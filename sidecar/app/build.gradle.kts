@@ -3,6 +3,47 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
+// ── OlliteRT release fetch ─────────────────────────────────────────
+// Downloads the pinned APK release, verifies SHA-256, extracts libollitert.so
+// into assets/ollitert/ for bundling in the APK.
+
+val olliteFetchScript = rootProject.projectDir.parentFile
+    .resolve("sidecar/scripts/fetch-ollitert.sh")
+
+var haveOlliteOutput = file(
+    "src/main/assets/ollitert/libollitert.so"
+).exists()
+
+tasks.register<Exec>("fetchOlliteRT") {
+    description = "Download, verify SHA-256, and extract libollitert.so from release APK"
+    group = "phonon-build"
+
+    onlyIf {
+        olliteFetchScript.exists() && !haveOlliteOutput
+    }
+
+    workingDir = rootProject.projectDir.parentFile
+    commandLine("bash", olliteFetchScript.absolutePath)
+
+    // Output must exist after run
+    doLast {
+        haveOlliteOutput = file(
+            "src/main/assets/ollitert/libollitert.so"
+        ).exists()
+        if (!haveOlliteOutput) {
+            throw GradleException(
+                "fetchOlliteRT completed but libollitert.so not found in assets"
+            )
+        }
+    }
+}
+
+// Auto-run before APK packaging when output is missing
+tasks.matching { it.name == "mergeReleaseAssets" || it.name == "mergeDebugAssets" }
+    .configureEach {
+        dependsOn("fetchOlliteRT")
+    }
+
 android {
     namespace = "com.chezgoulet.phonon"
     compileSdk = 35
