@@ -28,7 +28,7 @@ class CoordinatorClient(
     private var port: Int,
     private val app: PhononApplication,
     private val onStatusChange: (String) -> Unit,
-    private val onModelLoad: (modelName: String, modelUrl: String) -> Unit,
+    private val onModelLoad: (modelName: String, modelUrl: String, engine: String) -> Unit,
     private val onModelUnload: () -> Unit,
     private val onShutdown: () -> Unit
 ) {
@@ -224,8 +224,9 @@ class CoordinatorClient(
                     sendCommandAck(msg, ACK_ACCEPTED)
                     val modelName = msg.payload?.optString("model_name", "")
                     val modelUrl = msg.payload?.optString("download_url", "")
+                    val engine = msg.payload?.optString("engine", "prima")
                     if (modelName != null) {
-                        onModelLoad(modelName, modelUrl ?: "")
+                        onModelLoad(modelName, modelUrl ?: "", engine ?: "prima")
                     } else {
                         sendCommandAck(msg, ACK_FAILED, "missing model_name")
                     }
