@@ -2,6 +2,7 @@ package config
 
 import (
 	"testing"
+	"time"
 )
 
 func TestLoadExampleConfig(t *testing.T) {
@@ -382,5 +383,108 @@ func TestValidationResult_Warnings(t *testing.T) {
 	vr := &ValidationResult{Warnings: []string{"warn1", "warn2"}}
 	if len(vr.Warnings) != 2 {
 		t.Errorf("expected 2 warnings, got %d", len(vr.Warnings))
+	}
+}
+
+func TestHealthDefaults(t *testing.T) {
+	yaml := `cluster:
+  name: test
+groups:
+  - name: g1
+    mode: pool
+    model: gemma-4-E2B-it
+    runtime: litert
+    phones: [phone-01]`
+	cfg, _, err := Load([]byte(yaml))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	h := cfg.Cluster.Health
+	if h.Overheat.Threshold != 45 {
+		t.Errorf("expected default overheat 45, got %f", h.Overheat.Threshold)
+	}
+	if h.Overheat.ReentryThreshold != 40 {
+		t.Errorf("expected default overheat reentry 40, got %f", h.Overheat.ReentryThreshold)
+	}
+	if h.Battery.LowThreshold != 15 {
+		t.Errorf("expected default battery low 15, got %f", h.Battery.LowThreshold)
+	}
+	if h.Battery.ReentryThreshold != 30 {
+		t.Errorf("expected default battery reentry 30, got %f", h.Battery.ReentryThreshold)
+	}
+	if h.Battery.CapacityThreshold != 80 {
+		t.Errorf("expected default capacity 80, got %f", h.Battery.CapacityThreshold)
+	}
+	if h.OfflineTimeout != "60s" {
+		t.Errorf("expected default offline timeout 60s, got %q", h.OfflineTimeout)
+	}
+}
+
+func TestHealthCustom(t *testing.T) {
+	yaml := `cluster:
+  name: test
+  health:
+    overheat:
+      threshold: 50
+      reentry_threshold: 45
+    battery:
+      low_threshold: 10
+      reentry_threshold: 25
+      capacity_threshold: 75
+    offline_timeout: "120s"
+groups:
+  - name: g1
+    mode: pool
+    model: gemma-4-E2B-it
+    runtime: litert
+    phones: [phone-01]`
+	cfg, _, err := Load([]byte(yaml))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	h := cfg.Cluster.Health
+	if h.Overheat.Threshold != 50 {
+		t.Errorf("expected overheat 50, got %f", h.Overheat.Threshold)
+	}
+	if h.Overheat.ReentryThreshold != 45 {
+		t.Errorf("expected overheat reentry 45, got %f", h.Overheat.ReentryThreshold)
+	}
+	if h.Battery.LowThreshold != 10 {
+		t.Errorf("expected battery low 10, got %f", h.Battery.LowThreshold)
+	}
+	if h.Battery.ReentryThreshold != 25 {
+		t.Errorf("expected battery reentry 25, got %f", h.Battery.ReentryThreshold)
+	}
+	if h.Battery.CapacityThreshold != 75 {
+		t.Errorf("expected capacity 75, got %f", h.Battery.CapacityThreshold)
+	}
+	if h.OfflineTimeout != "120s" {
+		t.Errorf("expected offline timeout 120s, got %q", h.OfflineTimeout)
+	}
+}
+
+func TestOfflineTimeoutDuration(t *testing.T) {
+	h := &HealthConfig{OfflineTimeout: "60s"}
+	if d := h.OfflineTimeoutDuration(); d != 60*time.Second {
+		t.Errorf("expected 60s, got %v", d)
+	}
+
+	h = &HealthConfig{OfflineTimeout: "30s"}
+	if d := h.OfflineTimeoutDuration(); d != 30*time.Second {
+		t.Errorf("expected 30s, got %v", d)
+	}
+
+	// Invalid falls back to 60s
+	h = &HealthConfig{OfflineTimeout: "invalid"}
+	if d := h.OfflineTimeoutDuration(); d != 60*time.Second {
+		t.Errorf("expected 60s fallback, got %v", d)
+	}
+
+	// Empty falls back to 60s
+	h = &HealthConfig{}
+	if d := h.OfflineTimeoutDuration(); d != 60*time.Second {
+		t.Errorf("expected 60s fallback for empty, got %v", d)
 	}
 }

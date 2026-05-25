@@ -1,10 +1,31 @@
 package config
 
+// OverheatConfig defines thresholds for temperature-based exclusion.
+type OverheatConfig struct {
+	Threshold       float64 `yaml:"threshold"`       // °C — removed from pool above this (default 45)
+	ReentryThreshold float64 `yaml:"reentry_threshold"` // °C — re-entered below this (default 40)
+}
+
+// BatteryConfig defines thresholds for low-battery exclusion with hysteresis.
+type BatteryConfig struct {
+	LowThreshold      float64 `yaml:"low_threshold"`       // % — removed when below AND not charging (default 15)
+	ReentryThreshold  float64 `yaml:"reentry_threshold"`   // % — re-entered above this (default 30)
+	CapacityThreshold float64 `yaml:"capacity_threshold"`  // % — "charger-dependent" marked below this (default 80)
+}
+
+// HealthConfig controls health monitoring and automatic actions.
+type HealthConfig struct {
+	Overheat       OverheatConfig `yaml:"overheat"`
+	Battery        BatteryConfig  `yaml:"battery"`
+	OfflineTimeout string         `yaml:"offline_timeout"` // e.g. "60s" (default 60s)
+}
+
 // ClusterConfig defines the top-level cluster settings.
 type ClusterConfig struct {
 	Name       string           `yaml:"name"`
 	Auth       AuthConfig       `yaml:"auth"`
 	Networking NetworkingConfig `yaml:"networking"`
+	Health     HealthConfig     `yaml:"health"`
 }
 
 // AuthConfig defines authentication for the coordinator API.

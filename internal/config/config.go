@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -17,6 +18,40 @@ func LoadFile(path string) (*Config, *ValidationResult, error) {
 	return Load(data)
 }
 
+// setDefaults applies default values for unset config fields.
+func (c *Config) setDefaults() {
+	// Health defaults
+	h := &c.Cluster.Health
+	if h.Overheat.Threshold == 0 {
+		h.Overheat.Threshold = 45
+	}
+	if h.Overheat.ReentryThreshold == 0 {
+		h.Overheat.ReentryThreshold = 40
+	}
+	if h.Battery.LowThreshold == 0 {
+		h.Battery.LowThreshold = 15
+	}
+	if h.Battery.ReentryThreshold == 0 {
+		h.Battery.ReentryThreshold = 30
+	}
+	if h.Battery.CapacityThreshold == 0 {
+		h.Battery.CapacityThreshold = 80
+	}
+	if h.OfflineTimeout == "" {
+		h.OfflineTimeout = "60s"
+	}
+}
+
+// OfflineTimeoutDuration parses the offline timeout string into a Duration.
+// Returns 60s if unset or invalid.
+func (h *HealthConfig) OfflineTimeoutDuration() time.Duration {
+	d, err := time.ParseDuration(h.OfflineTimeout)
+	if err != nil || d <= 0 {
+		return 60 * time.Second
+	}
+	return d
+}
+
 // Load parses and validates a phonon.yaml byte slice.
 func Load(data []byte) (*Config, *ValidationResult, error) {
 	result := &ValidationResult{}
@@ -25,6 +60,8 @@ func Load(data []byte) (*Config, *ValidationResult, error) {
 	if err := yaml.Unmarshal(data, cfg); err != nil {
 		return nil, result, fmt.Errorf("parse yaml: %w", err)
 	}
+
+	cfg.setDefaults()
 
 	if err := cfg.Validate(result); err != nil {
 		return nil, result, err
