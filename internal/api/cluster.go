@@ -43,7 +43,7 @@ type ClusterHealthResponse struct {
 	Timestamp   time.Time        `json:"timestamp"`
 }
 
-func (h *ClusterHandler) handleClusterHealth(w http.ResponseWriter, r *http.Request) {
+func (h *ClusterHandler) handleClusterHealth(w http.ResponseWriter, _ *http.Request) {
 	nodes := h.reg.List()
 
 	online := 0
