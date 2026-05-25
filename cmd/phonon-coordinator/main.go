@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"time"
 	"fmt"
 	"io/fs"
 	"log/slog"
@@ -115,7 +116,7 @@ func main() {
 
 	<-ctx.Done()
 	logger.Info("shutting down")
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10_000_000_000)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10 * time.Second)
 	defer cancel()
 	_ = server.Shutdown(shutdownCtx)
 	logger.Info("stopped")
