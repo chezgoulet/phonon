@@ -232,7 +232,7 @@ func TestDistributeHandler_ServeFile(t *testing.T) {
 	cache.Init()
 	handler := DistributeHandler(cache)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/models/test-model.gguf", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/models/test-model.gguf", http.NoBody)
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 
@@ -254,7 +254,7 @@ func TestDistributeHandler_MethodNotAllowed(t *testing.T) {
 	cache.Init()
 	handler := DistributeHandler(cache)
 
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/models/test-model.gguf", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/models/test-model.gguf", http.NoBody)
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 
