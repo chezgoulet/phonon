@@ -238,6 +238,14 @@ func (r *Registry) SetDeviceModel(deviceID, model string) error {
 	})
 }
 
+// SetDeviceIP sets the IP address for a node.
+// Returns ErrNotFound if the device doesn't exist.
+func (r *Registry) SetDeviceIP(deviceID, ipAddress string) error {
+	return r.updateField(deviceID, func(n *Node) {
+		n.IPAddress = ipAddress
+	})
+}
+
 // updateField is a helper that locks, looks up the node, and applies a mutation.
 func (r *Registry) updateField(deviceID string, fn func(*Node)) error {
 	r.mu.Lock()
