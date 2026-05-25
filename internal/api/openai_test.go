@@ -203,8 +203,8 @@ func TestChatCompletionWithOnlinePhone(t *testing.T) {
 
 	// Override inference proxy to return a controlled response
 	h.inferenceProxy = func(phoneURL string, _ PhoneInferenceRequest) (*PhoneInferenceResponse, error) {
-		if !strings.Contains(phoneURL, "10.0.0.5") {
-			t.Errorf("expected phone URL to contain 10.0.0.5, got %s", phoneURL)
+		if !strings.Contains(phoneURL, "10.0.0.5:9876/infer") {
+			t.Errorf("expected phone URL to contain 10.0.0.5:9876/infer, got %s", phoneURL)
 		}
 		return &PhoneInferenceResponse{
 			Text:     "Hello! How can I help you?",
