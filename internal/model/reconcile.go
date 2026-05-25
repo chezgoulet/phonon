@@ -103,17 +103,17 @@ func (r *Reconciler) loop(ctx context.Context, groups []config.GroupConfig) {
 
 // reconcileAll runs reconciliation for all configured groups.
 func (r *Reconciler) reconcileAll(groups []config.GroupConfig) {
-	for _, g := range groups {
-		steps := r.ReconcileGroup(g)
-		for _, step := range steps {
-			r.executeStep(step)
+	for i := range groups {
+		steps := r.ReconcileGroup(&groups[i])
+		for j := range steps {
+			r.executeStep(&steps[j])
 		}
 	}
 }
 
 // ReconcileGroup compares desired vs current state for a group and returns
 // the steps needed. Exported for testing.
-func (r *Reconciler) ReconcileGroup(g config.GroupConfig) []ReconcilerStep {
+func (r *Reconciler) ReconcileGroup(g *config.GroupConfig) []ReconcilerStep {
 	var steps []ReconcilerStep
 
 	if g.Model == "" {
@@ -231,7 +231,7 @@ func (r *Reconciler) cachedEntry(modelName string) *CacheEntry {
 }
 
 // executeStep sends the command for a single reconciliation step.
-func (r *Reconciler) executeStep(step ReconcilerStep) {
+func (r *Reconciler) executeStep(step *ReconcilerStep) {
 	if !r.issuer.HasConnection(step.DeviceID) {
 		r.log.Debug("device not connected, deferring", "device_id", step.DeviceID)
 		return

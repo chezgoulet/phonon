@@ -163,7 +163,8 @@ func (m *Middleware) Stop() {
 func (m *Middleware) discover() error {
 	wellKnown := strings.TrimRight(m.config.Issuer, "/") + "/.well-known/openid-configuration"
 
-	resp, err := m.httpClient.Get(wellKnown)
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, wellKnown, http.NoBody)
+	resp, err := m.httpClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("fetch discovery document: %w", err)
 	}
@@ -267,7 +268,7 @@ func (m *Middleware) Handler(next http.Handler) http.Handler {
 		claims, err := m.validateToken(token)
 		if err != nil {
 			m.log.Warn("token validation failed", "error", err)
-			http.Error(w, fmt.Sprintf(`{"error":"unauthorized","message":"%s"}`, err.Error()), http.StatusUnauthorized)
+			http.Error(w, fmt.Sprintf(`{"error":"unauthorized","message":%q}`, err.Error()), http.StatusUnauthorized)
 			return
 		}
 

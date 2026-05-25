@@ -160,7 +160,7 @@ func parseEntry(entry *mdns.ServiceEntry) *DiscoveredDevice {
 
 	// Parse TXT records for device metadata
 	for _, txt := range entry.InfoFields {
-		if len(txt) == 0 {
+		if txt == "" {
 			continue
 		}
 		kv := parseTXTField(txt)

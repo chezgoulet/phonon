@@ -20,7 +20,7 @@ type HealthConfig struct {
 	OfflineTimeout string         `yaml:"offline_timeout"` // e.g. "60s" (default 60s)
 }
 
-// MDNSConfig controls mDNS auto-discovery behaviour.
+// MDNSConfig controls mDNS auto-discovery behavior.
 type MDNSConfig struct {
 	Disabled bool  `yaml:"disabled"`  // default: false (mDNS enabled)
 	Port     int   `yaml:"port"`      // listen port (default 0 = auto)

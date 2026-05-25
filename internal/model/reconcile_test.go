@@ -73,7 +73,7 @@ func TestReconcileGroup_NoActionNeeded(t *testing.T) {
 		Model: "llama3.2:1b",
 	}
 
-	steps := reconciler.ReconcileGroup(group)
+	steps := reconciler.ReconcileGroup(&group)
 	if len(steps) != 0 {
 		t.Errorf("expected 0 steps, got %d: %+v", len(steps), steps)
 	}
@@ -101,7 +101,7 @@ func TestReconcileGroup_NeedsLoad(t *testing.T) {
 		Phones: []string{"phone-01"},
 	}
 
-	steps := reconciler.ReconcileGroup(group)
+	steps := reconciler.ReconcileGroup(&group)
 	if len(steps) == 0 {
 		t.Fatal("expected at least 1 step")
 	}
@@ -140,7 +140,7 @@ func TestReconcileGroup_NeedsUnload(t *testing.T) {
 		Phones: []string{"phone-01"},
 	}
 
-	steps := reconciler.ReconcileGroup(group)
+	steps := reconciler.ReconcileGroup(&group)
 	if len(steps) == 0 {
 		t.Fatal("expected steps for model change")
 	}
@@ -163,7 +163,7 @@ func TestReconcileGroup_PhoneNotConnected(t *testing.T) {
 	}
 
 	// Model not cached and URL would be empty — no steps
-	steps := reconciler.ReconcileGroup(group)
+	steps := reconciler.ReconcileGroup(&group)
 	for _, s := range steps {
 		if s.DeviceID == "phone-01" {
 			t.Errorf("expected no steps for disconnected phone, got %+v", s)
@@ -201,7 +201,7 @@ func TestReconcileGroup_MultiplePhones(t *testing.T) {
 		Phones: []string{"phone-01", "phone-02", "phone-03"},
 	}
 
-	steps := reconciler.ReconcileGroup(group)
+	steps := reconciler.ReconcileGroup(&group)
 
 	// phone-01 should have no action (already loaded)
 	// phone-02 should have push or load
@@ -249,7 +249,7 @@ func TestReconcileGroup_Standby(t *testing.T) {
 		Standby: []string{"standby-01"},
 	}
 
-	steps := reconciler.ReconcileGroup(group)
+	steps := reconciler.ReconcileGroup(&group)
 
 	// Standby should get a push action
 	found := false
@@ -305,7 +305,7 @@ func TestReconcilerExecutePush(t *testing.T) {
 		URL:       "http://coord:9876/api/v1/models/llama3.2:1b",
 	}
 
-	reconciler.executeStep(step)
+	reconciler.executeStep(&step)
 
 	if len(issuer.pushCommands) != 1 {
 		t.Errorf("expected 1 push command, got %d", len(issuer.pushCommands))
@@ -330,7 +330,7 @@ func TestReconcilerExecuteLoad(t *testing.T) {
 		ModelName: "llama3.2:1b",
 	}
 
-	reconciler.executeStep(step)
+	reconciler.executeStep(&step)
 
 	if len(issuer.loadCommands) != 1 {
 		t.Errorf("expected 1 load command, got %d", len(issuer.loadCommands))
@@ -351,7 +351,7 @@ func TestReconcilerExecuteUnload(t *testing.T) {
 		Action:    ActionUnload,
 	}
 
-	reconciler.executeStep(step)
+	reconciler.executeStep(&step)
 
 	if len(issuer.unloadCommands) != 1 {
 		t.Errorf("expected 1 unload command, got %d", len(issuer.unloadCommands))
@@ -372,7 +372,7 @@ func TestReconcilerExecuteNotConnected(t *testing.T) {
 		ModelName: "test-model",
 	}
 
-	reconciler.executeStep(step)
+	reconciler.executeStep(&step)
 
 	if len(issuer.pushCommands) != 0 {
 		t.Error("expected no command for disconnected device")

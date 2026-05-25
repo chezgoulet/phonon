@@ -49,7 +49,7 @@ func (m *mockDiscoverer) run(ctx context.Context, ch chan<- DiscoveredDevice) {
 		}
 	}
 
-	// Keep running until ctx is cancelled (when Manager.Stop() is called)
+	// Keep running until ctx is canceled (when Manager.Stop() is called)
 	<-ctx.Done()
 }
 
