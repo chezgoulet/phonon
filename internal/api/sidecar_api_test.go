@@ -10,7 +10,7 @@ import (
 	"github.com/chezgoulet/phonon/internal/registry"
 )
 
-func setupTestHandler(t *testing.T) (*SidecarHandler, *registry.Registry, *http.ServeMux) {
+func setupTestHandler(t *testing.T) (*registry.Registry, *http.ServeMux) {
 	t.Helper()
 	reg := registry.New()
 	h := NewSidecarHandler(reg)
@@ -18,7 +18,7 @@ func setupTestHandler(t *testing.T) (*SidecarHandler, *registry.Registry, *http.
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
-	return h, reg, mux
+	return reg, mux
 }
 
 func mustMarshal(t *testing.T, v any) []byte {
@@ -42,7 +42,7 @@ func execPost(t *testing.T, mux *http.ServeMux, path string, body []byte) *httpt
 // --- Register tests ---
 
 func TestRegister_Success(t *testing.T) {
-	_, reg, mux := setupTestHandler(t)
+	reg, mux := setupTestHandler(t)
 
 	body := mustMarshal(t, registerRequest{
 		DeviceID:    "ABCD1234EFGH",
@@ -78,7 +78,7 @@ func TestRegister_Success(t *testing.T) {
 }
 
 func TestRegister_EmptyDeviceID(t *testing.T) {
-	_, _, mux := setupTestHandler(t)
+	_, mux := setupTestHandler(t)
 
 	body := mustMarshal(t, registerRequest{
 		DeviceModel: "Pixel 7a",
@@ -91,7 +91,7 @@ func TestRegister_EmptyDeviceID(t *testing.T) {
 }
 
 func TestRegister_ReRegistration(t *testing.T) {
-	_, reg, mux := setupTestHandler(t)
+	reg, mux := setupTestHandler(t)
 
 	// First registration
 	body1 := mustMarshal(t, registerRequest{
@@ -133,7 +133,7 @@ func TestRegister_ReRegistration(t *testing.T) {
 }
 
 func TestRegister_InvalidBody(t *testing.T) {
-	_, _, mux := setupTestHandler(t)
+	_, mux := setupTestHandler(t)
 	w := execPost(t, mux, "/api/v1/sidecar/register", []byte("not json"))
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", w.Code)
@@ -143,7 +143,7 @@ func TestRegister_InvalidBody(t *testing.T) {
 // --- Heartbeat tests ---
 
 func TestHeartbeat_Success(t *testing.T) {
-	_, reg, mux := setupTestHandler(t)
+	reg, mux := setupTestHandler(t)
 
 	// Register first
 	reg.Register("SERIAL001", "pixel-7a-0001", "192.168.1.10")
@@ -179,7 +179,7 @@ func TestHeartbeat_Success(t *testing.T) {
 }
 
 func TestHeartbeat_Nonexistent(t *testing.T) {
-	_, _, mux := setupTestHandler(t)
+	_, mux := setupTestHandler(t)
 
 	body := mustMarshal(t, heartbeatRequest{
 		DeviceID: "NONEXISTENT",
@@ -193,7 +193,7 @@ func TestHeartbeat_Nonexistent(t *testing.T) {
 }
 
 func TestHeartbeat_InvalidBody(t *testing.T) {
-	_, _, mux := setupTestHandler(t)
+	_, mux := setupTestHandler(t)
 	w := execPost(t, mux, "/api/v1/sidecar/heartbeat", []byte("not json"))
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", w.Code)
@@ -203,7 +203,7 @@ func TestHeartbeat_InvalidBody(t *testing.T) {
 // --- Model Status tests ---
 
 func TestModelStatus_Success(t *testing.T) {
-	_, reg, mux := setupTestHandler(t)
+	reg, mux := setupTestHandler(t)
 	reg.Register("SERIAL001", "pixel-7a-0001", "")
 
 	body := mustMarshal(t, modelStatusRequest{
@@ -220,7 +220,7 @@ func TestModelStatus_Success(t *testing.T) {
 }
 
 func TestModelStatus_Nonexistent(t *testing.T) {
-	_, _, mux := setupTestHandler(t)
+	_, mux := setupTestHandler(t)
 
 	body := mustMarshal(t, modelStatusRequest{
 		DeviceID: "NONEXISTENT",
@@ -235,7 +235,7 @@ func TestModelStatus_Nonexistent(t *testing.T) {
 // --- Pair tests ---
 
 func TestPair_Success(t *testing.T) {
-	_, reg, mux := setupTestHandler(t)
+	reg, mux := setupTestHandler(t)
 	reg.Register("SERIAL001", "pixel-7a-0001", "")
 
 	body := mustMarshal(t, pairRequest{
@@ -278,7 +278,7 @@ func TestPair_Success(t *testing.T) {
 }
 
 func TestPair_NotRegistered(t *testing.T) {
-	_, _, mux := setupTestHandler(t)
+	_, mux := setupTestHandler(t)
 
 	body := mustMarshal(t, pairRequest{
 		DeviceID: "NONEXISTENT",
@@ -291,7 +291,7 @@ func TestPair_NotRegistered(t *testing.T) {
 }
 
 func TestPair_AlreadyPaired(t *testing.T) {
-	_, reg, mux := setupTestHandler(t)
+	reg, mux := setupTestHandler(t)
 	reg.Register("SERIAL001", "pixel-7a-0001", "")
 	reg.Pair("SERIAL001")
 

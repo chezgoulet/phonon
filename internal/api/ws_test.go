@@ -12,7 +12,7 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-func setupWSTest(t *testing.T) (*WSHandler, *registry.Registry, *httptest.Server, *websocket.Conn) {
+func setupWSTest(t *testing.T) (*WSHandler, *httptest.Server, *websocket.Conn) {
 	t.Helper()
 	reg := registry.New()
 	ws := NewWSHandler(reg)
@@ -29,7 +29,7 @@ func setupWSTest(t *testing.T) (*WSHandler, *registry.Registry, *httptest.Server
 		t.Fatalf("websocket dial failed: %v", err)
 	}
 
-	return ws, reg, server, conn
+	return ws, server, conn
 }
 
 func readCommand(t *testing.T, conn *websocket.Conn, timeout time.Duration) WSCommand {
@@ -63,7 +63,7 @@ func pendingCount(t *testing.T, ws *WSHandler, deviceID string) int {
 }
 
 func TestWS_ConnectAndCommandFlow(t *testing.T) {
-	ws, _, server, conn := setupWSTest(t)
+	ws, server, conn := setupWSTest(t)
 	defer server.Close()
 	defer conn.Close()
 
@@ -95,7 +95,7 @@ func TestWS_ConnectAndCommandFlow(t *testing.T) {
 }
 
 func TestWS_AllCommandTypes(t *testing.T) {
-	ws, _, server, conn := setupWSTest(t)
+	ws, server, conn := setupWSTest(t)
 	defer server.Close()
 	defer conn.Close()
 
@@ -136,7 +136,7 @@ func TestWS_AllCommandTypes(t *testing.T) {
 }
 
 func TestWS_CommandLifecycle(t *testing.T) {
-	ws, _, server, conn := setupWSTest(t)
+	ws, server, conn := setupWSTest(t)
 	defer server.Close()
 	defer conn.Close()
 
@@ -176,7 +176,7 @@ func TestWS_CommandLifecycle(t *testing.T) {
 }
 
 func TestWS_CommandFailed(t *testing.T) {
-	ws, _, server, conn := setupWSTest(t)
+	ws, server, conn := setupWSTest(t)
 	defer server.Close()
 	defer conn.Close()
 
@@ -194,7 +194,7 @@ func TestWS_CommandFailed(t *testing.T) {
 }
 
 func TestWS_HasConnection(t *testing.T) {
-	ws, _, server, conn := setupWSTest(t)
+	ws, server, conn := setupWSTest(t)
 	defer server.Close()
 	defer conn.Close()
 
@@ -207,7 +207,7 @@ func TestWS_HasConnection(t *testing.T) {
 }
 
 func TestWS_ConnectedDevices(t *testing.T) {
-	ws, _, server, conn := setupWSTest(t)
+	ws, server, conn := setupWSTest(t)
 	defer server.Close()
 	defer conn.Close()
 
@@ -236,7 +236,7 @@ func TestWS_MissingDeviceID(t *testing.T) {
 }
 
 func TestWS_SendToOfflineDevice(t *testing.T) {
-	ws, _, server, _ := setupWSTest(t)
+	ws, server, _ := setupWSTest(t)
 	defer server.Close()
 
 	ws.reg.Register("OFFLINE-001", "offline", "")
@@ -255,7 +255,7 @@ func TestWS_SendToOfflineDevice(t *testing.T) {
 }
 
 func TestWS_ReconnectResendsPending(t *testing.T) {
-	ws, _, server, conn := setupWSTest(t)
+	ws, server, conn := setupWSTest(t)
 
 	ws.reg.Register("TEST-001", "pixel-test", "")
 
@@ -304,7 +304,7 @@ func TestWS_ReconnectResendsPending(t *testing.T) {
 }
 
 func TestWS_ReconnectMultiplePending(t *testing.T) {
-	ws, _, server, conn := setupWSTest(t)
+	ws, server, conn := setupWSTest(t)
 	defer server.Close()
 
 	ws.reg.Register("TEST-001", "pixel-test", "")

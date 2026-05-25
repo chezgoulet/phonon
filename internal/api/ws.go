@@ -258,9 +258,6 @@ func (h *WSHandler) resendPending(deviceID string) {
 		cmdID string
 	}
 
-	var toResend []pendingCmd
-	var toRemove []string
-
 	h.mu.Lock()
 	devicePending := h.pending[deviceID]
 	dc := h.devices[deviceID]
@@ -269,6 +266,9 @@ func (h *WSHandler) resendPending(deviceID string) {
 		h.mu.Unlock()
 		return
 	}
+
+	toResend := make([]pendingCmd, 0, len(devicePending))
+	toRemove := make([]string, 0, len(devicePending))
 
 	for cmdID, pc := range devicePending {
 		if pc.Status == "completed" || pc.Status == "failed" {

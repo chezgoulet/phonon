@@ -432,8 +432,8 @@ func TestValidateTokenES256(t *testing.T) {
 	xBytes := key.X.Bytes()
 	yBytes := key.Y.Bytes()
 	// Pad to 32 bytes for P-256
-	xPadded := padToSize(32, xBytes)
-	yPadded := padToSize(32, yBytes)
+	xPadded := padToSize(xBytes)
+	yPadded := padToSize(yBytes)
 
 	jwk := JWK{
 		Kty: "EC",
@@ -493,8 +493,8 @@ func TestValidateTokenES256RawSig(t *testing.T) {
 
 	xBytes := key.X.Bytes()
 	yBytes := key.Y.Bytes()
-	xPadded := padToSize(32, xBytes)
-	yPadded := padToSize(32, yBytes)
+	xPadded := padToSize(xBytes)
+	yPadded := padToSize(yBytes)
 
 	jwk := JWK{
 		Kty: "EC",
@@ -532,8 +532,8 @@ func TestValidateTokenES256RawSig(t *testing.T) {
 	}
 
 	// R||S raw format
-	rPadded := padToSize(32, r.Bytes())
-	sPadded := padToSize(32, s.Bytes())
+	rPadded := padToSize(r.Bytes())
+	sPadded := padToSize(s.Bytes())
 	rawSig := append(rPadded, sPadded...)
 	sigB64 := base64.RawURLEncoding.EncodeToString(rawSig)
 	token := signedContent + "." + sigB64
@@ -556,8 +556,9 @@ func TestConfigurationModes(t *testing.T) {
 	}
 }
 
-// padToSize left-pads a byte slice to the given size.
-func padToSize(size int, b []byte) []byte {
+// padToSize left-pads a byte slice to 32 bytes.
+func padToSize(b []byte) []byte {
+	const size = 32
 	if len(b) >= size {
 		return b
 	}

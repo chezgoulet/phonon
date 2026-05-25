@@ -9,6 +9,7 @@
 package auth
 
 import (
+	"context"
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -207,7 +208,11 @@ func (m *Middleware) refreshJWKS() error {
 		return fmt.Errorf("no jwks_uri configured")
 	}
 
-	resp, err := m.httpClient.Get(m.jwksURL)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, m.jwksURL, nil)
+	if err != nil {
+		return fmt.Errorf("create jwks request: %w", err)
+	}
+	resp, err := m.httpClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("fetch jwks: %w", err)
 	}
@@ -319,7 +324,7 @@ func (m *Middleware) validateToken(token string) (string, error) {
 	var claims struct {
 		Iss string   `json:"iss"`
 		Sub string   `json:"sub"`
-		Aud []string `json:"aud,string"`
+		Aud []string `json:"aud"`
 		Exp int64    `json:"exp"`
 		Iat int64    `json:"iat"`
 	}
