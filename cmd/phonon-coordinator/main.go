@@ -9,8 +9,10 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/chezgoulet/phonon/internal/api"
 	"github.com/chezgoulet/phonon/internal/auth"
 	"github.com/chezgoulet/phonon/internal/config"
+	"github.com/chezgoulet/phonon/internal/registry"
 	"gopkg.in/yaml.v3"
 )
 
@@ -40,6 +42,15 @@ func main() {
 		}
 	}
 
+	// Create registry and API handlers
+	reg := registry.New()
+
+	wsHandler := api.NewWSHandler(reg)
+
+	sidecarHandler := api.NewSidecarHandler(reg)
+	openaiHandler := api.NewOpenAIHandler(reg)
+	clusterHandler := api.NewClusterHandler(reg)
+
 	// Create auth middleware
 	authMiddleware := auth.New(auth.Config{
 		Mode:     cfg.Cluster.Auth.Mode,
@@ -67,6 +78,10 @@ func main() {
 
 	// Protected routes — wrapped with auth middleware
 	protectedMux := http.NewServeMux()
+	wsHandler.RegisterRoutes(protectedMux)
+	sidecarHandler.RegisterRoutes(protectedMux)
+	openaiHandler.RegisterRoutes(protectedMux)
+	clusterHandler.RegisterRoutes(protectedMux)
 	mux.Handle("/api/v1/", authMiddleware.Handler(protectedMux))
 
 	addr := ":8080"

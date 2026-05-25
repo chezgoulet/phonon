@@ -213,7 +213,7 @@ func (h *OpenAIHandler) handleChatCompletion(w http.ResponseWriter, r *http.Requ
 	}
 
 	// Select a phone for inference
-	phone, err := h.selectPhone(req.Model)
+	phone, phoneNode, err := h.selectPhone(req.Model)
 	if err != nil {
 		h.log.Warn("no available phone for inference", "model", req.Model, "error", err)
 		writeJSON(w, http.StatusServiceUnavailable, map[string]any{
@@ -245,6 +245,11 @@ func (h *OpenAIHandler) handleChatCompletion(w http.ResponseWriter, r *http.Requ
 		})
 		return
 	}
+
+	// Set response headers
+	w.Header().Set("X-Phonon-Device", phoneNode.DeviceID)
+	w.Header().Set("X-Phonon-Group", phoneNode.Group)
+	w.Header().Set("X-Phonon-Queue-Depth", fmt.Sprintf("%d", phoneNode.Telemetry.QueueDepth))
 
 	// Build OpenAI-compatible response
 	promptText := buildPrompt(req.Messages)
@@ -280,26 +285,26 @@ func (h *OpenAIHandler) handleChatCompletion(w http.ResponseWriter, r *http.Requ
 }
 
 // selectPhone finds an online phone with the requested model loaded.
-func (h *OpenAIHandler) selectPhone(modelName string) (string, error) {
+func (h *OpenAIHandler) selectPhone(modelName string) (string, *registry.Node, error) {
 	nodes := h.reg.List()
 
-	var candidates []string
+	var candidates []*registry.Node
 	for _, node := range nodes {
 		if node.State != registry.NodeStateOnline {
 			continue
 		}
 		if node.ModelStatus.Loaded && node.ModelStatus.Name == modelName {
-			candidates = append(candidates, node.IPAddress)
+			candidates = append(candidates, node)
 		}
 	}
 
 	if len(candidates) == 0 {
-		return "", fmt.Errorf("no online node has model %q loaded", modelName)
+		return "", nil, fmt.Errorf("no online node has model %q loaded", modelName)
 	}
 
 	// Random selection (weighted by load later)
 	selected := candidates[rand.Intn(len(candidates))]
-	return selected, nil
+	return selected.IPAddress, selected, nil
 }
 
 // defaultInferenceProxy sends an inference request to a phone's local endpoint.
