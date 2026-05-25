@@ -51,8 +51,6 @@ func (h *ClusterHandler) handleClusterHealth(w http.ResponseWriter, _ *http.Requ
 	paired := 0
 	unpaired := 0
 	groups := make(map[string]int)
-	staleThreshold := 3 * time.Minute
-
 	for _, node := range nodes {
 		switch node.State {
 		case registry.NodeStateOnline:
@@ -88,7 +86,7 @@ func (h *ClusterHandler) handleClusterHealth(w http.ResponseWriter, _ *http.Requ
 		OfflineNodes: offline + paired + unpaired,
 		PairedNodes:  paired,
 		Groups:       groups,
-		StaleCount:   h.reg.PurgeStale(staleThreshold),
+		StaleCount:   0,
 		Timestamp:    time.Now(),
 	}
 

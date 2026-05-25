@@ -259,11 +259,12 @@ func (h *WSHandler) resendPending(deviceID string) {
 	}
 
 	h.mu.Lock()
+	defer h.mu.Unlock()
+
 	devicePending := h.pending[deviceID]
 	dc := h.devices[deviceID]
 
 	if dc == nil || len(devicePending) == 0 {
-		h.mu.Unlock()
 		return
 	}
 
@@ -282,7 +283,6 @@ func (h *WSHandler) resendPending(deviceID string) {
 	for _, id := range toRemove {
 		delete(devicePending, id)
 	}
-	h.mu.Unlock()
 
 	for _, pc := range toResend {
 		if err := dc.conn.WriteJSON(pc.cmd); err != nil {
