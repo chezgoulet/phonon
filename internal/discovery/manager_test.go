@@ -2,6 +2,7 @@ package discovery
 
 import (
 	"context"
+	"sync"
 	"net"
 	"testing"
 	"time"
@@ -80,6 +81,7 @@ func TestManager_StopTwice(t *testing.T) {
 
 func TestManager_DiscoveryCallback(t *testing.T) {
 	var (
+		mu               sync.Mutex
 		callbackDeviceID string
 		callbackModel    string
 		callbackIP       net.IP
@@ -87,6 +89,8 @@ func TestManager_DiscoveryCallback(t *testing.T) {
 	)
 
 	callback := func(deviceID, model string, ip net.IP, port int) error {
+		mu.Lock()
+		defer mu.Unlock()
 		callbackDeviceID = deviceID
 		callbackModel = model
 		callbackIP = ip
@@ -112,6 +116,9 @@ func TestManager_DiscoveryCallback(t *testing.T) {
 	// Give it time to process
 	time.Sleep(100 * time.Millisecond)
 	manager.Stop()
+
+	mu.Lock()
+	defer mu.Unlock()
 
 	if callbackDeviceID != testPhone01 {
 		t.Errorf("expected device_id phone-01, got %q", callbackDeviceID)
