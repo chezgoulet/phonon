@@ -42,14 +42,12 @@ func (m *mockIssuer) HasConnection(deviceID string) bool {
 	return m.connected[deviceID]
 }
 
-func registerNode(reg *registry.Registry, deviceID, group string, state registry.NodeState, modelName string, loaded bool) {
+func registerNode(reg *registry.Registry, deviceID string, state registry.NodeState, modelName string, loaded bool) {
 	if err := reg.Register(deviceID, "", ""); err != nil && !registry.IsAlreadyRegistered(err) {
 		panic(err)
 	}
 	reg.SetOnline(deviceID)
-	if group != "" {
-		reg.AssignToGroup(deviceID, group)
-	}
+	reg.AssignToGroup(deviceID, "alpha")
 	// Set model status via the returned pointer (single-threaded test)
 	node, _ := reg.Get(deviceID)
 	node.State = state
@@ -61,7 +59,7 @@ func registerNode(reg *registry.Registry, deviceID, group string, state registry
 
 func TestReconcileGroup_NoActionNeeded(t *testing.T) {
 	reg := registry.New()
-	registerNode(reg, "phone-01", "alpha", registry.NodeStateOnline, "llama3.2:1b", true)
+	registerNode(reg, "phone-01", registry.NodeStateOnline, "llama3.2:1b", true)
 
 	issuer := newMockIssuer()
 	issuer.connected["phone-01"] = true
@@ -83,7 +81,7 @@ func TestReconcileGroup_NoActionNeeded(t *testing.T) {
 
 func TestReconcileGroup_NeedsLoad(t *testing.T) {
 	reg := registry.New()
-	registerNode(reg, "phone-01", "alpha", registry.NodeStateOnline, "llama3.2:1b", false)
+	registerNode(reg, "phone-01", registry.NodeStateOnline, "llama3.2:1b", false)
 
 	issuer := newMockIssuer()
 	issuer.connected["phone-01"] = true
@@ -123,7 +121,7 @@ func TestReconcileGroup_NeedsLoad(t *testing.T) {
 
 func TestReconcileGroup_NeedsUnload(t *testing.T) {
 	reg := registry.New()
-	registerNode(reg, "phone-01", "alpha", registry.NodeStateOnline, "old-model", true)
+	registerNode(reg, "phone-01", registry.NodeStateOnline, "old-model", true)
 
 	issuer := newMockIssuer()
 	issuer.connected["phone-01"] = true
@@ -150,7 +148,7 @@ func TestReconcileGroup_NeedsUnload(t *testing.T) {
 
 func TestReconcileGroup_PhoneNotConnected(t *testing.T) {
 	reg := registry.New()
-	registerNode(reg, "phone-01", "alpha", registry.NodeStateOnline, "", false)
+	registerNode(reg, "phone-01", registry.NodeStateOnline, "", false)
 
 	issuer := newMockIssuer() // no connections registered
 	cache := NewCache(t.TempDir(), nil)
@@ -177,13 +175,13 @@ func TestReconcileGroup_MultiplePhones(t *testing.T) {
 	reg := registry.New()
 
 	// phone-01 has the right model loaded
-	registerNode(reg, "phone-01", "alpha", registry.NodeStateOnline, "llama3.2:1b", true)
+	registerNode(reg, "phone-01", registry.NodeStateOnline, "llama3.2:1b", true)
 
 	// phone-02 needs the model
-	registerNode(reg, "phone-02", "alpha", registry.NodeStateOnline, "", false)
+	registerNode(reg, "phone-02", registry.NodeStateOnline, "", false)
 
 	// phone-03 is offline
-	registerNode(reg, "phone-03", "alpha", registry.NodeStateOffline, "", false)
+	registerNode(reg, "phone-03", registry.NodeStateOffline, "", false)
 
 	issuer := newMockIssuer()
 	issuer.connected["phone-01"] = true
@@ -229,8 +227,8 @@ func TestReconcileGroup_MultiplePhones(t *testing.T) {
 
 func TestReconcileGroup_Standby(t *testing.T) {
 	reg := registry.New()
-	registerNode(reg, "phone-01", "alpha", registry.NodeStateOnline, "model", true)
-	registerNode(reg, "standby-01", "alpha", registry.NodeStateOnline, "old-model", false)
+	registerNode(reg, "phone-01", registry.NodeStateOnline, "model", true)
+	registerNode(reg, "standby-01", registry.NodeStateOnline, "old-model", false)
 
 	issuer := newMockIssuer()
 	issuer.connected["phone-01"] = true
