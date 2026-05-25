@@ -202,15 +202,16 @@ func (h *WSHandler) SendCommand(deviceID, cmdType string, payload any) (string, 
 		SentAt: time.Now(),
 	}
 	dc := h.devices[deviceID]
-	h.mu.Unlock()
 
-	// Send immediately if connected
+	// Send immediately if connected (hold mu to prevent concurrent write)
 	if dc != nil {
 		if err := dc.conn.WriteJSON(cmd); err != nil {
+			h.mu.Unlock()
 			h.log.Error("failed to send command", "device_id", deviceID, "command_id", cmd.CommandID, "error", err)
 			return cmd.CommandID, err
 		}
 	}
+	h.mu.Unlock()
 
 	return cmd.CommandID, nil
 }

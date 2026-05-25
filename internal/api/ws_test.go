@@ -202,6 +202,13 @@ func TestWS_HasConnection(t *testing.T) {
 	defer server.Close()
 	defer conn.Close()
 
+	// Poll until handler registers the device (async goroutine startup)
+	for i := 0; i < 50; i++ {
+		if ws.HasConnection("TEST-001") {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
 	if !ws.HasConnection("TEST-001") {
 		t.Error("expected HasConnection true for connected device")
 	}
