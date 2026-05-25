@@ -26,7 +26,11 @@ import (
 	"time"
 )
 
-const es256Alg = "ES256"
+const (
+	es256Alg  = "ES256"
+	es384Alg  = "ES384"
+	es512Alg  = "ES512"
+)
 
 // Mode constants.
 const (
@@ -211,7 +215,7 @@ func (m *Middleware) refreshJWKS() error {
 		return fmt.Errorf("no jwks_uri configured")
 	}
 
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, m.jwksURL, nil)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, m.jwksURL, http.NoBody)
 	if err != nil {
 		return fmt.Errorf("create jwks request: %w", err)
 	}
@@ -438,7 +442,7 @@ func (m *Middleware) verifySignature(parts []string, header *struct {
 	switch header.Alg {
 	case "RS256", "RS384", "RS512":
 		return m.verifyRSA(key, signedContent, sigBytes, header.Alg)
-	case "ES256", "ES384", "ES512":
+	case es256Alg, es384Alg, es512Alg:
 		return m.verifyECDSA(key, signedContent, sigBytes, header.Alg)
 	default:
 		return fmt.Errorf("unsupported algorithm: %s", header.Alg)
@@ -549,7 +553,7 @@ func decodeExponent(b []byte) int {
 
 func hashForAlg(alg string) crypto.Hash {
 	switch alg {
-	case "RS256", "ES256":
+	case "RS256", es256Alg:
 		return crypto.SHA256
 	case "RS384", "ES384":
 		return crypto.SHA384
@@ -575,9 +579,9 @@ func curveForAlg(alg string) elliptic.Curve {
 
 // StatusHandler returns the auth status endpoint handler.
 func (m *Middleware) StatusHandler() http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
+	return func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(m.Status())
+		_ = json.NewEncoder(w).Encode(m.Status())
 	}
 }
 

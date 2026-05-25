@@ -196,7 +196,7 @@ func TestDistributeHandler_NoModelInPath(t *testing.T) {
 	cache := NewCache(t.TempDir(), nil)
 	handler := DistributeHandler(cache)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/models/", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/models/", http.NoBody)
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 
@@ -210,7 +210,7 @@ func TestDistributeHandler_ModelNotCached(t *testing.T) {
 	cache.Init()
 	handler := DistributeHandler(cache)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/models/nonexistent.gguf", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/models/nonexistent.gguf", http.NoBody)
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 
@@ -232,7 +232,7 @@ func TestDistributeHandler_ServeFile(t *testing.T) {
 	cache.Init()
 	handler := DistributeHandler(cache)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/models/test-model.gguf", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/models/test-model.gguf", http.NoBody)
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 
@@ -254,7 +254,7 @@ func TestDistributeHandler_MethodNotAllowed(t *testing.T) {
 	cache.Init()
 	handler := DistributeHandler(cache)
 
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/models/test-model.gguf", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/models/test-model.gguf", http.NoBody)
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 
@@ -281,7 +281,7 @@ func TestURL(t *testing.T) {
 func TestCacheDownload(t *testing.T) {
 	// Start a test server that serves model data
 	modelData := []byte("test-model-content-12345")
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Write(modelData)
 	}))
 	defer server.Close()
@@ -311,7 +311,7 @@ func TestCacheDownload(t *testing.T) {
 func TestCacheDownloadChecksum(t *testing.T) {
 	modelData := []byte("verify-me-98765")
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Write(modelData)
 	}))
 	defer server.Close()
@@ -329,7 +329,7 @@ func TestCacheDownloadChecksum(t *testing.T) {
 }
 
 func TestCacheDownloadHTTPError(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 	}))
 	defer server.Close()

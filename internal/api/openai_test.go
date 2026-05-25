@@ -28,7 +28,7 @@ func TestListModelsEmpty(t *testing.T) {
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
-	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/models", http.NoBody)
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 
@@ -57,7 +57,7 @@ func TestListModelsWithModels(t *testing.T) {
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
-	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/models", http.NoBody)
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 
@@ -94,7 +94,7 @@ func TestSetModels(t *testing.T) {
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
-	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/models", http.NoBody)
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 
@@ -276,7 +276,7 @@ func TestChatCompletionPhoneFails(t *testing.T) {
 	h.AddModel("test-model", "test")
 
 	// Override proxy to fail
-	h.inferenceProxy = func(_ string, req PhoneInferenceRequest) (*PhoneInferenceResponse, error) {
+	h.inferenceProxy = func(_ string, _ PhoneInferenceRequest) (*PhoneInferenceResponse, error) {
 		return nil, fmt.Errorf("connection refused")
 	}
 
@@ -335,7 +335,7 @@ func TestModelRouteRegistration(t *testing.T) {
 	h.RegisterRoutes(mux)
 
 	// GET /v1/models should work
-	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/models", http.NoBody)
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {

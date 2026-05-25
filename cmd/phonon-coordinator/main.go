@@ -132,7 +132,7 @@ func serveUI(mux *http.ServeMux, log *slog.Logger) {
 	if err != nil {
 		log.Warn("UI not built — skipping static file server", "error", err)
 		// Create a handler that shows a helpful message when the UI isn't built
-		mux.HandleFunc("/ui/", func(w http.ResponseWriter, r *http.Request) {
+		mux.HandleFunc("/ui/", func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			w.WriteHeader(http.StatusOK)
 			fmt.Fprint(w, `<!DOCTYPE html>

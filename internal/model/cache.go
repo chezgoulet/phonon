@@ -194,7 +194,7 @@ func (c *Cache) download(ctx context.Context, url, dest, expectedSHA string) err
 
 // downloadOnce performs a single download attempt.
 func (c *Cache) downloadOnce(ctx context.Context, url, dest, expectedSHA string) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
 	if err != nil {
 		return err
 	}
