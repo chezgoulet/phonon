@@ -3,10 +3,13 @@ package main
 import (
 	"context"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
+	"path"
+	"strings"
 	"syscall"
 
 	"github.com/chezgoulet/phonon/internal/api"
@@ -15,6 +18,8 @@ import (
 	"github.com/chezgoulet/phonon/internal/registry"
 	"gopkg.in/yaml.v3"
 )
+
+// uiFS is declared in ui_embed.go (this package)
 
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
@@ -84,6 +89,9 @@ func main() {
 	clusterHandler.RegisterRoutes(protectedMux)
 	mux.Handle("/api/v1/", authMiddleware.Handler(protectedMux))
 
+	// Serve the Web UI from /ui/ and redirect / → /ui/
+	serveUI(mux, logger)
+
 	addr := ":8080"
 	if p := os.Getenv("PHONON_PORT"); p != "" {
 		addr = ":" + p
@@ -111,6 +119,59 @@ func main() {
 	defer cancel()
 	_ = server.Shutdown(shutdownCtx)
 	logger.Info("stopped")
+}
+
+// serveUI serves the Vite-built React app from /ui/ and redirects / → /ui/.
+func serveUI(mux *http.ServeMux, log *slog.Logger) {
+	// The embed pattern static/* embeds files from cmd/phonon-coordinator/static/.
+	// Copy ui/dist/ → cmd/phonon-coordinator/static/ before building:
+	//   cp -r ui/dist cmd/phonon-coordinator/static
+	//
+	// The embedded FS contains files directly (no prefix to strip).
+	subFS, err := fs.Sub(uiFS, "static")
+	if err != nil {
+		log.Warn("UI not built — skipping static file server", "error", err)
+		// Create a handler that shows a helpful message when the UI isn't built
+		mux.HandleFunc("/ui/", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprint(w, `<!DOCTYPE html>
+<html><body style="font-family:monospace;padding:2em;background:#0f172a;color:#94a3b8">
+<h1 style="color:#38bdf8">Phonon Cluster</h1>
+<p>UI not built yet. Run <code style="background:#1e293b;padding:2px 6px;border-radius:4px">cd ui && npm run build</code> to build the frontend.</p>
+<p>API ready at <a href="/api/v1/cluster/health" style="color:#38bdf8">/api/v1/cluster/health</a></p>
+</body></html>`)
+		})
+		return
+	}
+
+	fileServer := http.FileServer(http.FS(subFS))
+
+	// Serve /ui/ and all subpaths from the embedded filesystem
+	mux.Handle("/ui/", http.StripPrefix("/ui/", fileServer))
+
+	// Redirect / → /ui/ for the SPA
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		// Only handle exact root or non-API paths
+		if r.URL.Path == "/" {
+			http.Redirect(w, r, "/ui/", http.StatusFound)
+			return
+		}
+		// For SPA client-side routing: serve index.html for non-file paths
+		if !strings.HasPrefix(r.URL.Path, "/api/") && !strings.HasPrefix(r.URL.Path, "/ws") {
+			// Check if the path looks like a file (has an extension)
+			ext := path.Ext(r.URL.Path)
+			if ext == "" {
+				// Serve index.html for SPA routes
+				r.URL.Path = "/ui/index.html"
+				http.StripPrefix("/ui/", fileServer).ServeHTTP(w, r)
+				return
+			}
+		}
+		http.NotFound(w, r)
+	})
+
+	log.Info("UI served at /ui/")
 }
 
 func loadConfig(path string) (*config.Config, error) {
