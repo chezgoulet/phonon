@@ -263,15 +263,15 @@ func TestDistributeHandler_MethodNotAllowed(t *testing.T) {
 	}
 }
 
-func TestModelURL(t *testing.T) {
-	got := ModelURL("http://10.0.0.1:9876", "llama3.2:1b")
+func TestURL(t *testing.T) {
+	got := URL("http://10.0.0.1:9876", "llama3.2:1b")
 	expected := "http://10.0.0.1:9876/api/v1/models/llama3.2:1b"
 	if got != expected {
 		t.Errorf("expected %q, got %q", expected, got)
 	}
 
 	// Trailing slash should be trimmed
-	got = ModelURL("http://10.0.0.1:9876/", "model")
+	got = URL("http://10.0.0.1:9876/", "model")
 	expected = "http://10.0.0.1:9876/api/v1/models/model"
 	if got != expected {
 		t.Errorf("expected %q, got %q", expected, got)

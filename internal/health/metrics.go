@@ -110,7 +110,7 @@ func (m *Metrics) Handler() http.Handler {
 	if m.registry == nil {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte("# phonon metrics not yet initialized\n"))
+			_, _ = w.Write([]byte("# phonon metrics not yet initialized\n"))
 		})
 	}
 	return promhttp.HandlerFor(m.registry, promhttp.HandlerOpts{})

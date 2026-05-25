@@ -20,6 +20,8 @@ import (
 	"time"
 )
 
+const testSecureStatus = "secure"
+
 func parseRSAPublicKey(pemBytes []byte) (*rsa.PublicKey, error) {
 	block, _ := pem.Decode(pemBytes)
 	if block == nil {

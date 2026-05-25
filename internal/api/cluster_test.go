@@ -116,7 +116,7 @@ func TestListNodesEmpty(t *testing.T) {
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/cluster/nodes", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/cluster/nodes", http.NoBody)
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 
@@ -156,7 +156,7 @@ func TestListNodesWithGroupFilter(t *testing.T) {
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/cluster/nodes?group=pool-alpha", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/cluster/nodes?group=pool-alpha", http.NoBody)
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 
@@ -182,7 +182,7 @@ func TestChatCompletionWithGroupHeader(t *testing.T) {
 
 	h := NewOpenAIHandler(reg)
 	h.AddModel("test-model", "test")
-	h.inferenceProxy = func(phoneURL string, req PhoneInferenceRequest) (*PhoneInferenceResponse, error) {
+	h.inferenceProxy = func(_ string, _ PhoneInferenceRequest) (*PhoneInferenceResponse, error) {
 		return &PhoneInferenceResponse{Text: "ok", Tokens: 1, Duration: 0}, nil
 	}
 
@@ -222,7 +222,7 @@ func TestListNodesSortOrder(t *testing.T) {
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/cluster/nodes", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/cluster/nodes", http.NoBody)
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 

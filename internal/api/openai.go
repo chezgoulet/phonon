@@ -308,7 +308,7 @@ func (h *OpenAIHandler) selectPhone(modelName string) (string, *registry.Node, e
 }
 
 // defaultInferenceProxy sends an inference request to a phone's local endpoint.
-func (h *OpenAIHandler) defaultInferenceProxy(phoneURL string, req PhoneInferenceRequest) (*PhoneInferenceResponse, error) {
+func (h *OpenAIHandler) defaultInferenceProxy(phoneURL string, _ PhoneInferenceRequest) (*PhoneInferenceResponse, error) {
 	// Phone inference is not yet implemented on the sidecar side.
 	// This returns a placeholder response for development.
 	return &PhoneInferenceResponse{

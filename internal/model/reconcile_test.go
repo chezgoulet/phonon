@@ -23,7 +23,7 @@ func newMockIssuer() *mockIssuer {
 	}
 }
 
-func (m *mockIssuer) SendModelPush(deviceID, model, url, checksum string, sizeBytes int64) (string, error) {
+func (m *mockIssuer) SendModelPush(deviceID, model, _ string, checksum string, sizeBytes int64) (string, error) {
 	m.pushCommands = append(m.pushCommands, deviceID+":"+model)
 	return "cmd-" + deviceID, nil
 }
@@ -57,12 +57,14 @@ func registerNode(reg *registry.Registry, deviceID string, state registry.NodeSt
 	}
 }
 
+const testPhone01 = "phone-01"
+
 func TestReconcileGroup_NoActionNeeded(t *testing.T) {
 	reg := registry.New()
-	registerNode(reg, "phone-01", registry.NodeStateOnline, "llama3.2:1b", true)
+	registerNode(reg, testPhone01, registry.NodeStateOnline, "llama3.2:1b", true)
 
 	issuer := newMockIssuer()
-	issuer.connected["phone-01"] = true
+	issuer.connected[testPhone01] = true
 	cache := NewCache(t.TempDir(), nil)
 	cache.Init()
 
@@ -81,10 +83,10 @@ func TestReconcileGroup_NoActionNeeded(t *testing.T) {
 
 func TestReconcileGroup_NeedsLoad(t *testing.T) {
 	reg := registry.New()
-	registerNode(reg, "phone-01", registry.NodeStateOnline, "llama3.2:1b", false)
+	registerNode(reg, testPhone01, registry.NodeStateOnline, "llama3.2:1b", false)
 
 	issuer := newMockIssuer()
-	issuer.connected["phone-01"] = true
+	issuer.connected[testPhone01] = true
 	cache := NewCache(t.TempDir(), nil)
 	cache.Init()
 
@@ -98,7 +100,7 @@ func TestReconcileGroup_NeedsLoad(t *testing.T) {
 	group := config.GroupConfig{
 		Name:   "alpha",
 		Model:  "llama3.2:1b",
-		Phones: []string{"phone-01"},
+		Phones: []string{testPhone01},
 	}
 
 	steps := reconciler.ReconcileGroup(&group)
@@ -109,7 +111,7 @@ func TestReconcileGroup_NeedsLoad(t *testing.T) {
 	// Should push since not loaded
 	found := false
 	for _, s := range steps {
-		if s.DeviceID == "phone-01" && s.Action == ActionPush {
+		if s.DeviceID == testPhone01 && s.Action == ActionPush {
 			found = true
 			break
 		}
@@ -121,10 +123,10 @@ func TestReconcileGroup_NeedsLoad(t *testing.T) {
 
 func TestReconcileGroup_NeedsUnload(t *testing.T) {
 	reg := registry.New()
-	registerNode(reg, "phone-01", registry.NodeStateOnline, "old-model", true)
+	registerNode(reg, testPhone01, registry.NodeStateOnline, "old-model", true)
 
 	issuer := newMockIssuer()
-	issuer.connected["phone-01"] = true
+	issuer.connected[testPhone01] = true
 	cache := NewCache(t.TempDir(), nil)
 	cache.Init()
 
@@ -137,7 +139,7 @@ func TestReconcileGroup_NeedsUnload(t *testing.T) {
 	group := config.GroupConfig{
 		Name:   "alpha",
 		Model:  "new-model",
-		Phones: []string{"phone-01"},
+		Phones: []string{testPhone01},
 	}
 
 	steps := reconciler.ReconcileGroup(&group)
@@ -148,7 +150,7 @@ func TestReconcileGroup_NeedsUnload(t *testing.T) {
 
 func TestReconcileGroup_PhoneNotConnected(t *testing.T) {
 	reg := registry.New()
-	registerNode(reg, "phone-01", registry.NodeStateOnline, "", false)
+	registerNode(reg, testPhone01, registry.NodeStateOnline, "", false)
 
 	issuer := newMockIssuer() // no connections registered
 	cache := NewCache(t.TempDir(), nil)
@@ -159,13 +161,13 @@ func TestReconcileGroup_PhoneNotConnected(t *testing.T) {
 	group := config.GroupConfig{
 		Name:   "alpha",
 		Model:  "new-model",
-		Phones: []string{"phone-01"},
+		Phones: []string{testPhone01},
 	}
 
 	// Model not cached and URL would be empty — no steps
 	steps := reconciler.ReconcileGroup(&group)
 	for _, s := range steps {
-		if s.DeviceID == "phone-01" {
+		if s.DeviceID == testPhone01 {
 			t.Errorf("expected no steps for disconnected phone, got %+v", s)
 		}
 	}
@@ -175,7 +177,7 @@ func TestReconcileGroup_MultiplePhones(t *testing.T) {
 	reg := registry.New()
 
 	// phone-01 has the right model loaded
-	registerNode(reg, "phone-01", registry.NodeStateOnline, "llama3.2:1b", true)
+	registerNode(reg, testPhone01, registry.NodeStateOnline, "llama3.2:1b", true)
 
 	// phone-02 needs the model
 	registerNode(reg, "phone-02", registry.NodeStateOnline, "", false)
@@ -184,7 +186,7 @@ func TestReconcileGroup_MultiplePhones(t *testing.T) {
 	registerNode(reg, "phone-03", registry.NodeStateOffline, "", false)
 
 	issuer := newMockIssuer()
-	issuer.connected["phone-01"] = true
+	issuer.connected[testPhone01] = true
 	issuer.connected["phone-02"] = true
 
 	cache := NewCache(t.TempDir(), nil)
@@ -198,7 +200,7 @@ func TestReconcileGroup_MultiplePhones(t *testing.T) {
 	group := config.GroupConfig{
 		Name:  "alpha",
 		Model: "llama3.2:1b",
-		Phones: []string{"phone-01", "phone-02", "phone-03"},
+		Phones: []string{testPhone01, "phone-02", "phone-03"},
 	}
 
 	steps := reconciler.ReconcileGroup(&group)
@@ -207,7 +209,7 @@ func TestReconcileGroup_MultiplePhones(t *testing.T) {
 	// phone-02 should have push or load
 	// phone-03 should have no action (offline, issuer not connected)
 	for _, s := range steps {
-		if s.DeviceID == "phone-01" && s.Action != ActionNone {
+		if s.DeviceID == testPhone01 && s.Action != ActionNone {
 			t.Errorf("phone-01 should have no action, got %+v", s)
 		}
 	}
@@ -227,11 +229,11 @@ func TestReconcileGroup_MultiplePhones(t *testing.T) {
 
 func TestReconcileGroup_Standby(t *testing.T) {
 	reg := registry.New()
-	registerNode(reg, "phone-01", registry.NodeStateOnline, "model", true)
+	registerNode(reg, testPhone01, registry.NodeStateOnline, "model", true)
 	registerNode(reg, "standby-01", registry.NodeStateOnline, "old-model", false)
 
 	issuer := newMockIssuer()
-	issuer.connected["phone-01"] = true
+	issuer.connected[testPhone01] = true
 	issuer.connected["standby-01"] = true
 
 	cache := NewCache(t.TempDir(), nil)
@@ -245,7 +247,7 @@ func TestReconcileGroup_Standby(t *testing.T) {
 	group := config.GroupConfig{
 		Name:    "alpha",
 		Model:   "model",
-		Phones:  []string{"phone-01"},
+		Phones:  []string{testPhone01},
 		Standby: []string{"standby-01"},
 	}
 
@@ -292,14 +294,14 @@ func TestReconcilerStartStop(t *testing.T) {
 func TestReconcilerExecutePush(t *testing.T) {
 	reg := registry.New()
 	issuer := newMockIssuer()
-	issuer.connected["phone-01"] = true
+	issuer.connected[testPhone01] = true
 	cache := NewCache(t.TempDir(), nil)
 	cache.Init()
 
 	reconciler := NewReconciler(cache, reg, issuer, "http://coord:9876")
 
 	step := ReconcilerStep{
-		DeviceID:  "phone-01",
+		DeviceID:  testPhone01,
 		Action:    ActionPush,
 		ModelName: "llama3.2:1b",
 		URL:       "http://coord:9876/api/v1/models/llama3.2:1b",
@@ -318,14 +320,14 @@ func TestReconcilerExecutePush(t *testing.T) {
 func TestReconcilerExecuteLoad(t *testing.T) {
 	reg := registry.New()
 	issuer := newMockIssuer()
-	issuer.connected["phone-01"] = true
+	issuer.connected[testPhone01] = true
 	cache := NewCache(t.TempDir(), nil)
 	cache.Init()
 
 	reconciler := NewReconciler(cache, reg, issuer, "http://coord:9876")
 
 	step := ReconcilerStep{
-		DeviceID:  "phone-01",
+		DeviceID:  testPhone01,
 		Action:    ActionLoad,
 		ModelName: "llama3.2:1b",
 	}
@@ -340,14 +342,14 @@ func TestReconcilerExecuteLoad(t *testing.T) {
 func TestReconcilerExecuteUnload(t *testing.T) {
 	reg := registry.New()
 	issuer := newMockIssuer()
-	issuer.connected["phone-01"] = true
+	issuer.connected[testPhone01] = true
 	cache := NewCache(t.TempDir(), nil)
 	cache.Init()
 
 	reconciler := NewReconciler(cache, reg, issuer, "http://coord:9876")
 
 	step := ReconcilerStep{
-		DeviceID:  "phone-01",
+		DeviceID:  testPhone01,
 		Action:    ActionUnload,
 	}
 
@@ -367,7 +369,7 @@ func TestReconcilerExecuteNotConnected(t *testing.T) {
 	reconciler := NewReconciler(cache, reg, issuer, "http://coord:9876")
 
 	step := ReconcilerStep{
-		DeviceID:  "phone-01",
+		DeviceID:  testPhone01,
 		Action:    ActionPush,
 		ModelName: "test-model",
 	}

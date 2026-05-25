@@ -61,7 +61,7 @@ func TestMetrics_ScrapeContent(t *testing.T) {
 	}
 }
 
-func TestMetrics_RegisterIdempotent(t *testing.T) {
+func TestMetrics_RegisterIdempotent(_ *testing.T) {
 	metrics := NewMetrics()
 	metrics.Register()
 	// Second call should be a no-op (not panic)

@@ -9,6 +9,8 @@ import (
 	"github.com/chezgoulet/phonon/internal/registry"
 )
 
+const statusDegraded = "degraded"
+
 // ClusterHandler exposes aggregate cluster health data from the registry.
 type ClusterHandler struct {
 	reg *registry.Registry

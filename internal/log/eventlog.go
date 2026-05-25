@@ -373,7 +373,7 @@ func (el *EventLog) StartRetentionLoop(ctx interface{ Done() <-chan struct{} }, 
 
 	go func() {
 		// Run once immediately
-		el.PurgeOlderThan(time.Duration(retentionDays) * 24 * time.Hour)
+		_, _ = el.PurgeOlderThan(time.Duration(retentionDays) * 24 * time.Hour)
 
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
@@ -381,7 +381,7 @@ func (el *EventLog) StartRetentionLoop(ctx interface{ Done() <-chan struct{} }, 
 		for {
 			select {
 			case <-ticker.C:
-				el.PurgeOlderThan(time.Duration(retentionDays) * 24 * time.Hour)
+				_, _ = el.PurgeOlderThan(time.Duration(retentionDays) * 24 * time.Hour)
 			case <-ctx.Done():
 				return
 			}

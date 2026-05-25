@@ -13,7 +13,7 @@ const (
 )
 
 // ModelMetadata describes a model to be cached and distributed.
-type ModelMetadata struct {
+type Metadata struct {
 	Name        string         // Fully qualified name, e.g. "meta-llama/Llama-3.2-1B:Q4_K_M"
 	Source      UpstreamSource // How to resolve the download URL
 	UpstreamURL string         // Override download URL (from group.download_url)

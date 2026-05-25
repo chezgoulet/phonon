@@ -48,6 +48,6 @@ func DistributeHandler(cache *Cache) http.Handler {
 
 // ModelURL builds the coordinator URL for a model download.
 // baseURL is the coordinator's external URL, e.g. "http://10.0.0.1:9876".
-func ModelURL(baseURL, modelName string) string {
+func URL(baseURL, modelName string) string {
 	return strings.TrimRight(baseURL, "/") + modelPrefix + modelName
 }
