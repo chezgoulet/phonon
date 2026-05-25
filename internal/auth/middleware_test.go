@@ -83,7 +83,7 @@ func TestHandlerInsecurePassThrough(t *testing.T) {
 		w.Write([]byte("ok"))
 	}))
 
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 
@@ -111,7 +111,7 @@ func TestHandlerMissingToken(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	}))
 
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 
@@ -124,7 +124,7 @@ func TestHandlerInvalidToken(t *testing.T) {
 	m := New(Config{Mode: "oidc"})
 	m.started = true
 
-	handler := m.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := m.Handler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 
@@ -191,7 +191,7 @@ func TestStatusHandler(t *testing.T) {
 
 // newTestOIDCServer creates an httptest.Server that serves OIDC discovery + JWKS.
 // Returns the server and the URL (pre-resolved for closure use).
-func newTestOIDCServer(_ string, jwksPath string, keys []JWK) (srv *httptest.Server, url string) {
+func newTestOIDCServer(_, jwksPath string, keys []JWK) (srv *httptest.Server, url string) {
 	discoveryPath := "/.well-known/openid-configuration"
 	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "openid-configuration") || r.URL.Path == discoveryPath {

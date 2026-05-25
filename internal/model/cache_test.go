@@ -281,7 +281,7 @@ func TestURL(t *testing.T) {
 func TestCacheDownload(t *testing.T) {
 	// Start a test server that serves model data
 	modelData := []byte("test-model-content-12345")
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Write(modelData)
 	}))
 	defer server.Close()

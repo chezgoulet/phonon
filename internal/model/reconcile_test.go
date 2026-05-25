@@ -23,7 +23,7 @@ func newMockIssuer() *mockIssuer {
 	}
 }
 
-func (m *mockIssuer) SendModelPush(deviceID, model, _ string, _ string, sizeBytes int64) (string, error) {
+func (m *mockIssuer) SendModelPush(deviceID, model, _ string, _ string, _ int64) (string, error) {
 	m.pushCommands = append(m.pushCommands, deviceID+":"+model)
 	return "cmd-" + deviceID, nil
 }

@@ -215,7 +215,7 @@ func (m *Middleware) refreshJWKS() error {
 		return fmt.Errorf("no jwks_uri configured")
 	}
 
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, m.jwksURL, nil)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, m.jwksURL, http.NoBody)
 	if err != nil {
 		return fmt.Errorf("create jwks request: %w", err)
 	}
@@ -579,7 +579,7 @@ func curveForAlg(alg string) elliptic.Curve {
 
 // StatusHandler returns the auth status endpoint handler.
 func (m *Middleware) StatusHandler() http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
+	return func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(m.Status())
 	}
