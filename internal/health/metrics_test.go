@@ -93,7 +93,7 @@ func TestMetrics_NotRegisteredHandler(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.Handle("GET /metrics", metrics.Handler())
 
-	req := httptest.NewRequest("GET", "/metrics", nil)
+	req := httptest.NewRequest("GET", "/metrics", http.NoBody)
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 

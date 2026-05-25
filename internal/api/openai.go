@@ -141,7 +141,7 @@ func (h *OpenAIHandler) AddModel(id, ownedBy string) {
 
 // --- Handlers ---
 
-func (h *OpenAIHandler) handleListModels(w http.ResponseWriter, r *http.Request) {
+func (h *OpenAIHandler) handleListModels(w http.ResponseWriter, _ *http.Request) {
 	h.modelsMu.RLock()
 	defer h.modelsMu.RUnlock()
 

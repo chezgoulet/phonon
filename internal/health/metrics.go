@@ -108,7 +108,7 @@ func (m *Metrics) Register() {
 // been registered yet.
 func (m *Metrics) Handler() http.Handler {
 	if m.registry == nil {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte("# phonon metrics not yet initialized\n"))
 		})

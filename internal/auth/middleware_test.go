@@ -174,7 +174,7 @@ func TestStatusHandler(t *testing.T) {
 	m := New(Config{Mode: "oidc", Issuer: "https://auth.example.com"})
 	m.started = true
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/status", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/status", http.NoBody)
 	w := httptest.NewRecorder()
 	m.StatusHandler()(w, req)
 

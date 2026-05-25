@@ -426,7 +426,7 @@ func TestMetrics_NoDoubleCounting(t *testing.T) {
 	// Scrape metrics after first cycle
 	mux := http.NewServeMux()
 	mux.Handle("GET /metrics", metrics.Handler())
-	req := httptest.NewRequest("GET", "/metrics", nil)
+	req := httptest.NewRequest("GET", "/metrics", http.NoBody)
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 	body1 := w.Body.String()
