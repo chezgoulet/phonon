@@ -445,3 +445,66 @@ func TestIsWrongState(t *testing.T) {
 		t.Error("IsWrongState should return false for nil")
 	}
 }
+
+func TestSetExcludeReason(t *testing.T) {
+	reg := New()
+	reg.Register("d1", "name", "")
+
+	if err := reg.SetExcludeReason("d1", "overheating"); err != nil {
+		t.Fatalf("SetExcludeReason error: %v", err)
+	}
+	node, _ := reg.Get("d1")
+	if node.ExcludeReason != "overheating" {
+		t.Errorf("expected overheating, got %q", node.ExcludeReason)
+	}
+
+	// Nonexistent
+	if err := reg.SetExcludeReason("nonexistent", "x"); err == nil {
+		t.Error("expected error for nonexistent device")
+	}
+}
+
+func TestClearExcludeReason(t *testing.T) {
+	reg := New()
+	reg.Register("d1", "name", "")
+	reg.SetExcludeReason("d1", "overheating")
+
+	if err := reg.ClearExcludeReason("d1"); err != nil {
+		t.Fatalf("ClearExcludeReason error: %v", err)
+	}
+	node, _ := reg.Get("d1")
+	if node.ExcludeReason != "" {
+		t.Errorf("expected empty, got %q", node.ExcludeReason)
+	}
+
+	// Nonexistent
+	if err := reg.ClearExcludeReason("nonexistent"); err == nil {
+		t.Error("expected error for nonexistent device")
+	}
+}
+
+func TestListOnline(t *testing.T) {
+	reg := New()
+	reg.Register("d1", "a", "")
+	reg.Register("d2", "b", "")
+
+	// Only paired+heartbeat nodes are online
+	reg.Pair("d1")
+	reg.UpdateHeartbeat("d1", HealthTelemetry{BatteryLevel: 80})
+
+	online := reg.ListOnline()
+	if len(online) != 1 {
+		t.Fatalf("expected 1 online node, got %d", len(online))
+	}
+	if online[0].DeviceID != "d1" {
+		t.Errorf("expected d1, got %s", online[0].DeviceID)
+	}
+}
+
+func TestListOnline_Empty(t *testing.T) {
+	reg := New()
+	online := reg.ListOnline()
+	if len(online) != 0 {
+		t.Errorf("expected 0 online nodes, got %d", len(online))
+	}
+}

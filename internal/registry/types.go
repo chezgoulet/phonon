@@ -40,4 +40,5 @@ type Node struct {
 	PairedAt    time.Time     `json:"paired_at,omitempty"`
 	LastHeartbeat time.Time   `json:"last_heartbeat,omitempty"`
 	IPAddress   string         `json:"ip_address,omitempty"`
+	ExcludeReason string      `json:"exclude_reason,omitempty"` // empty = healthy; "overheating", "low-battery", "degraded"
 }

@@ -222,6 +222,50 @@ func (r *Registry) Count() int {
 	return len(r.nodes)
 }
 
+// SetExcludeReason sets the reason a node is excluded from routing.
+// Returns ErrNotFound if the device doesn't exist.
+func (r *Registry) SetExcludeReason(deviceID, reason string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	node, exists := r.nodes[deviceID]
+	if !exists {
+		return fmt.Errorf("%w: %s", ErrNotFound, deviceID)
+	}
+
+	node.ExcludeReason = reason
+	return nil
+}
+
+// ClearExcludeReason removes any exclusion reason from a node.
+// Returns ErrNotFound if the device doesn't exist.
+func (r *Registry) ClearExcludeReason(deviceID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	node, exists := r.nodes[deviceID]
+	if !exists {
+		return fmt.Errorf("%w: %s", ErrNotFound, deviceID)
+	}
+
+	node.ExcludeReason = ""
+	return nil
+}
+
+// ListOnline returns all nodes in online state.
+func (r *Registry) ListOnline() []*Node {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	result := make([]*Node, 0)
+	for _, node := range r.nodes {
+		if node.State == NodeStateOnline {
+			result = append(result, node)
+		}
+	}
+	return result
+}
+
 // PurgeStale marks nodes as offline if their last heartbeat exceeds the timeout.
 // Returns the number of nodes marked offline.
 func (r *Registry) PurgeStale(timeout time.Duration) int {
