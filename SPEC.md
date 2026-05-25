@@ -2,7 +2,7 @@
 
 > **Status:** DRAFT
 > **Derived from:** PHONON.md (project plan) + CONTRIBUTING.md (engineering standards)
-> **Last updated:** 2026-05-25
+> **Last updated:** 2026-05-25 (revised based on spec review)
 
 ---
 
@@ -281,12 +281,22 @@ POST /api/v1/sidecar/pair
 
 ### 5.3 WebSocket (Coordinator → Sidecar)
 
-Persistent connection maintained by coordinator. On disconnect, sidecar reconnects; coordinator re-sends pending commands.
+Persistent connection maintained by coordinator. Each command carries a unique
+`command_id` (UUID). The sidecar acknowledges every command on the same WebSocket
+channel, enabling the coordinator to track lifecycle: sent → accepted → completed/failed.
+
+On disconnect, the sidecar reconnects automatically. The coordinator re-sends all
+unacknowledged commands with the same IDs; the sidecar deduplicates by `command_id`.
+
+#### Outbound Commands (Coordinator → Sidecar)
+
+All commands include `command_id`:
 
 **Model push:**
 ```json
 {
   "type": "model_push",
+  "command_id": "a1b2c3d4-...",
   "payload": {
     "model": "gemma-4-E2B-it",
     "url": "http://coordinator:8080/api/v1/models/gemma-4-E2B-it/download",
@@ -300,6 +310,7 @@ Persistent connection maintained by coordinator. On disconnect, sidecar reconnec
 ```json
 {
   "type": "model_load",
+  "command_id": "e5f6g7h8-...",
   "payload": { "model": "gemma-4-E2B-it" }
 }
 ```
@@ -308,6 +319,7 @@ Persistent connection maintained by coordinator. On disconnect, sidecar reconnec
 ```json
 {
   "type": "model_unload",
+  "command_id": "i9j0k1l2-...",
   "payload": {}
 }
 ```
@@ -316,6 +328,7 @@ Persistent connection maintained by coordinator. On disconnect, sidecar reconnec
 ```json
 {
   "type": "mode_change",
+  "command_id": "m3n4o5p6-...",
   "payload": { "mode": "pool", "runtime": "litert" }
 }
 ```
@@ -324,6 +337,7 @@ Persistent connection maintained by coordinator. On disconnect, sidecar reconnec
 ```json
 {
   "type": "standby_promote",
+  "command_id": "q7r8s9t0-...",
   "payload": {
     "model": "gemma-4-27b-q4",
     "url": "http://coordinator:8080/api/v1/models/gemma-4-27b-q4/download",
@@ -336,9 +350,32 @@ Persistent connection maintained by coordinator. On disconnect, sidecar reconnec
 ```json
 {
   "type": "shutdown",
+  "command_id": "u1v2w3x4-...",
   "payload": { "reason": "operator_removed" }
 }
 ```
+
+#### Inbound Acknowledgments (Sidecar → Coordinator)
+
+The sidecar acknowledges each command on the same WebSocket channel:
+
+```json
+{
+  "type": "ack",
+  "command_id": "a1b2c3d4-...",
+  "status": "accepted"
+}
+```
+
+| Status | Meaning |
+|---|---|
+| `accepted` | Sidecar received and will begin processing |
+| `completed` | Command executed successfully |
+| `failed` | Command failed — sidecar includes an `error` field with details |
+
+The coordinator keeps commands in the unacknowledged queue until it receives
+`completed` or `failed`. On reconnection, unacknowledged commands are re-sent
+with the same IDs.
 
 ---
 
@@ -464,7 +501,7 @@ Reported by sidecar every 15 seconds (heartbeat):
 ### 9.2 Automatic Actions
 
 - **Overheating:** Phone removed from routing pool. Re-entered after cooling below threshold.
-- **Low battery + not charging:** Phone removed from pool. Re-entered on charge.
+- **Low battery + not charging:** Phone removed from pool. Re-entered when charging *or* battery rises above a configurable re-entry threshold (default: 30%). This hysteresis prevents flapping when a phone at the boundary starts/stops charging.
 - **Offline in shard group:** Standby promoted automatically if configured. Request fails with error if no standby.
 - **Degraded battery:** Phone marked "charger-dependent" in UI below configurable capacity threshold.
 
@@ -527,11 +564,16 @@ groups:
 - `mode: shard` groups must have `runtime: prima`.
 - `mode: pool` groups must have `runtime: litert`.
 - At least one phone must be specified per group.
-- Model names must be recognized (validated against a known-model list that the coordinator maintains and updates from upstream registries on start).
+- Model names should be validated against a known-model list (maintained by the coordinator from upstream registries) with a warning on unrecognized names. Unknown models are permitted if `download_url` is explicitly specified in the configuration.
 
 ### 10.3 Phone Identifiers
 
-Phone identifiers are human-friendly names assigned during pairing (the operator names them in the web UI). These names are the keys in the YAML configuration. The coordinator maintains the mapping from human name to device ID (hardware serial) in its internal registry.
+Phone identifiers are human-friendly names that serve as keys in the YAML
+configuration. To minimize setup friction, the coordinator auto-generates a
+default name from the device model and last 4 characters of the hardware serial
+(e.g., `pixel-7a-AB12`). The operator can rename any phone in the web UI after
+pairing. The coordinator maintains the mapping from human name to device ID
+(hardware serial) in its internal registry.
 
 ---
 
@@ -619,7 +661,8 @@ In secure mode, the coordinator validates bearer tokens against a configured OID
 9. **OIDC authentication** — Optional. Insecure mode also available.
 10. **Rolling model updates** — One phone at a time.
 11. **Event log** — SQLite, queryable through web UI.
-12. **Documentation** — Setup guide, hardware recommendations, model selection guide, battery safety guidance.
+12. **Pre-flight group readiness check** — Before activating a shard group, coordinator verifies all nodes are online, model is cached on each node, and inter-node latency is within configured bounds. Prevents activation of groups with missing or slow nodes.
+13. **Documentation** — Setup guide, hardware recommendations, model selection guide, battery safety guidance.
 
 **Estimated effort:** 2–4 months for a motivated solo developer.
 
@@ -628,6 +671,7 @@ In secure mode, the coordinator validates bearer tokens against a configured OID
 - Coordinator recovers from restart without data loss (event log preserved, node state reconstructed from heartbeats).
 - Pairing flow works end-to-end without touching the phone screen.
 - Model update from one model to another succeeds without dropping all requests.
+- Pre-flight group check passes for a shard group (validates nodes online and model cached).
 
 ### 13.2 Phase 2 — Shard Mode via prima.cpp (Beta)
 
@@ -703,6 +747,21 @@ Three parallel jobs (Go, Kotlin, React). All must pass green before merge. Each 
 1. **OlliteRT license verification.** The document lists OlliteRT as Apache 2.0 but this should be verified from the actual repo before Phase 1 begins. If it's GPL or has non-commercial restrictions, it constrains how the APK is distributed.
 2. **LiteRT NPU path on GrapheneOS.** The Play Services audit flags LiteRT GPU delegate as a potential Play Services dependency. The NPU path (which Phonon relies on for pool mode) must be tested on a clean GrapheneOS install without sandboxed Play Services before Phase 1 ships.
 3. **prima.cpp phone-only performance.** Shard mode estimates use a 0.5–0.7× multiplier on prima.cpp's published desktop-GPU benchmarks. The first real phone cluster test will either validate or invalidate these numbers, which affects the shard mode hardware requirements table.
-4. **WebSocket reconnection semantics.** On reconnect, the coordinator needs to re-send any pending commands. The spec defines this but the implementation detail (command queue with acknowledgment vs. re-send-everything) needs to be decided during implementation.
-5. **Model download from phones behind NAT.** If phones are on a separate VLAN or behind NAT from the coordinator, the model push (coordinator → phone) may require the sidecar to pull from the coordinator rather than the coordinator pushing. The current design assumes LAN adjacency.
-6. **Event log schema.** The SQLite schema for the event log is not specified here. It should track: timestamp, event type, device ID, details (JSON blob), and severity. The implementation should decide the exact schema early in Phase 1.
+4. **WebSocket reconnection semantics.** The spec now defines the command queue + acknowledgment pattern (see §5.3). Each command has a UUID. The sidecar acknowledges `accepted` / `completed` / `failed`. On reconnect, unacknowledged commands are re-sent. The remaining implementation detail: the sidecar must deduplicate by `command_id` to handle the case where the ack was in-flight when the connection dropped.
+5. **Model download from phones behind NAT.** Resolved by design: the `model_push` command instructs the sidecar to *pull* from the coordinator over HTTP. The phone initiates the connection. NAT is not a concern because the phone connects outward. The spec should clarify this to prevent anyone from implementing a coordinator-initiated TCP push.
+6. **Event log schema.** Not fully specified yet. Recommended starting schema:
+
+```sql
+CREATE TABLE events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  timestamp TEXT NOT NULL,  -- ISO 8601
+  event_type TEXT NOT NULL, -- node_joined, model_loaded, node_left, overheated, etc.
+  device_id TEXT,
+  severity TEXT DEFAULT 'info', -- info, warn, error
+  details TEXT,  -- JSON blob with event-specific fields
+  created_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX idx_events_timestamp ON events(timestamp);
+CREATE INDEX idx_events_type ON events(event_type);
+```
+The implementation should finalize the event types enum early in Phase 1.
