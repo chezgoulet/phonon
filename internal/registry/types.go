@@ -12,11 +12,12 @@ const (
 	NodeStateOffline  NodeState = "offline"
 )
 
-// HealthTelemetry captures battery and thermal state from heartbeats.
+// HealthTelemetry captures battery, thermal, and queue state from heartbeats.
 type HealthTelemetry struct {
 	BatteryLevel      float64   `json:"battery_level"`
 	ThermalTempC      float64   `json:"thermal_temp_c"`
 	IsCharging        bool      `json:"is_charging"`
+	QueueDepth        int       `json:"queue_depth"`
 	HeartbeatRecorded time.Time `json:"-"`
 }
 

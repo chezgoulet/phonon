@@ -191,6 +191,7 @@ func TestChatCompletionWithOnlinePhone(t *testing.T) {
 	reg.UpdateHeartbeat("phone-01", registry.HealthTelemetry{
 		BatteryLevel: 85,
 		ThermalTempC: 30,
+		QueueDepth:   3,
 	})
 
 	// Set model loaded
@@ -223,6 +224,17 @@ func TestChatCompletionWithOnlinePhone(t *testing.T) {
 
 	if w.Code != http.StatusOK {
 		t.Errorf("expected 200, got %d", w.Code)
+	}
+
+	// Check response headers
+	if v := w.Header().Get("X-Phonon-Device"); v != "phone-01" {
+		t.Errorf("expected X-Phonon-Device: phone-01, got %s", v)
+	}
+	if v := w.Header().Get("X-Phonon-Queue-Depth"); v != "3" {
+		t.Errorf("expected X-Phonon-Queue-Depth: 3, got %s", v)
+	}
+	if v := w.Header().Get("X-Phonon-Group"); v != "" {
+		t.Errorf("expected empty X-Phonon-Group, got %s", v)
 	}
 
 	var resp ChatCompletionResponse
@@ -294,7 +306,7 @@ func TestSelectPhoneWithModel(t *testing.T) {
 
 	h := NewOpenAIHandler(reg)
 
-	phone, err := h.selectPhone("my-model")
+	phone, _, err := h.selectPhone("my-model")
 	if err != nil {
 		t.Fatalf("selectPhone: %v", err)
 	}
@@ -307,7 +319,7 @@ func TestSelectPhoneNoMatch(t *testing.T) {
 	reg := registry.New()
 	h := NewOpenAIHandler(reg)
 
-	_, err := h.selectPhone("nonexistent-model")
+	_, _, err := h.selectPhone("nonexistent-model")
 	if err == nil {
 		t.Error("expected error for nonexistent model")
 	}
@@ -508,7 +520,7 @@ func TestSelectPhoneWithMultipleCandidates(t *testing.T) {
 	// Run multiple times to ensure we get different results (probabilistic)
 	seen := make(map[string]int)
 	for i := 0; i < 20; i++ {
-		phone, err := h.selectPhone("llama")
+		phone, _, err := h.selectPhone("llama")
 		if err != nil {
 			t.Fatalf("selectPhone: %v", err)
 		}
