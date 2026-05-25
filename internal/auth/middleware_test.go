@@ -46,7 +46,7 @@ func TestStatusSecure(t *testing.T) {
 	m.started = true
 
 	s := m.Status()
-	if s.Mode != "secure" {
+	if s.Mode != testSecureStatus {
 		t.Errorf("expected secure, got %s", s.Mode)
 	}
 	if s.Issuer != "https://auth.example.com" {
@@ -78,7 +78,7 @@ func TestHandlerInsecurePassThrough(t *testing.T) {
 	m := New(Config{Mode: "none"})
 	m.started = true
 
-	handler := m.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := m.Handler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("ok"))
 	}))
@@ -93,7 +93,7 @@ func TestHandlerInsecurePassThrough(t *testing.T) {
 }
 
 func TestHandlerMissingToken(t *testing.T) {
-	jwksSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	jwksSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer jwksSrv.Close()
@@ -107,7 +107,7 @@ func TestHandlerMissingToken(t *testing.T) {
 	m.jwks = &JWKSSet{Keys: []JWK{}}
 	m.started = true
 
-	handler := m.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := m.Handler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 
@@ -184,14 +184,15 @@ func TestStatusHandler(t *testing.T) {
 
 	var s Status
 	json.NewDecoder(w.Body).Decode(&s)
-	if s.Mode != "secure" {
+	if s.Mode != testSecureStatus {
 		t.Errorf("expected secure, got %s", s.Mode)
 	}
 }
 
 // newTestOIDCServer creates an httptest.Server that serves OIDC discovery + JWKS.
 // Returns the server and the URL (pre-resolved for closure use).
-func newTestOIDCServer(discoveryPath, jwksPath string, keys []JWK) (srv *httptest.Server, url string) {
+func newTestOIDCServer(_ string, jwksPath string, keys []JWK) (srv *httptest.Server, url string) {
+	discoveryPath := "/.well-known/openid-configuration"
 	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "openid-configuration") || r.URL.Path == discoveryPath {
 			json.NewEncoder(w).Encode(openIDConfig{
@@ -224,7 +225,7 @@ func TestStartStopSecure(t *testing.T) {
 	}
 
 	s := m.Status()
-	if s.Mode != "secure" {
+	if s.Mode != testSecureStatus {
 		t.Errorf("expected secure, got %s", s.Mode)
 	}
 
@@ -379,7 +380,7 @@ func TestValidateTokenRS256(t *testing.T) {
 	// Create a valid JWT with future expiry
 	future := time.Now().Add(24 * time.Hour).Unix()
 	header := `{"alg":"RS256","kid":"test-key-1","typ":"JWT"}`
-	payload := fmt.Sprintf(`{"iss":"%s","sub":"user-1","aud":"test-client","exp":%d,"iat":%d}`,
+	payload := fmt.Sprintf(`{"iss":%q,"sub":"user-1","aud":"test-client","exp":%d,"iat":%d}`,
 		srvURL, future, future-3600)
 
 	headerB64 := base64.RawURLEncoding.EncodeToString([]byte(header))
@@ -457,7 +458,7 @@ func TestValidateTokenES256(t *testing.T) {
 	// Create a valid ECDSA-signed JWT
 	future := time.Now().Add(24 * time.Hour).Unix()
 	header := `{"alg":"ES256","kid":"ec-key-1","typ":"JWT"}`
-	payload := fmt.Sprintf(`{"iss":"%s","sub":"ec-user","aud":"test-client","exp":%d,"iat":%d}`,
+	payload := fmt.Sprintf(`{"iss":%q,"sub":"ec-user","aud":"test-client","exp":%d,"iat":%d}`,
 		srvURL, future, future-3600)
 
 	headerB64 := base64.RawURLEncoding.EncodeToString([]byte(header))
@@ -518,7 +519,7 @@ func TestValidateTokenES256RawSig(t *testing.T) {
 	// Create JWT with raw R||S signature (alternative ECDSA format)
 	future := time.Now().Add(24 * time.Hour).Unix()
 	header := `{"alg":"ES256","kid":"ec-key-2","typ":"JWT"}`
-	payload := fmt.Sprintf(`{"iss":"%s","sub":"raw-ec","aud":"test-client","exp":%d,"iat":%d}`,
+	payload := fmt.Sprintf(`{"iss":%q,"sub":"raw-ec","aud":"test-client","exp":%d,"iat":%d}`,
 		srvURL, future, future-3600)
 
 	headerB64 := base64.RawURLEncoding.EncodeToString([]byte(header))

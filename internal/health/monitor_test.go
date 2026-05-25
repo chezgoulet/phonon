@@ -274,7 +274,7 @@ func TestActionHook_StandbyPromote(t *testing.T) {
 	m, reg := setupTest(t)
 
 	var called int32
-	m.AddAction(func(_ context.Context, deviceID, groupName string, actionType ActionType) {
+	m.AddAction(func(_ context.Context, _ string, groupName string, actionType ActionType) {
 		atomic.AddInt32(&called, 1)
 	})
 
@@ -293,10 +293,10 @@ func TestActionHook_MultipleActions(t *testing.T) {
 	m, reg := setupTest(t)
 
 	var count1, count2 int32
-	m.AddAction(func(_ context.Context, deviceID, groupName string, actionType ActionType) {
+	m.AddAction(func(_ context.Context, _ string, groupName string, actionType ActionType) {
 		atomic.AddInt32(&count1, 1)
 	})
-	m.AddAction(func(_ context.Context, deviceID, groupName string, actionType ActionType) {
+	m.AddAction(func(_ context.Context, _ string, groupName string, actionType ActionType) {
 		atomic.AddInt32(&count2, 1)
 	})
 

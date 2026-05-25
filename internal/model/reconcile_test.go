@@ -23,7 +23,7 @@ func newMockIssuer() *mockIssuer {
 	}
 }
 
-func (m *mockIssuer) SendModelPush(deviceID, model, _ string, checksum string, sizeBytes int64) (string, error) {
+func (m *mockIssuer) SendModelPush(deviceID, model, _ string, _ string, sizeBytes int64) (string, error) {
 	m.pushCommands = append(m.pushCommands, deviceID+":"+model)
 	return "cmd-" + deviceID, nil
 }
@@ -381,7 +381,7 @@ func TestReconcilerExecuteNotConnected(t *testing.T) {
 	}
 }
 
-func TestModelMetadataTypes(t *testing.T) {
+func TestModelMetadataTypes(_ *testing.T) {
 	// Verify types compile and work
 	_ = SourceHuggingFace
 	_ = SourceGeneric

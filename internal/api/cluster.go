@@ -76,9 +76,9 @@ func (h *ClusterHandler) handleClusterHealth(w http.ResponseWriter, r *http.Requ
 	if totalNodes == 0 {
 		status = "offline"
 	} else if online == 0 {
-		status = "degraded"
+		status = statusDegraded
 	} else if offline > 0 || paired > 0 || unpaired > 0 {
-		status = "degraded"
+		status = statusDegraded
 	}
 
 	resp := ClusterHealthResponse{

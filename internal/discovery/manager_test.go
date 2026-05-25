@@ -175,7 +175,7 @@ func TestManager_ManualRegistrationInvalidIP(t *testing.T) {
 
 func TestManager_DuplicateDiscovery(t *testing.T) {
 	var callCount int
-	callback := func(deviceID, model string, ip net.IP, port int) error {
+	callback := func(_ string, _ string, _ net.IP, _ int) error {
 		callCount++
 		return nil
 	}
@@ -204,7 +204,7 @@ func TestManager_DuplicateDiscovery(t *testing.T) {
 
 func TestManager_DuplicateDiscoveryDifferentIP(t *testing.T) {
 	var callCount int
-	callback := func(deviceID, model string, ip net.IP, port int) error {
+	callback := func(_ string, _ string, _ net.IP, _ int) error {
 		callCount++
 		return nil
 	}

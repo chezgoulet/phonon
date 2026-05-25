@@ -113,7 +113,7 @@ func (d *MDNSDiscoverer) queryLoop(ctx context.Context, ch chan<- DiscoveredDevi
 }
 
 // runQuery performs a single mDNS query for _phonon._tcp.
-func (d *MDNSDiscoverer) runQuery(ctx context.Context, ch chan<- DiscoveredDevice) {
+func (d *MDNSDiscoverer) runQuery(_ context.Context, ch chan<- DiscoveredDevice) {
 	// Use the hashicorp/mdns query which handles the DNS-SD protocol
 	entriesCh := make(chan *mdns.ServiceEntry, 10)
 

@@ -387,42 +387,45 @@ func TestValidationResult_Warnings(t *testing.T) {
 }
 
 func TestHealthDefaults(t *testing.T) {
-	yaml := `cluster:
+    tests := []struct{
+        name string
+        yaml string
+        expected func(t *testing.T, h HealthConfig)
+    }{
+        {
+            name: "defaults",
+            yaml: `cluster:
   name: test
 groups:
   - name: g1
     mode: pool
     model: gemma-4-E2B-it
     runtime: litert
-    phones: [phone-01]`
-	cfg, _, err := Load([]byte(yaml))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	h := cfg.Cluster.Health
-	if h.Overheat.Threshold != 45 {
-		t.Errorf("expected default overheat 45, got %f", h.Overheat.Threshold)
-	}
-	if h.Overheat.ReentryThreshold != 40 {
-		t.Errorf("expected default overheat reentry 40, got %f", h.Overheat.ReentryThreshold)
-	}
-	if h.Battery.LowThreshold != 15 {
-		t.Errorf("expected default battery low 15, got %f", h.Battery.LowThreshold)
-	}
-	if h.Battery.ReentryThreshold != 30 {
-		t.Errorf("expected default battery reentry 30, got %f", h.Battery.ReentryThreshold)
-	}
-	if h.Battery.CapacityThreshold != 80 {
-		t.Errorf("expected default capacity 80, got %f", h.Battery.CapacityThreshold)
-	}
-	if h.OfflineTimeout != "60s" {
-		t.Errorf("expected default offline timeout 60s, got %q", h.OfflineTimeout)
-	}
-}
-
-func TestHealthCustom(t *testing.T) {
-	yaml := `cluster:
+    phones: [phone-01]`,
+            expected: func(t *testing.T, h HealthConfig) {
+                if h.Overheat.Threshold != 45 {
+                    t.Errorf("expected default overheat 45, got %f", h.Overheat.Threshold)
+                }
+                if h.Overheat.ReentryThreshold != 40 {
+                    t.Errorf("expected default overheat reentry 40, got %f", h.Overheat.ReentryThreshold)
+                }
+                if h.Battery.LowThreshold != 15 {
+                    t.Errorf("expected default battery low 15, got %f", h.Battery.LowThreshold)
+                }
+                if h.Battery.ReentryThreshold != 30 {
+                    t.Errorf("expected default battery reentry 30, got %f", h.Battery.ReentryThreshold)
+                }
+                if h.Battery.CapacityThreshold != 80 {
+                    t.Errorf("expected default capacity 80, got %f", h.Battery.CapacityThreshold)
+                }
+                if h.OfflineTimeout != "60s" {
+                    t.Errorf("expected default offline timeout 60s, got %q", h.OfflineTimeout)
+                }
+            },
+        },
+        {
+            name: "custom",
+            yaml: `cluster:
   name: test
   health:
     overheat:
@@ -438,31 +441,39 @@ groups:
     mode: pool
     model: gemma-4-E2B-it
     runtime: litert
-    phones: [phone-01]`
-	cfg, _, err := Load([]byte(yaml))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+    phones: [phone-01]`,
+            expected: func(t *testing.T, h HealthConfig) {
+                if h.Overheat.Threshold != 50 {
+                    t.Errorf("expected overheat 50, got %f", h.Overheat.Threshold)
+                }
+                if h.Overheat.ReentryThreshold != 45 {
+                    t.Errorf("expected overheat reentry 45, got %f", h.Overheat.ReentryThreshold)
+                }
+                if h.Battery.LowThreshold != 10 {
+                    t.Errorf("expected battery low 10, got %f", h.Battery.LowThreshold)
+                }
+                if h.Battery.ReentryThreshold != 25 {
+                    t.Errorf("expected battery reentry 25, got %f", h.Battery.ReentryThreshold)
+                }
+                if h.Battery.CapacityThreshold != 75 {
+                    t.Errorf("expected capacity 75, got %f", h.Battery.CapacityThreshold)
+                }
+                if h.OfflineTimeout != "120s" {
+                    t.Errorf("expected offline timeout 120s, got %q", h.OfflineTimeout)
+                }
+            },
+        },
+    }
 
-	h := cfg.Cluster.Health
-	if h.Overheat.Threshold != 50 {
-		t.Errorf("expected overheat 50, got %f", h.Overheat.Threshold)
-	}
-	if h.Overheat.ReentryThreshold != 45 {
-		t.Errorf("expected overheat reentry 45, got %f", h.Overheat.ReentryThreshold)
-	}
-	if h.Battery.LowThreshold != 10 {
-		t.Errorf("expected battery low 10, got %f", h.Battery.LowThreshold)
-	}
-	if h.Battery.ReentryThreshold != 25 {
-		t.Errorf("expected battery reentry 25, got %f", h.Battery.ReentryThreshold)
-	}
-	if h.Battery.CapacityThreshold != 75 {
-		t.Errorf("expected capacity 75, got %f", h.Battery.CapacityThreshold)
-	}
-	if h.OfflineTimeout != "120s" {
-		t.Errorf("expected offline timeout 120s, got %q", h.OfflineTimeout)
-	}
+    for _, tt := range tests {
+        t.Run(tt.name, func(t *testing.T) {
+            cfg, _, err := Load([]byte(tt.yaml))
+            if err != nil {
+                t.Fatalf("unexpected error: %v", err)
+            }
+            tt.expected(t, cfg.Cluster.Health)
+        })
+    }
 }
 
 func TestOfflineTimeoutDuration(t *testing.T) {
