@@ -72,8 +72,8 @@ func (c *Config) Validate(result *ValidationResult) error {
 	}
 	phoneMap := make(map[string][]phoneEntry)
 
-	for gi, g := range c.Groups {
-		if err := validateGroup(gi, g, result); err != nil {
+	for gi := range c.Groups {
+		if err := validateGroup(gi, &c.Groups[gi], result); err != nil {
 			return err
 		}
 
@@ -85,8 +85,8 @@ func (c *Config) Validate(result *ValidationResult) error {
 				})
 			}
 		}
-		registerPhones(g.Phones, false)
-		registerPhones(g.Standby, true)
+		registerPhones(c.Groups[gi].Phones, false)
+		registerPhones(c.Groups[gi].Standby, true)
 	}
 
 	// Cross-group phone overlap checks.
@@ -137,7 +137,7 @@ func (c *Config) Validate(result *ValidationResult) error {
 	return nil
 }
 
-func validateGroup(gi int, g GroupConfig, result *ValidationResult) error {
+func validateGroup(gi int, g *GroupConfig, result *ValidationResult) error {
 	if g.Name == "" {
 		return fmt.Errorf("group at index %d has no name", gi)
 	}
