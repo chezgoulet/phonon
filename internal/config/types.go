@@ -31,6 +31,12 @@ type DiscoveryConfig struct {
 	MDNS   MDNSConfig `yaml:"mdns"`
 }
 
+// EventLogConfig controls the SQLite-backed event log.
+type EventLogConfig struct {
+	Path          string `yaml:"path"`           // database file path (default "phonon.db")
+	RetentionDays int    `yaml:"retention_days"` // auto-purge events older than this (default 90)
+}
+
 // ClusterConfig defines the top-level cluster settings.
 type ClusterConfig struct {
 	Name       string           `yaml:"name"`
@@ -38,6 +44,7 @@ type ClusterConfig struct {
 	Networking NetworkingConfig `yaml:"networking"`
 	Discovery  DiscoveryConfig  `yaml:"discovery"`
 	Health     HealthConfig     `yaml:"health"`
+	EventLog   EventLogConfig   `yaml:"event_log"`
 }
 
 // AuthConfig defines authentication for the coordinator API.
