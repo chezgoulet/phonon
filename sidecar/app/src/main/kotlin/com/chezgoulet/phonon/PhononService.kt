@@ -6,6 +6,7 @@ import android.app.NotificationManager
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.os.Binder
 import android.os.IBinder
 import android.os.PowerManager
 import com.chezgoulet.phonon.coordinator.CoordinatorClient
@@ -77,7 +78,19 @@ class PhononService : Service() {
         return START_STICKY
     }
 
-    override fun onBind(intent: Intent?): IBinder? = null
+    /** Binder for activity binding. */
+    inner class LocalBinder : Binder() {
+        fun getService(): PhononService = this@PhononService
+    }
+
+    private val binder = LocalBinder()
+
+    override fun onBind(intent: Intent?): IBinder? = binder
+
+    /** Force an immediate heartbeat to the coordinator. */
+    fun forceHeartbeat() {
+        healthReporter.forceSend()
+    }
 
     override fun onDestroy() {
         scope.cancel()

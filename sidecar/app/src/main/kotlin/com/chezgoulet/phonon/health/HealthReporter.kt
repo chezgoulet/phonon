@@ -52,8 +52,21 @@ class HealthReporter(
         }
     }
 
+    private var lastTelemetry: HeartbeatRequest? = null
+
     fun stop() {
         scope.cancel()
+    }
+
+    /** Send a heartbeat immediately, collecting fresh telemetry. */
+    fun forceSend() {
+        try {
+            val heartbeat = collectTelemetry()
+            coordinatorClient.sendHeartbeat(heartbeat)
+            Log.i(tag, "Forced heartbeat sent: battery=${heartbeat.batteryLevel}%")
+        } catch (e: Exception) {
+            Log.w(tag, "Forced heartbeat error: ${e.message}")
+        }
     }
 
     private fun collectTelemetry(): HeartbeatRequest {
