@@ -223,10 +223,12 @@ func (m *Monitor) evaluateNode(node *registry.Node) string {
 	}
 
 	// --- Degraded capacity (charger-dependent) ---
-	if node.Telemetry.BatteryLevel > 0 && node.Telemetry.BatteryLevel < m.cfg.BatteryCapacityThreshold &&
+	// Uses BatteryCapacityPct (max capacity relative to original), not BatteryLevel (current charge %).
+	// Sidecar reports this from Android's BatteryManager; 0 means sidecar hasn't sent data yet.
+	if node.Telemetry.BatteryCapacityPct > 0 && node.Telemetry.BatteryCapacityPct < m.cfg.BatteryCapacityThreshold &&
 		!node.Telemetry.IsCharging && node.ExcludeReason == "" {
-		// Mark as charger-dependent if battery capacity is degraded below threshold
-		// But only if it's not already excluded for another reason, and has reported capacity data
+		// Mark as charger-dependent if max battery capacity is degraded below threshold.
+		// Only fires when capacity data is available (>0).
 		return reasonDegraded
 	}
 	if reason == reasonDegraded && node.Telemetry.IsCharging {

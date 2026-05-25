@@ -136,10 +136,11 @@ func (h *SidecarHandler) handleHeartbeat(w http.ResponseWriter, r *http.Request)
 	}
 
 	telemetry := registry.HealthTelemetry{
-		BatteryLevel: req.Battery.Level,
-		ThermalTempC: req.Thermal.SoCTempC,
-		IsCharging:   req.Battery.Charging,
-		QueueDepth:   req.QueueDepth,
+		BatteryLevel:       req.Battery.Level,
+		BatteryCapacityPct: req.Battery.CapacityPct,
+		ThermalTempC:       req.Thermal.SoCTempC,
+		IsCharging:         req.Battery.Charging,
+		QueueDepth:         req.QueueDepth,
 	}
 
 	err := h.reg.UpdateHeartbeat(req.DeviceID, telemetry)
