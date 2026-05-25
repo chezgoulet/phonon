@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Phonon Worker</string>
+    <string name="notification_channel_name">Phonon Worker Status</string>
+    <string name="notification_channel_desc">Shows worker status, device ID, and connection state</string>
+    <string name="notification_title_connecting">Connecting…</string>
+    <string name="notification_title_connected">Connected</string>
+    <string name="notification_title_disconnected">Disconnected</string>
+    <string name="status_format">Device: %s\nCoordinator: %s\nModel: %s</string>
+    <string name="stop_worker">Stop Worker</string>
+</resources>
