@@ -12,14 +12,27 @@ pipeline downloads and extracts the native library as needed.
 
 ## Current pinned release
 
-Check the [releases page](https://github.com/NightMean/OlliteRT/releases) for
-the latest version. Update this file when bumping.
+| Field | Value |
+|---|---|
+| Version | v0.9.5-beta.1 |
+| URL | `https://github.com/NightMean/OlliteRT/releases/download/v0.9.5-beta.1/OlliteRT-v0.9.5-beta.1-arm64-v8a.apk` |
+| SHA-256 | `d65ef0b35cb7fc87a7b174721972c1abab2dc547e6c1d075a8f7f9b1c0f0f976` |
+| Size | 32,985,679 bytes |
+| Released | 2026-04-30 |
 
-```yaml
-release:
-  version: "v1.0.0"                    # From git tag
-  url: "https://github.com/NightMean/OlliteRT/releases/download/v1.0.0/ollitert-arm64.apk"
-  sha256: "TODO — set after downloading and checksumming"
+## Update process
+
+1. Download the new APK release
+2. Compute SHA-256: `sha256sum OlliteRT-*-arm64-v8a.apk`
+3. Update this file with the new version, URL, SHA-256
+4. Commit and PR
+
+```bash
+# Bump example:
+OLD_VERSION=v0.9.5-beta.1
+NEW_VERSION=v0.10.0
+curl -OL "https://github.com/NightMean/OlliteRT/releases/download/$NEW_VERSION/OlliteRT-$NEW_VERSION-arm64-v8a.apk"
+sha256sum "OlliteRT-$NEW_VERSION-arm64-v8a.apk"
 ```
 
 ## Extraction
@@ -27,8 +40,8 @@ release:
 The native library lives inside the APK at:
 `lib/arm64-v8a/libollitert.so`
 
-The sidecar build pipeline extracts it as a Gradle task and bundles it as a
-raw asset under `sidecar/app/src/main/assets/libollitert.so`, where the
+The sidecar Gradle build downloads the APK, verifies the SHA-256, and extracts
+the .so into `app/src/main/assets/ollitert/libollitert.so`, where the
 PhononService copies it to the app's native library directory at runtime.
 
 ## Source repo
