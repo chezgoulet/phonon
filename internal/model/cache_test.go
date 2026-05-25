@@ -196,7 +196,7 @@ func TestDistributeHandler_NoModelInPath(t *testing.T) {
 	cache := NewCache(t.TempDir(), nil)
 	handler := DistributeHandler(cache)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/models/", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/models/", http.NoBody)
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 
@@ -210,7 +210,7 @@ func TestDistributeHandler_ModelNotCached(t *testing.T) {
 	cache.Init()
 	handler := DistributeHandler(cache)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/models/nonexistent.gguf", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/models/nonexistent.gguf", http.NoBody)
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 
