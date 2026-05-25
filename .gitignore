@@ -1,0 +1,41 @@
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binaries
+*.test
+
+# Coverage
+*.out
+*.cov
+cover.html
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Web UI build output (embedded into Go binary)
+web/node_modules/
+web/dist/
+web/.env.local
+
+# Go workspace
+go.work
+go.work.sum
+
+# Android / Kotlin
+sidecar/build/
+sidecar/.gradle/
+sidecar/local.properties
+sidecar/*.iml
+sidecar/.cxx/
