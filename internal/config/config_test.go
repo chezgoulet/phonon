@@ -1,7 +1,386 @@
 package config
 
-import "testing"
+import (
+	"testing"
+)
 
-func TestPackageCompiles(t *testing.T) {
-	t.Log("placeholder — real tests added in issue #4")
+func TestLoadExampleConfig(t *testing.T) {
+	yaml := `
+cluster:
+  name: "homelab-inference"
+  auth:
+    mode: none
+  networking:
+    prefer: ethernet
+
+groups:
+  - name: fast-general
+    mode: pool
+    model: gemma-4-E2B-it
+    runtime: litert
+    phones: [pixel-7a-01, pixel-7a-02]
+  - name: reasoning
+    mode: shard
+    model: gemma-4-27b-q4
+    runtime: prima
+    phones: [pixel-9-01, pixel-9-02]
+    standby: [pixel-8-01]
+`
+	cfg, vr, err := Load([]byte(yaml))
+	if err != nil {
+		t.Fatalf("Load() returned error: %v", err)
+	}
+	if cfg.Cluster.Name != "homelab-inference" {
+		t.Errorf("expected cluster name 'homelab-inference', got %q", cfg.Cluster.Name)
+	}
+	if len(cfg.Groups) != 2 {
+		t.Fatalf("expected 2 groups, got %d", len(cfg.Groups))
+	}
+	if cfg.Groups[0].Name != "fast-general" {
+		t.Errorf("expected first group name 'fast-general', got %q", cfg.Groups[0].Name)
+	}
+	if cfg.Groups[1].Name != "reasoning" {
+		t.Errorf("expected second group name 'reasoning', got %q", cfg.Groups[1].Name)
+	}
+	if len(vr.Warnings) != 0 {
+		t.Errorf("expected no warnings, got %v", vr.Warnings)
+	}
+}
+
+func TestLoadFile(t *testing.T) {
+	_, _, err := LoadFile("/nonexistent/phonon.yaml")
+	if err == nil {
+		t.Fatal("expected error for nonexistent file, got nil")
+	}
+}
+
+func TestValidate_EmptyGroups(t *testing.T) {
+	yaml := `cluster:
+  name: test
+groups: []`
+	_, _, err := Load([]byte(yaml))
+	if err == nil {
+		t.Fatal("expected error for empty groups, got nil")
+	}
+}
+
+func TestValidate_NoGroups(t *testing.T) {
+	yaml := `cluster:
+  name: test`
+	_, _, err := Load([]byte(yaml))
+	if err == nil {
+		t.Fatal("expected error for no groups, got nil")
+	}
+}
+
+func TestValidate_GroupNoName(t *testing.T) {
+	yaml := `cluster:
+  name: test
+groups:
+  - mode: pool
+    model: gemma-4-E2B-it
+    runtime: litert
+    phones: [phone-01]`
+	_, _, err := Load([]byte(yaml))
+	if err == nil {
+		t.Fatal("expected error for unnamed group, got nil")
+	}
+}
+
+func TestValidate_GroupNoPhones(t *testing.T) {
+	yaml := `cluster:
+  name: test
+groups:
+  - name: empty
+    mode: pool
+    model: gemma-4-E2B-it
+    runtime: litert
+    phones: []`
+	_, _, err := Load([]byte(yaml))
+	if err == nil {
+		t.Fatal("expected error for empty phone list, got nil")
+	}
+}
+
+func TestValidate_ModeRuntimeMismatchPool(t *testing.T) {
+	yaml := `cluster:
+  name: test
+groups:
+  - name: bad
+    mode: pool
+    model: gemma-4-E2B-it
+    runtime: prima
+    phones: [phone-01]`
+	_, _, err := Load([]byte(yaml))
+	if err == nil {
+		t.Fatal("expected error for pool+prima mismatch, got nil")
+	}
+}
+
+func TestValidate_ModeRuntimeMismatchShard(t *testing.T) {
+	yaml := `cluster:
+  name: test
+groups:
+  - name: bad
+    mode: shard
+    model: gemma-4-27b-q4
+    runtime: litert
+    phones: [phone-01]`
+	_, _, err := Load([]byte(yaml))
+	if err == nil {
+		t.Fatal("expected error for shard+litert mismatch, got nil")
+	}
+}
+
+func TestValidate_UnknownMode(t *testing.T) {
+	yaml := `cluster:
+  name: test
+groups:
+  - name: bad
+    mode: unknown
+    model: gemma-4-E2B-it
+    runtime: litert
+    phones: [phone-01]`
+	_, _, err := Load([]byte(yaml))
+	if err == nil {
+		t.Fatal("expected error for unknown mode, got nil")
+	}
+}
+
+func TestValidate_UnknownRuntime(t *testing.T) {
+	yaml := `cluster:
+  name: test
+groups:
+  - name: bad
+    mode: pool
+    model: gemma-4-E2B-it
+    runtime: unknown
+    phones: [phone-01]`
+	_, _, err := Load([]byte(yaml))
+	if err == nil {
+		t.Fatal("expected error for unknown runtime, got nil")
+	}
+}
+
+func TestValidate_NoModel(t *testing.T) {
+	yaml := `cluster:
+  name: test
+groups:
+  - name: bad
+    mode: pool
+    runtime: litert
+    phones: [phone-01]`
+	_, _, err := Load([]byte(yaml))
+	if err == nil {
+		t.Fatal("expected error for missing model, got nil")
+	}
+}
+
+func TestValidate_UnknownModelWarning(t *testing.T) {
+	yaml := `cluster:
+  name: test
+groups:
+  - name: custom
+    mode: pool
+    model: my-custom-model-v1
+    runtime: litert
+    phones: [phone-01]`
+	_, vr, err := Load([]byte(yaml))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(vr.Warnings) != 1 {
+		t.Fatalf("expected 1 warning, got %d: %v", len(vr.Warnings), vr.Warnings)
+	}
+	if vr.Warnings[0] != `group "custom": unknown model "my-custom-model-v1" — set 'download_url' to explicitly enable` {
+		t.Errorf("unexpected warning text: %q", vr.Warnings[0])
+	}
+}
+
+func TestValidate_UnknownModelWithDownloadURL(t *testing.T) {
+	yaml := `cluster:
+  name: test
+groups:
+  - name: custom
+    mode: pool
+    model: my-custom-model-v1
+    runtime: litert
+    download_url: "http://example.com/model.bin"
+    phones: [phone-01]`
+	_, vr, err := Load([]byte(yaml))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(vr.Warnings) != 0 {
+		t.Errorf("expected no warnings with download_url, got %v", vr.Warnings)
+	}
+}
+
+func TestValidate_DuplicatePhoneSameGroup(t *testing.T) {
+	yaml := `cluster:
+  name: test
+groups:
+  - name: g1
+    mode: pool
+    model: gemma-4-E2B-it
+    runtime: litert
+    phones: [phone-01, phone-01]`
+	_, _, err := Load([]byte(yaml))
+	if err != nil {
+		t.Errorf("duplicate phone in same group should be allowed, got error: %v", err)
+	}
+}
+
+func TestValidate_PhoneInMultipleActiveGroups(t *testing.T) {
+	yaml := `cluster:
+  name: test
+groups:
+  - name: g1
+    mode: pool
+    model: gemma-4-E2B-it
+    runtime: litert
+    phones: [phone-01]
+  - name: g2
+    mode: pool
+    model: gemma-4-E2B-it
+    runtime: litert
+    phones: [phone-01]`
+	_, _, err := Load([]byte(yaml))
+	if err == nil {
+		t.Fatal("expected error for duplicate phone in multiple groups, got nil")
+	}
+}
+
+func TestValidate_StandbyNotActiveElsewhere(t *testing.T) {
+	yaml := `cluster:
+  name: test
+groups:
+  - name: g1
+    mode: pool
+    model: gemma-4-E2B-it
+    runtime: litert
+    phones: [phone-01]
+  - name: g2
+    mode: pool
+    model: gemma-4-E2B-it
+    runtime: litert
+    phones: [phone-02]
+    standby: [phone-01]`
+	_, _, err := Load([]byte(yaml))
+	if err == nil {
+		t.Fatal("expected error for standby active elsewhere, got nil")
+	}
+}
+
+func TestValidate_StandbyInOwnGroupAllowed(t *testing.T) {
+	yaml := `cluster:
+  name: test
+groups:
+  - name: g1
+    mode: pool
+    model: gemma-4-E2B-it
+    runtime: litert
+    phones: [phone-01, phone-02]
+    standby: [phone-03]`
+	_, _, err := Load([]byte(yaml))
+	if err != nil {
+		t.Fatalf("standby in own group should be allowed, got error: %v", err)
+	}
+}
+
+func TestValidate_OIDCRequiresIssuer(t *testing.T) {
+	yaml := `cluster:
+  name: test
+  auth:
+    mode: oidc
+    client_id: my-client
+groups:
+  - name: g1
+    mode: pool
+    model: gemma-4-E2B-it
+    runtime: litert
+    phones: [phone-01]`
+	_, _, err := Load([]byte(yaml))
+	if err == nil {
+		t.Fatal("expected error for OIDC without issuer, got nil")
+	}
+}
+
+func TestValidate_OIDCRequiresClientID(t *testing.T) {
+	yaml := `cluster:
+  name: test
+  auth:
+    mode: oidc
+    issuer: https://example.com
+groups:
+  - name: g1
+    mode: pool
+    model: gemma-4-E2B-it
+    runtime: litert
+    phones: [phone-01]`
+	_, _, err := Load([]byte(yaml))
+	if err == nil {
+		t.Fatal("expected error for OIDC without client_id, got nil")
+	}
+}
+
+func TestValidate_OIDCValid(t *testing.T) {
+	yaml := `cluster:
+  name: test
+  auth:
+    mode: oidc
+    issuer: https://example.com
+    client_id: my-client
+groups:
+  - name: g1
+    mode: pool
+    model: gemma-4-E2B-it
+    runtime: litert
+    phones: [phone-01]`
+	_, _, err := Load([]byte(yaml))
+	if err != nil {
+		t.Fatalf("valid OIDC config should be allowed, got error: %v", err)
+	}
+}
+
+func TestRegisterModels(t *testing.T) {
+	RegisterModels("test-model-v2")
+	if !KnownModels["test-model-v2"] {
+		t.Error("expected test-model-v2 to be registered")
+	}
+}
+
+func TestKnownModelsSnapshot(t *testing.T) {
+	// Verify a few baseline models exist
+	expected := []string{"gemma-4-E2B-it", "gemma-4-27b-q4", "llama-3.2-3b-q4", "phi-3.5-mini-q4"}
+	for _, m := range expected {
+		if !KnownModels[m] {
+			t.Errorf("expected known model %q to be in KnownModels", m)
+		}
+	}
+}
+
+func TestValidate_DefaultNetworkConfig(t *testing.T) {
+	yaml := `cluster:
+  name: test
+groups:
+  - name: g1
+    mode: pool
+    model: gemma-4-E2B-it
+    runtime: litert
+    phones: [phone-01]`
+	cfg, _, err := Load([]byte(yaml))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Cluster.Networking.Prefer != "" {
+		t.Errorf("expected empty networking prefer, got %q", cfg.Cluster.Networking.Prefer)
+	}
+}
+
+func TestValidationResult_Warnings(t *testing.T) {
+	vr := &ValidationResult{Warnings: []string{"warn1", "warn2"}}
+	if len(vr.Warnings) != 2 {
+		t.Errorf("expected 2 warnings, got %d", len(vr.Warnings))
+	}
 }
