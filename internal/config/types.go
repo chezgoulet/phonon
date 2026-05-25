@@ -20,11 +20,23 @@ type HealthConfig struct {
 	OfflineTimeout string         `yaml:"offline_timeout"` // e.g. "60s" (default 60s)
 }
 
+// MDNSConfig controls mDNS auto-discovery behaviour.
+type MDNSConfig struct {
+	Disabled bool  `yaml:"disabled"`  // default: false (mDNS enabled)
+	Port     int   `yaml:"port"`      // listen port (default 0 = auto)
+}
+
+// DiscoveryConfig controls how sidecars are discovered.
+type DiscoveryConfig struct {
+	MDNS   MDNSConfig `yaml:"mdns"`
+}
+
 // ClusterConfig defines the top-level cluster settings.
 type ClusterConfig struct {
 	Name       string           `yaml:"name"`
 	Auth       AuthConfig       `yaml:"auth"`
 	Networking NetworkingConfig `yaml:"networking"`
+	Discovery  DiscoveryConfig  `yaml:"discovery"`
 	Health     HealthConfig     `yaml:"health"`
 }
 
