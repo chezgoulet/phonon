@@ -53,7 +53,7 @@ func readCommand(t *testing.T, conn *websocket.Conn, timeout time.Duration) WSCo
 func sendAck(t *testing.T, conn *websocket.Conn, cmdID, status string) {
 	t.Helper()
 	if err := conn.WriteJSON(map[string]string{
-		"type": "ack", "command_id": cmdID, "status": status,
+		"ack_type": "ack", "command_id": cmdID, "status": status,
 	}); err != nil {
 		t.Fatalf("write ack error: %v", err)
 	}

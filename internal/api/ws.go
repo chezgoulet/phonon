@@ -38,7 +38,7 @@ type WSCommand struct {
 
 // WSAck is an acknowledgement received from the sidecar.
 type WSAck struct {
-	Type      string `json:"type"`
+	AckType   string `json:"ack_type"`
 	CommandID string `json:"command_id"`
 	Status    string `json:"status"`
 	Error     string `json:"error,omitempty"`
@@ -147,7 +147,7 @@ func (h *WSHandler) handleAck(deviceID string, data []byte) {
 		h.log.Warn("invalid ack message", "device_id", deviceID, "error", err)
 		return
 	}
-	if ack.Type != "ack" {
+	if ack.AckType != "ack" {
 		return
 	}
 
