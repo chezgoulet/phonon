@@ -1,87 +1,71 @@
-# Phonon
+# phonon
 
 **Used phones → unified AI inference.** One endpoint, zero marginal cost.
 
 Phonon turns a handful of cracked-screen Pixels into a private, local inference backend. Install the APK, plug in power and ethernet, point your agent framework at the endpoint. The coordinator handles discovery, health monitoring, load balancing, and model management. You get a cluster that behaves like one API.
 
-**Fast tier** — pool of independent phones with NPU acceleration. Gemma 4 E2B at 25–40 tok/s per phone. Handles tool calls, classification, summarization. You talk to it like any cloud API — models pick themselves based on complexity.
+## Components
 
-**Reasoning tier** — phones sharding a 27B+ model across 3–4 devices. CPU via prima.cpp pipelined-ring parallelism. 3–8 tok/s. For planning, complex reasoning, multi-step decomposition.
+| Layer | Language | Location |
+|---|---|---|
+| **Coordinator** — API, routing, model cache, health monitoring | Go | `cmd/`, `internal/` |
+| **Sidecar** — Android phone agent, foreground service, mDNS, inference | Kotlin | `sidecar/` |
 
-**Zero marginal cost** — no rate limits, no billing, no one reading your prompts. The agent can make fifty calls to reason through a problem without cost pressure. The cluster handles the 95% of inference that doesn't need frontier capability.
+## Quick Start
 
-**Six phones, $300–600 total, 25–50W power draw.** The gap between "hit a cloud API" and "run inference yourself" dropped from $1,000+ to phone-scrap prices.
+1. **Build the coordinator.** `go build ./cmd/phonon-coordinator`
+2. **Build the APK.** `cd sidecar && ./gradlew assembleRelease`
+3. **Install the APK** on each phone via `adb install sidecar/app/build/outputs/apk/release/app-release.apk`
+4. **Start the coordinator** — `./phonon-coordinator`
+5. **Phones appear automatically.** Pair them in the UI.
 
 ---
 
+### Coordinator
+
+The coordinator is a single Go binary. It handles:
+- mDNS discovery of phones on the LAN
+- REST + WebSocket protocol for phone management
+- Model caching with HuggingFace download + SHA-256 verification
+- Health monitoring with automatic exclusion for overheating/low battery
+- OpenAI-compatible API (`POST /v1/chat/completions`, `GET /v1/models`)
+- OIDC auth middleware with JWKS caching
+- Event log with JSON-lines file backend
+
+Build: `CGO_ENABLED=0 go build ./cmd/phonon-coordinator`
+
+Config: `phonon.yaml` (or `$PHONON_CONFIG`)
+
+### Sidecar
+
+The sidecar is a Kotlin Android app that runs as a foreground service on each phone. It:
+- Announces itself via mDNS on `_phonon._tcp`
+- Registers with the coordinator via REST
+- Maintains a WebSocket command channel
+- Reports health telemetry (battery, temperature, storage) every 60s
+- Downloads model files via HTTP Range requests
+- Starts/stops the OlliteRT inference engine
+- Proxies inference requests to OlliteRT
+
+Build: `cd sidecar && ./gradlew assembleRelease` (Android SDK 35+, Kotlin 2.1)
+
+Zero Google Play Services — works on GrapheneOS.
+
 ## Architecture
-
-Two components:
-
-**The coordinator** — a single Go binary. Discovery, pairing, health monitoring, request routing, web UI. Runs on a Pi, NAS, laptop, or Docker. One binary, one port.
-
-**The phone app** — a single Kotlin APK. Always a worker. Runs the inference engine (OlliteRT for pool mode, prima.cpp for shard mode) and a sidecar that handles mDNS announcement, health telemetry, and coordinator commands.
 
 ```
 ┌─────────────┐     ┌──────────────────┐     ┌──────────────┐
 │             │     │   Coordinator    │     │              │
-│  LiteLLM /  │────▶│  (Pi / NAS /    │────▶│  Phone pool  │
-│  Agent      │     │   Docker)       │     │  (6 Pixels)  │
-│  Framework  │     │  :8080          │     │              │
-│             │     │  REST + WS + UI │     │  5W each     │
-└─────────────┘     └──────────────────┘     └──────────────┘
+│  LiteLLM /  │────▶│  (Go binary)     │────▶│  Phone pool  │
+│  Agent      │     │  :8080           │     │  (6 Pixels)  │
+│  Framework  │     │  REST + WS + UI  │     │  5W each     │
+│             │     └──────┬───────────┘     └──────────────┘
+└─────────────┘            │
+                           │ mDNS + WS + REST
+                           │
+                    ┌──────┴──────┐
+                    │  Sidecar    │
+                    │  (Kotlin    │
+                    │   APK)      │
+                    └─────────────┘
 ```
-
-Phones announce themselves on the LAN via mDNS. The coordinator discovers them. Pairing is zero-touch — broadcast a token, phones auto-pair within a time window. Add a phone by plugging it in.
-
-The coordinator continuously monitors each phone's battery, temperature, queue depth, and liveness. Overheating phones are removed from the routing pool and re-entered after cooling. Offline phones trigger standby promotion. Automatic, no operator intervention.
-
----
-
-## Quick Start
-
-1. **Prepare phones.** Enable USB Debugging, disable battery optimization for the Phonon app. One-time step, done over ADB.
-2. **Install the APK** on each phone via `adb install phonon-worker.apk`
-3. **Start the coordinator** — `./phonon-coordinator` or Docker
-4. **Open the web UI** — discovered phones appear. Pair them in one click.
-5. **Drag phones into groups**, pick models for each, hit deploy.
-6. **Copy the API endpoint** into your agent framework's config.
-
-From first APK install to working inference: ~5 minutes.
-
----
-
-## Current Status
-
-Phase 1 (pool mode) is in active development. Go coordinator builds, YAML config parses, nodes register and report health. Working toward a usable alpha.
-
-| Layer | Status |
-|---|---|
-| Go coordinator scaffold | ✅ Done |
-| YAML config parser | ✅ Done |
-| Node registry | ✅ Done |
-| Coordinator-sidecar protocol (REST + WebSocket) | ✅ Done |
-| Health monitoring (battery/thermal hysteresis, offline detection, Prometheus metrics) | ✅ Done |
-| mDNS discovery | 🔜 In progress |
-| Event log (SQLite) | 🔜 Next |
-| OIDC authentication | 🔜 Next |
-| Inference routing (/v1/chat/completions) | 🔜 Next |
-| Sidecar Kotlin APK | 🔜 Next |
-| Web UI (React embedded in Go binary) | 🔜 Next |
-| Shard mode (prima.cpp) | Phase 2 |
-
----
-
-## License
-
-Source-available non-commercial license (TBD — likely AGPL or similar). Upstream dependencies are Apache 2.0 or MIT.
-
----
-
-## Why
-
-The models are ready. Gemma 4 E2B does multimodal inference in under 2 GB. OlliteRT ships a pre-built APK. LiteLLM routes to any OpenAI-compatible endpoint. What's missing is pure orchestration: install an APK on a handful of phones, they self-organize into a compute pool, one endpoint appears on your network.
-
-Phonon is that missing piece. The phones are already in the trash. The software is the rack.
-
-*Built for people who'd rather spend $300 on used phones than $1,000 on a GPU.*
