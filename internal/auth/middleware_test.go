@@ -128,7 +128,7 @@ func TestHandlerInvalidToken(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	}))
 
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
 	req.Header.Set("Authorization", "Bearer not.a.token")
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
@@ -154,7 +154,7 @@ func TestExtractBearerToken(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
 			if tt.header != "" {
 				req.Header.Set("Authorization", tt.header)
 			}
@@ -191,8 +191,9 @@ func TestStatusHandler(t *testing.T) {
 
 // newTestOIDCServer creates an httptest.Server that serves OIDC discovery + JWKS.
 // Returns the server and the URL (pre-resolved for closure use).
-func newTestOIDCServer(_, jwksPath string, keys []JWK) (srv *httptest.Server, url string) {
+func newTestOIDCServer(_ string, keys []JWK) (srv *httptest.Server, url string) {
 	discoveryPath := "/.well-known/openid-configuration"
+	jwksPath := "/jwks"
 	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "openid-configuration") || r.URL.Path == discoveryPath {
 			json.NewEncoder(w).Encode(openIDConfig{
@@ -210,7 +211,7 @@ func newTestOIDCServer(_, jwksPath string, keys []JWK) (srv *httptest.Server, ur
 }
 
 func TestStartStopSecure(t *testing.T) {
-	srv, srvURL := newTestOIDCServer("/.well-known/openid-configuration", "/jwks", nil)
+	srv, srvURL := newTestOIDCServer("/.well-known/openid-configuration", nil)
 	defer srv.Close()
 
 	m := New(Config{
@@ -234,7 +235,7 @@ func TestStartStopSecure(t *testing.T) {
 }
 
 func TestDoubleStart(t *testing.T) {
-	srv, srvURL := newTestOIDCServer("/.well-known/openid-configuration", "/jwks", nil)
+	srv, srvURL := newTestOIDCServer("/.well-known/openid-configuration", nil)
 	defer srv.Close()
 
 	m := New(Config{Mode: "oidc", Issuer: srvURL})
@@ -362,7 +363,7 @@ func TestValidateTokenRS256(t *testing.T) {
 		E:   base64.RawURLEncoding.EncodeToString(eBytes),
 	}
 
-	srv, srvURL := newTestOIDCServer("/.well-known/openid-configuration", "/jwks", []JWK{jwk})
+	srv, srvURL := newTestOIDCServer("/.well-known/openid-configuration", []JWK{jwk})
 	defer srv.Close()
 
 	m := New(Config{
@@ -445,7 +446,7 @@ func TestValidateTokenES256(t *testing.T) {
 		Y:   base64.RawURLEncoding.EncodeToString(yPadded),
 	}
 
-	srv, srvURL := newTestOIDCServer("/.well-known/openid-configuration", "/jwks", []JWK{jwk})
+	srv, srvURL := newTestOIDCServer("/.well-known/openid-configuration", []JWK{jwk})
 	defer srv.Close()
 
 	m := New(Config{Mode: "oidc", Issuer: srvURL, ClientID: "test-client"})
@@ -506,7 +507,7 @@ func TestValidateTokenES256RawSig(t *testing.T) {
 		Y:   base64.RawURLEncoding.EncodeToString(yPadded),
 	}
 
-	srv, srvURL := newTestOIDCServer("/.well-known/openid-configuration", "/jwks", []JWK{jwk})
+	srv, srvURL := newTestOIDCServer("/.well-known/openid-configuration", []JWK{jwk})
 	defer srv.Close()
 
 	m := New(Config{Mode: "oidc", Issuer: srvURL, ClientID: "test-client"})

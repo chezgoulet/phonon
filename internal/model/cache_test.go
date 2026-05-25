@@ -311,7 +311,7 @@ func TestCacheDownload(t *testing.T) {
 func TestCacheDownloadChecksum(t *testing.T) {
 	modelData := []byte("verify-me-98765")
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Write(modelData)
 	}))
 	defer server.Close()
@@ -329,7 +329,7 @@ func TestCacheDownloadChecksum(t *testing.T) {
 }
 
 func TestCacheDownloadHTTPError(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 	}))
 	defer server.Close()
