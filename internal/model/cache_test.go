@@ -1,6 +1,7 @@
 package model
 
 import (
+	"bytes"
 	"context"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +11,8 @@ import (
 	"testing"
 	"time"
 )
+
+var testFilePerm os.FileMode = 0644
 
 func TestNewCache(t *testing.T) {
 	dir := t.TempDir()
@@ -46,7 +49,7 @@ func TestCacheScanExisting(t *testing.T) {
 
 	// Create a fake cached model
 	modelPath := filepath.Join(modelsDir, "test-model.bin")
-	os.WriteFile(modelPath, []byte("model-data"), 0644)
+	os.WriteFile(modelPath, []byte("model-data"), testFilePerm)
 
 	cache := NewCache(dir, nil)
 	if err := cache.Init(); err != nil {
@@ -102,7 +105,7 @@ func TestCacheRemove(t *testing.T) {
 	os.MkdirAll(modelsDir, 0755)
 
 	modelPath := filepath.Join(modelsDir, "test-model.bin")
-	os.WriteFile(modelPath, []byte("data"), 0644)
+	os.WriteFile(modelPath, []byte("data"), testFilePerm)
 
 	cache := NewCache(dir, nil)
 	cache.Init()
@@ -141,7 +144,7 @@ func TestCacheModelPath(t *testing.T) {
 	modelsDir := filepath.Join(dir, "models")
 	os.MkdirAll(modelsDir, 0755)
 	modelPath := filepath.Join(modelsDir, "mymodel.bin")
-	os.WriteFile(modelPath, []byte("data"), 0644)
+	os.WriteFile(modelPath, []byte("data"), testFilePerm)
 	cache.Init()
 
 	got, err := cache.ModelPath("mymodel.bin")
@@ -222,7 +225,7 @@ func TestDistributeHandler_ServeFile(t *testing.T) {
 
 	content := []byte("fake-model-data-for-testing")
 	modelPath := filepath.Join(modelsDir, "test-model.gguf")
-	os.WriteFile(modelPath, content, 0644)
+	os.WriteFile(modelPath, content, testFilePerm)
 
 	cache := NewCache(dir, nil)
 	cache.Init()
@@ -244,7 +247,7 @@ func TestDistributeHandler_MethodNotAllowed(t *testing.T) {
 	dir := t.TempDir()
 	modelsDir := filepath.Join(dir, "models")
 	os.MkdirAll(modelsDir, 0755)
-	os.WriteFile(filepath.Join(modelsDir, "test-model.gguf"), []byte("data"), 0644)
+	os.WriteFile(filepath.Join(modelsDir, "test-model.gguf"), []byte("data"), testFilePerm)
 
 	cache := NewCache(dir, nil)
 	cache.Init()
@@ -299,7 +302,7 @@ func TestCacheDownload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(data) != string(modelData) {
+	if !bytes.Equal(data, modelData) {
 		t.Errorf("expected %q, got %q", modelData, data)
 	}
 }
@@ -356,7 +359,7 @@ func TestCacheGetFromCache(t *testing.T) {
 	dir := t.TempDir()
 	modelsDir := filepath.Join(dir, "models")
 	os.MkdirAll(modelsDir, 0755)
-	os.WriteFile(filepath.Join(modelsDir, "cached-model.bin"), []byte("data"), 0644)
+	os.WriteFile(filepath.Join(modelsDir, "cached-model.bin"), []byte("data"), testFilePerm)
 
 	cache := NewCache(dir, nil)
 	cache.Init()
