@@ -32,6 +32,7 @@ type ModelStatus struct {
 type Node struct {
 	DeviceID    string         `json:"device_id"`    // hardware serial
 	Name        string         `json:"name"`          // human-friendly (auto-gen or operator-set)
+	DeviceModel string         `json:"device_model"` // e.g. "Pixel 9 Pro"
 	Group       string         `json:"group"`         // group name, empty if unassigned
 	State       NodeState      `json:"state"`
 	Telemetry   HealthTelemetry `json:"telemetry"`

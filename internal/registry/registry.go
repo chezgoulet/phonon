@@ -225,6 +225,21 @@ func (r *Registry) Count() int {
 // SetExcludeReason sets the reason a node is excluded from routing.
 // Returns ErrNotFound if the device doesn't exist.
 func (r *Registry) SetExcludeReason(deviceID, reason string) error {
+	return r.updateField(deviceID, func(n *Node) {
+		n.ExcludeReason = reason
+	})
+}
+
+// SetDeviceModel sets the device model string (e.g. "Pixel 9 Pro").
+// Returns ErrNotFound if the device doesn't exist.
+func (r *Registry) SetDeviceModel(deviceID, model string) error {
+	return r.updateField(deviceID, func(n *Node) {
+		n.DeviceModel = model
+	})
+}
+
+// updateField is a helper that locks, looks up the node, and applies a mutation.
+func (r *Registry) updateField(deviceID string, fn func(*Node)) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -233,7 +248,7 @@ func (r *Registry) SetExcludeReason(deviceID, reason string) error {
 		return fmt.Errorf("%w: %s", ErrNotFound, deviceID)
 	}
 
-	node.ExcludeReason = reason
+	fn(node)
 	return nil
 }
 
