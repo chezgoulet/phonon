@@ -661,7 +661,7 @@ In secure mode, the coordinator validates bearer tokens against a configured OID
 9. **OIDC authentication** — Optional. Insecure mode also available.
 10. **Rolling model updates** — One phone at a time.
 11. **Event log** — SQLite, queryable through web UI.
-12. **Pre-flight group readiness check** — Before activating a shard group, coordinator verifies all nodes are online, model is cached on each node, and inter-node latency is within configured bounds. Prevents activation of groups with missing or slow nodes.
+12. **Pre-flight group readiness check** — Before activating a group (any mode), coordinator verifies all nodes are online and model is cached on each node. Prevents activation of groups with missing or slow nodes. Developed and tested against pool groups in Phase 1 where the same validation logic applies; shard mode additionally validates inter-node latency in Phase 2.
 13. **Documentation** — Setup guide, hardware recommendations, model selection guide, battery safety guidance.
 
 **Estimated effort:** 2–4 months for a motivated solo developer.
@@ -671,7 +671,7 @@ In secure mode, the coordinator validates bearer tokens against a configured OID
 - Coordinator recovers from restart without data loss (event log preserved, node state reconstructed from heartbeats).
 - Pairing flow works end-to-end without touching the phone screen.
 - Model update from one model to another succeeds without dropping all requests.
-- Pre-flight group check passes for a shard group (validates nodes online and model cached).
+- Pre-flight group check passes (validates nodes online and model cached, tested against pool groups).
 
 ### 13.2 Phase 2 — Shard Mode via prima.cpp (Beta)
 
