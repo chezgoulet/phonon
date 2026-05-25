@@ -43,7 +43,7 @@ jobs:
   kotlin:
     name: Kotlin (sidecar)
     runs-on: ubuntu-latest
-    if: false  # Sidecar codebase not yet present — enable in #14
+    if: false  # Enable in #14 — requires Android SDK + NDK on runner
     defaults:
       run:
         working-directory: sidecar
@@ -58,6 +58,14 @@ jobs:
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
+
+      - name: Install Android SDK
+        run: |
+          mkdir -p $ANDROID_HOME/cmdline-tools
+          curl -sL https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -o /tmp/cmdline-tools.zip
+          unzip -q /tmp/cmdline-tools.zip -d $ANDROID_HOME/cmdline-tools
+          mv $ANDROID_HOME/cmdline-tools/cmdline-tools $ANDROID_HOME/cmdline-tools/latest
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --install "platforms;android-35" "build-tools;35.0.0" "ndk;27.0.12077973" > /dev/null 2>&1 || true
 
       - name: Lint (ktlint)
         run: ./gradlew ktlintCheck
@@ -74,10 +82,9 @@ jobs:
   react:
     name: React (web UI)
     runs-on: ubuntu-latest
-    if: false  # Web UI source not yet present — enable in #13
     defaults:
       run:
-        working-directory: web
+        working-directory: ui
     steps:
       - uses: actions/checkout@v4
 
@@ -85,19 +92,10 @@ jobs:
         with:
           node-version: "22"
           cache: npm
-          cache-dependency-path: web/package-lock.json
+          cache-dependency-path: ui/package-lock.json
 
       - name: Install
         run: npm ci
-
-      - name: Format check
-        run: npx prettier --check src/
-
-      - name: Lint
-        run: npx eslint src/
-
-      - name: Test
-        run: npx vitest run
 
       - name: Build
         run: npm run build

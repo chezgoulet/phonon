@@ -39,7 +39,8 @@ sidecar/.gradle/
 sidecar/local.properties
 sidecar/*.iml
 sidecar/.cxx/
-cmd/phonon-coordinator/static/
+cmd/phonon-coordinator/static/*
+!cmd/phonon-coordinator/static/.gitkeep
 # UI build deps
 ui/node_modules/
 ui/dist/
