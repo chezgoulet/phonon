@@ -253,8 +253,11 @@ func (m *Monitor) fireActions(ctx context.Context, node *registry.Node, actionTy
 func (m *Monitor) updateMetrics() {
 	nodes := m.reg.List()
 
-	totalOnline := 0
-	totalOffline := 0
+	// Reset per-group gauges before counting — otherwise Inc() would
+	// double-count on each check cycle (Issue #25).
+	m.metrics.NodesOnline.Reset()
+	m.metrics.NodesOffline.Reset()
+
 	totalOverheating := 0
 
 	for _, n := range nodes {
@@ -262,28 +265,21 @@ func (m *Monitor) updateMetrics() {
 		m.metrics.ThermalTempC.WithLabelValues(n.DeviceID).Set(n.Telemetry.ThermalTempC)
 		m.metrics.QueueDepth.WithLabelValues(n.DeviceID).Set(0) // TODO: wired from API
 
-		switch n.State {
-		case registry.NodeStateOnline:
-			totalOnline++
-			if n.ExcludeReason == "overheating" {
-				totalOverheating++
-			}
-		case registry.NodeStateOffline:
-			totalOffline++
+		if n.State == registry.NodeStateOnline && n.ExcludeReason == "overheating" {
+			totalOverheating++
 		}
 
-		// Per-group online/offline metrics
+		// Per-group online/offline gauges
 		if n.Group != "" {
 			groupLabel := n.Group
-			if n.State == registry.NodeStateOnline {
+			switch n.State {
+			case registry.NodeStateOnline:
 				m.metrics.NodesOnline.WithLabelValues(groupLabel).Inc()
-			} else {
+			case registry.NodeStateOffline:
 				m.metrics.NodesOffline.WithLabelValues(groupLabel).Inc()
 			}
 		}
 	}
 
 	m.metrics.NodesOverheating.Set(float64(totalOverheating))
-	_ = totalOnline
-	_ = totalOffline
 }

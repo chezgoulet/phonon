@@ -2,6 +2,8 @@ package health
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -403,6 +405,47 @@ func TestMultipleNodes_IndependentStates(t *testing.T) {
 
 	assertExcludeReason(t, reg, "device-1", "overheating")
 	assertExcludeReason(t, reg, "device-2", "")
+}
+
+func TestMetrics_NoDoubleCounting(t *testing.T) {
+	m, reg := setupTest(t)
+	metrics := m.RegisterMetrics()
+
+	registerNode(t, reg, "d1", "phone-1")
+	registerNode(t, reg, "d2", "phone-2")
+	pairNode(t, reg, "d1")
+	pairNode(t, reg, "d2")
+	reg.AssignToGroup("d1", "fast-general")
+	reg.AssignToGroup("d2", "fast-general")
+	sendHeartbeat(t, reg, "d1", 80, true, 35)
+	sendHeartbeat(t, reg, "d2", 80, true, 35)
+
+	// First check cycle
+	m.Check()
+
+	// Scrape metrics after first cycle
+	mux := http.NewServeMux()
+	mux.Handle("GET /metrics", metrics.Handler())
+	req := httptest.NewRequest("GET", "/metrics", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	body1 := w.Body.String()
+
+	// Second check cycle — without Reset(), this would double
+	m.Check()
+
+	w2 := httptest.NewRecorder()
+	mux.ServeHTTP(w2, req)
+	body2 := w2.Body.String()
+
+	if body1 != body2 {
+		t.Errorf("metrics changed between cycles — double-counting bug detected")
+	}
+
+	// Verify the actual count is correct (2 nodes, not doubled)
+	if !strContains(body1, `phonon_nodes_online{group="fast-general"} 2`) {
+		t.Errorf("expected 2 online in fast-general, got:\n%s", body1)
+	}
 }
 
 func TestMonitor_DefaultConfig(t *testing.T) {
