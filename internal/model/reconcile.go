@@ -124,10 +124,7 @@ func (r *Reconciler) ReconcileGroup(g config.GroupConfig) []ReconcilerStep {
 	needDownload := modelURL == "" && !r.cache.Has(g.Model)
 
 	for _, phoneID := range g.Phones {
-		step := r.reconcilePhone(phoneID, g.Model, g.Checksum, modelURL, needDownload)
-		if step.Action != ActionNone {
-			steps = append(steps, step)
-		}
+		steps = append(steps, r.reconcilePhone(phoneID, g.Model, g.Checksum, modelURL, needDownload)...)
 	}
 
 	// Handle standby phones: just ensure they have the model cached
@@ -156,46 +153,46 @@ func (r *Reconciler) cachedDownloadURL(modelName string) string {
 	return ""
 }
 
-// reconcilePhone computes a single step for one phone.
-func (r *Reconciler) reconcilePhone(deviceID, desiredModel, checksum, modelURL string, needDownload bool) ReconcilerStep {
+// reconcilePhone computes steps needed for one phone.
+func (r *Reconciler) reconcilePhone(deviceID, desiredModel, checksum, modelURL string, needDownload bool) []ReconcilerStep {
 	node, ok := r.reg.Get(deviceID)
 	if !ok {
 		r.log.Debug("phone not registered", "device_id", deviceID)
-		return ReconcilerStep{Action: ActionNone}
+		return nil
 	}
 
 	if node.State != registry.NodeStateOnline {
-		return ReconcilerStep{Action: ActionNone}
+		return nil
 	}
 
 	// If model not cached and need download, skip for now
 	if needDownload {
 		r.log.Info("model not cached and no URL for download",
 			"model", desiredModel, "device_id", deviceID)
-		return ReconcilerStep{Action: ActionNone}
+		return nil
 	}
 
 	currentName := node.ModelStatus.Name
 	currentLoaded := node.ModelStatus.Loaded
 
 	if currentLoaded && currentName == desiredModel {
-		return ReconcilerStep{Action: ActionNone}
+		return nil
 	}
 
 	// Model needs to change
 	if modelURL == "" && !r.cache.Has(desiredModel) {
 		r.log.Info("model not cached, cannot push", "model", desiredModel, "device_id", deviceID)
-		return ReconcilerStep{Action: ActionNone}
+		return nil
 	}
 
 	entry := r.cachedEntry(desiredModel)
 
 	if !r.cache.Has(desiredModel) {
 		// Can't push without cache
-		return ReconcilerStep{Action: ActionNone}
+		return nil
 	}
 
-	step := ReconcilerStep{
+	pushStep := ReconcilerStep{
 		DeviceID:  deviceID,
 		ModelName: desiredModel,
 		URL:       ModelURL(r.baseURL, desiredModel),
@@ -203,20 +200,25 @@ func (r *Reconciler) reconcilePhone(deviceID, desiredModel, checksum, modelURL s
 	}
 
 	if entry != nil {
-		step.SizeBytes = entry.SizeBytes
+		pushStep.SizeBytes = entry.SizeBytes
 	}
 
 	if currentName != desiredModel || !currentLoaded {
-		step.Action = ActionPush
 		if currentLoaded {
-			// Will need unload + push + load (return both as multiple steps)
-			step.Action = ActionUnload
-			return step
+			// Emit unload + push in one shot so the model change converges in
+			// a single reconciliation cycle instead of requiring two.
+			unloadStep := ReconcilerStep{
+				DeviceID: deviceID,
+				Action:   ActionUnload,
+			}
+			pushStep.Action = ActionPush
+			return []ReconcilerStep{unloadStep, pushStep}
 		}
-		return step
+		pushStep.Action = ActionPush
+		return []ReconcilerStep{pushStep}
 	}
 
-	return ReconcilerStep{Action: ActionNone}
+	return nil
 }
 
 func (r *Reconciler) cachedEntry(modelName string) *CacheEntry {
