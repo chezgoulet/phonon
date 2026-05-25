@@ -202,7 +202,7 @@ func TestChatCompletionWithOnlinePhone(t *testing.T) {
 	h.AddModel("test-model", "test")
 
 	// Override inference proxy to return a controlled response
-	h.inferenceProxy = func(phoneURL string, req PhoneInferenceRequest) (*PhoneInferenceResponse, error) {
+	h.inferenceProxy = func(phoneURL string, _ PhoneInferenceRequest) (*PhoneInferenceResponse, error) {
 		if !strings.Contains(phoneURL, "10.0.0.5") {
 			t.Errorf("expected phone URL to contain 10.0.0.5, got %s", phoneURL)
 		}
@@ -276,7 +276,7 @@ func TestChatCompletionPhoneFails(t *testing.T) {
 	h.AddModel("test-model", "test")
 
 	// Override proxy to fail
-	h.inferenceProxy = func(phoneURL string, req PhoneInferenceRequest) (*PhoneInferenceResponse, error) {
+	h.inferenceProxy = func(_ string, req PhoneInferenceRequest) (*PhoneInferenceResponse, error) {
 		return nil, fmt.Errorf("connection refused")
 	}
 

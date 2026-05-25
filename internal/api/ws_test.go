@@ -23,11 +23,15 @@ func setupWSTest(t *testing.T) (*WSHandler, *httptest.Server, *websocket.Conn) {
 	server := httptest.NewServer(mux)
 
 	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/api/v1/sidecar/ws?device_id=TEST-001"
-	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	conn, resp, err := websocket.DefaultDialer.Dial(wsURL, nil)
 	if err != nil {
+		if resp != nil {
+			resp.Body.Close()
+		}
 		server.Close()
 		t.Fatalf("websocket dial failed: %v", err)
 	}
+	resp.Body.Close()
 
 	return ws, server, conn
 }
@@ -290,10 +294,14 @@ func TestWS_ReconnectResendsPending(t *testing.T) {
 	defer server2.Close()
 
 	wsURL2 := "ws" + strings.TrimPrefix(server2.URL, "http") + "/api/v1/sidecar/ws?device_id=TEST-001"
-	conn2, _, err := websocket.DefaultDialer.Dial(wsURL2, nil)
+	conn2, resp, err := websocket.DefaultDialer.Dial(wsURL2, nil)
 	if err != nil {
+		if resp != nil {
+			resp.Body.Close()
+		}
 		t.Fatalf("reconnect dial failed: %v", err)
 	}
+	resp.Body.Close()
 	defer conn2.Close()
 
 	// Should receive the pending command re-sent
@@ -331,10 +339,14 @@ func TestWS_ReconnectMultiplePending(t *testing.T) {
 	defer server2.Close()
 
 	wsURL2 := "ws" + strings.TrimPrefix(server2.URL, "http") + "/api/v1/sidecar/ws?device_id=TEST-001"
-	conn2, _, err := websocket.DefaultDialer.Dial(wsURL2, nil)
+	conn2, resp, err := websocket.DefaultDialer.Dial(wsURL2, nil)
 	if err != nil {
+		if resp != nil {
+			resp.Body.Close()
+		}
 		t.Fatalf("reconnect dial failed: %v", err)
 	}
+	resp.Body.Close()
 	defer conn2.Close()
 
 	// Read both pending commands

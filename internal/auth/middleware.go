@@ -26,6 +26,8 @@ import (
 	"time"
 )
 
+const es256Alg = "ES256"
+
 // Mode constants.
 const (
 	ModeOIDC = "oidc"

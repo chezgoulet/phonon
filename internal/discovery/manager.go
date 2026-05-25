@@ -26,7 +26,6 @@ type Manager struct {
 	discovered    map[string]DiscoveredDevice // deviceID → device
 	mdnsCancel    context.CancelFunc
 	mdnsRunning   bool
-	manualEnabled bool
 
 	stopCh chan struct{}
 }
@@ -88,7 +87,7 @@ func (m *Manager) Stop() error {
 	}
 
 	if m.mdns != nil {
-		m.mdns.Stop()
+		_ = m.mdns.Stop()
 	}
 	m.mdnsRunning = false
 	m.mdnsCancel()
@@ -208,7 +207,7 @@ func DefaultRegistrationCallback(reg *registry.Registry) RegistrationCallback {
 			// Already registered — update device model
 		}
 		if deviceModel != "" {
-			reg.SetDeviceModel(deviceID, deviceModel)
+			_ = reg.SetDeviceModel(deviceID, deviceModel)
 		}
 		return nil
 	}

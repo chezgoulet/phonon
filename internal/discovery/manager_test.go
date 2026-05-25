@@ -9,6 +9,8 @@ import (
 	"github.com/chezgoulet/phonon/internal/registry"
 )
 
+const testPhone01 = "phone-01"
+
 func TestNewManager_NoMDNS(t *testing.T) {
 	m := NewManager(nil, nil)
 	if m == nil {
@@ -93,7 +95,7 @@ func TestManager_DiscoveryCallback(t *testing.T) {
 	}
 
 	mock := newMockDiscoverer(DiscoveredDevice{
-		DeviceID:    "phone-01",
+		DeviceID:    testPhone01,
 		DeviceModel: "Pixel 9 Pro",
 		IP:          net.ParseIP("192.168.1.10"),
 		Port:        9876,
@@ -111,7 +113,7 @@ func TestManager_DiscoveryCallback(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 	manager.Stop()
 
-	if callbackDeviceID != "phone-01" {
+	if callbackDeviceID != testPhone01 {
 		t.Errorf("expected device_id phone-01, got %q", callbackDeviceID)
 	}
 	if callbackModel != "Pixel 9 Pro" {
@@ -179,7 +181,7 @@ func TestManager_DuplicateDiscovery(t *testing.T) {
 	}
 
 	device := DiscoveredDevice{
-		DeviceID:    "phone-01",
+		DeviceID:    testPhone01,
 		DeviceModel: "Pixel 9 Pro",
 		IP:          net.ParseIP("192.168.1.10"),
 		Port:        9876,
@@ -210,7 +212,7 @@ func TestManager_DuplicateDiscoveryDifferentIP(t *testing.T) {
 	manager := NewManager(nil, callback)
 
 	manager.handleDiscovery(&DiscoveredDevice{
-		DeviceID:    "phone-01",
+		DeviceID:    testPhone01,
 		DeviceModel: "Pixel 9 Pro",
 		IP:          net.ParseIP("192.168.1.10"),
 		Port:        9876,
@@ -218,7 +220,7 @@ func TestManager_DuplicateDiscoveryDifferentIP(t *testing.T) {
 
 	// Same device, different IP — should trigger callback again
 	manager.handleDiscovery(&DiscoveredDevice{
-		DeviceID:    "phone-01",
+		DeviceID:    testPhone01,
 		DeviceModel: "Pixel 9 Pro",
 		IP:          net.ParseIP("192.168.1.20"),
 		Port:        9876,
@@ -233,7 +235,7 @@ func TestManager_List(t *testing.T) {
 	manager := NewManager(nil, nil)
 
 	manager.handleDiscovery(&DiscoveredDevice{
-		DeviceID:    "phone-01",
+		DeviceID:    testPhone01,
 		DeviceModel: "Pixel 9 Pro",
 		IP:          net.ParseIP("192.168.1.10"),
 		Port:        9876,
@@ -292,7 +294,7 @@ func TestParseEntry_Nil(t *testing.T) {
 
 func TestParseTXTField(t *testing.T) {
 	kv := parseTXTField("device_id=phone-01")
-	if kv.key != "device_id" || kv.value != "phone-01" {
+	if kv.key != "device_id" || kv.value != testPhone01 {
 		t.Errorf("expected device_id=phone-01, got %s=%s", kv.key, kv.value)
 	}
 
@@ -313,10 +315,10 @@ func TestParseTXTField(t *testing.T) {
 }
 
 func TestSanitizeHostname(t *testing.T) {
-	if got := sanitizeHostname("phone-01.local."); got != "phone-01" {
+	if got := sanitizeHostname("phone-01.local."); got != testPhone01 {
 		t.Errorf("expected phone-01, got %q", got)
 	}
-	if got := sanitizeHostname("phone-01"); got != "phone-01" {
+	if got := sanitizeHostname(testPhone01); got != testPhone01 {
 		t.Errorf("expected phone-01, got %q", got)
 	}
 	if got := sanitizeHostname(""); got != "" {

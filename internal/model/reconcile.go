@@ -148,7 +148,7 @@ func (r *Reconciler) ReconcileGroup(g *config.GroupConfig) []ReconcilerStep {
 // cachedDownloadURL returns the download URL if the model is cached, or empty.
 func (r *Reconciler) cachedDownloadURL(modelName string) string {
 	if r.cache.Has(modelName) && r.baseURL != "" {
-		return ModelURL(r.baseURL, modelName)
+		return URL(r.baseURL, modelName)
 	}
 	return ""
 }
@@ -195,7 +195,7 @@ func (r *Reconciler) reconcilePhone(deviceID, desiredModel, checksum, modelURL s
 	pushStep := ReconcilerStep{
 		DeviceID:  deviceID,
 		ModelName: desiredModel,
-		URL:       ModelURL(r.baseURL, desiredModel),
+		URL:       URL(r.baseURL, desiredModel),
 		SHA256:    checksum,
 	}
 

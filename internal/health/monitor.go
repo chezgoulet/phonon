@@ -13,6 +13,9 @@ import (
 type ActionType string
 
 const (
+	reasonOverheating = "overheating"
+	reasonLowBattery = "low-battery"
+	reasonDegraded = "degraded"
 	ActionStandbyPromote ActionType = "standby_promote"
 	ActionNodeOffline    ActionType = "node_offline"
 	ActionNodeOverheat   ActionType = "node_overheat"
@@ -180,7 +183,7 @@ func (m *Monitor) evaluateNodes(ctx context.Context) {
 					"temp", node.Telemetry.ThermalTempC,
 					"battery", node.Telemetry.BatteryLevel,
 					"charging", node.Telemetry.IsCharging)
-				m.reg.SetExcludeReason(node.DeviceID, newReason)
+				_ = m.reg.SetExcludeReason(node.DeviceID, newReason)
 				m.fireActions(ctx, node, ActionNodeOverheat)
 			} else {
 				m.log.Info("node re-entered routing",
@@ -188,7 +191,7 @@ func (m *Monitor) evaluateNodes(ctx context.Context) {
 					"old_reason", oldReason,
 					"temp", node.Telemetry.ThermalTempC,
 					"battery", node.Telemetry.BatteryLevel)
-				m.reg.ClearExcludeReason(node.DeviceID)
+				_ = m.reg.ClearExcludeReason(node.DeviceID)
 				m.fireActions(ctx, node, ActionNodeReEntered)
 			}
 		}
@@ -201,21 +204,21 @@ func (m *Monitor) evaluateNode(node *registry.Node) string {
 
 	// --- Overheat check with hysteresis ---
 	if node.Telemetry.ThermalTempC >= m.cfg.OverheatThreshold {
-		return "overheating"
+		return reasonOverheating
 	}
 	// Stay excluded until below re-entry threshold
-	if reason == "overheating" && node.Telemetry.ThermalTempC >= m.cfg.OverheatReentryThreshold {
-		return "overheating"
+	if reason == reasonOverheating && node.Telemetry.ThermalTempC >= m.cfg.OverheatReentryThreshold {
+		return reasonOverheating
 	}
 
 	// --- Low battery check with hysteresis ---
 	if node.Telemetry.BatteryLevel < m.cfg.BatteryLowThreshold && !node.Telemetry.IsCharging {
-		return "low-battery"
+		return reasonLowBattery
 	}
 	// Stay excluded until charging OR above re-entry threshold
-	if reason == "low-battery" {
+	if reason == reasonLowBattery {
 		if !node.Telemetry.IsCharging && node.Telemetry.BatteryLevel < m.cfg.BatteryReentryThreshold {
-			return "low-battery"
+			return reasonLowBattery
 		}
 	}
 
@@ -224,14 +227,14 @@ func (m *Monitor) evaluateNode(node *registry.Node) string {
 		!node.Telemetry.IsCharging && node.ExcludeReason == "" {
 		// Mark as charger-dependent if battery capacity is degraded below threshold
 		// But only if it's not already excluded for another reason, and has reported capacity data
-		return "degraded"
+		return reasonDegraded
 	}
-	if reason == "degraded" && node.Telemetry.IsCharging {
+	if reason == reasonDegraded && node.Telemetry.IsCharging {
 		// Clear degraded while charging — UI shows it differently when plugged in
 		return ""
 	}
-	if reason == "degraded" {
-		return "degraded"
+	if reason == reasonDegraded {
+		return reasonDegraded
 	}
 
 	return ""
@@ -265,7 +268,7 @@ func (m *Monitor) updateMetrics() {
 		m.metrics.ThermalTempC.WithLabelValues(n.DeviceID).Set(n.Telemetry.ThermalTempC)
 		m.metrics.QueueDepth.WithLabelValues(n.DeviceID).Set(0) // TODO: wired from API
 
-		if n.State == registry.NodeStateOnline && n.ExcludeReason == "overheating" {
+		if n.State == registry.NodeStateOnline && n.ExcludeReason == reasonOverheating {
 			totalOverheating++
 		}
 
