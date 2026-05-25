@@ -1,0 +1,47 @@
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - misspell
+    - gocritic
+    - whitespace
+    - noctx
+    - unparam
+    - prealloc
+    - errorlint
+    - gosimple
+    - unused
+    - bodyclose
+    - dupl
+    - goconst
+    - revive
+  disable:
+    - depguard
+
+linters-settings:
+  gocritic:
+    enabled-tags:
+      - diagnostic
+      - performance
+      - style
+    disabled-checks:
+      - ifElseChain
+  errorlint:
+    errorf: true
+    asserts: true
+    comparison: true
+  misspell:
+    locale: US
+
+issues:
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - errcheck
+        - noctx
