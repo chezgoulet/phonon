@@ -45,6 +45,18 @@ func sendHeartbeat(t *testing.T, reg *registry.Registry, id string, battery floa
 	}
 }
 
+func sendHeartbeatBatteryCapacity(t *testing.T, reg *registry.Registry, id string, capacityPct float64, charging bool, temp float64) {
+	t.Helper()
+	if err := reg.UpdateHeartbeat(id, registry.HealthTelemetry{
+		BatteryLevel:       75, // healthy charge level
+		BatteryCapacityPct: capacityPct,
+		ThermalTempC:       temp,
+		IsCharging:         charging,
+	}); err != nil {
+		t.Fatalf("heartbeat %s: %v", id, err)
+	}
+}
+
 func assertExcludeReason(t *testing.T, reg *registry.Registry, id, expected string) {
 	t.Helper()
 	node, ok := reg.Get(id)
@@ -243,11 +255,25 @@ func TestDegradedCapacity_MarksDegraded(t *testing.T) {
 
 	registerNode(t, reg, "device-1", "test-phone")
 	pairNode(t, reg, "device-1")
-	sendHeartbeat(t, reg, "device-1", 25, false, 35) // 25%, not charging
+	sendHeartbeatBatteryCapacity(t, reg, "device-1", 60, false, 35) // 60% max capacity, not charging
 
 	m.Check()
 
 	assertExcludeReason(t, reg, "device-1", "degraded")
+}
+
+func TestDegradedCapacity_IgnoresBatteryLevel(t *testing.T) {
+	m, reg := setupTest(t)
+	m.cfg.BatteryCapacityThreshold = 80
+
+	registerNode(t, reg, "device-1", "test-phone")
+	pairNode(t, reg, "device-1")
+	sendHeartbeat(t, reg, "device-1", 25, false, 35) // 25% charge, 0 capacity (no data) — should NOT be degraded
+
+	m.Check()
+
+	// CapacityPct is 0 (no data from sidecar), so degraded check should be skipped
+	assertExcludeReason(t, reg, "device-1", "")
 }
 
 func TestDegradedCapacity_ClearedOnCharge(t *testing.T) {
@@ -257,13 +283,13 @@ func TestDegradedCapacity_ClearedOnCharge(t *testing.T) {
 	registerNode(t, reg, "device-1", "test-phone")
 	pairNode(t, reg, "device-1")
 
-	// Degraded
-	sendHeartbeat(t, reg, "device-1", 25, false, 35)
+	// Degraded due to low max capacity
+	sendHeartbeatBatteryCapacity(t, reg, "device-1", 60, false, 35)
 	m.Check()
 	assertExcludeReason(t, reg, "device-1", "degraded")
 
-	// Now charging
-	sendHeartbeat(t, reg, "device-1", 25, true, 35)
+	// Now charging — same degraded capacity but clears because charging
+	sendHeartbeatBatteryCapacity(t, reg, "device-1", 60, true, 35)
 	m.Check()
 	assertExcludeReason(t, reg, "device-1", "")
 }
