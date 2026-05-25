@@ -1,8 +1,8 @@
 # Phonon — Specification
 
 > **Status:** DRAFT
-> **Derived from:** PHONON.md (project plan) + CONTRIBUTING.md (engineering standards)
-> **Last updated:** 2026-05-25 (revised based on spec review)
+> **Derived from:** PHONON.md (project plan) + CONTRIBUTING.md (engineering standards) + PR #2 (merged decisions)
+> **Last updated:** 2026-05-25
 
 ---
 
@@ -500,8 +500,8 @@ Reported by sidecar every 15 seconds (heartbeat):
 
 ### 9.2 Automatic Actions
 
-- **Overheating:** Phone removed from routing pool. Re-entered after cooling below threshold.
-- **Low battery + not charging:** Phone removed from pool. Re-entered when charging *or* battery rises above a configurable re-entry threshold (default: 30%). This hysteresis prevents flapping when a phone at the boundary starts/stops charging.
+- **Overheating:** Phone removed from routing pool. Re-entered after cooling below threshold. Thresholds are configurable in `phonon.yaml` under `cluster.health.overheat.*`.
+- **Low battery + not charging:** Phone removed from pool. Re-entered when charging *or* battery rises above a configurable re-entry threshold (default: 30%). The re-entry threshold is independent of the removal threshold, creating a hysteresis band. Configurable in `phonon.yaml` under `cluster.health.battery.*`.
 - **Offline in shard group:** Standby promoted automatically if configured. Request fails with error if no standby.
 - **Degraded battery:** Phone marked "charger-dependent" in UI below configurable capacity threshold.
 
@@ -661,7 +661,7 @@ In secure mode, the coordinator validates bearer tokens against a configured OID
 9. **OIDC authentication** — Optional. Insecure mode also available.
 10. **Rolling model updates** — One phone at a time.
 11. **Event log** — SQLite, queryable through web UI.
-12. **Pre-flight group readiness check** — Before activating a group (any mode), coordinator verifies all nodes are online and model is cached on each node. Prevents activation of groups with missing or slow nodes. Developed and tested against pool groups in Phase 1 where the same validation logic applies; shard mode additionally validates inter-node latency in Phase 2.
+12. **Pre-flight readiness check** — Before activating any group, coordinator verifies all nodes are online and the model is cached on each node. Prevents activation with missing or slow nodes. Developed and tested against pool groups in Phase 1; shard mode additionally validates inter-node latency in Phase 2.
 13. **Documentation** — Setup guide, hardware recommendations, model selection guide, battery safety guidance.
 
 **Estimated effort:** 2–4 months for a motivated solo developer.
@@ -747,8 +747,8 @@ Three parallel jobs (Go, Kotlin, React). All must pass green before merge. Each 
 1. **OlliteRT license verification.** The document lists OlliteRT as Apache 2.0 but this should be verified from the actual repo before Phase 1 begins. If it's GPL or has non-commercial restrictions, it constrains how the APK is distributed.
 2. **LiteRT NPU path on GrapheneOS.** The Play Services audit flags LiteRT GPU delegate as a potential Play Services dependency. The NPU path (which Phonon relies on for pool mode) must be tested on a clean GrapheneOS install without sandboxed Play Services before Phase 1 ships.
 3. **prima.cpp phone-only performance.** Shard mode estimates use a 0.5–0.7× multiplier on prima.cpp's published desktop-GPU benchmarks. The first real phone cluster test will either validate or invalidate these numbers, which affects the shard mode hardware requirements table.
-4. **WebSocket reconnection semantics.** The spec now defines the command queue + acknowledgment pattern (see §5.3). Each command has a UUID. The sidecar acknowledges `accepted` / `completed` / `failed`. On reconnect, unacknowledged commands are re-sent. The remaining implementation detail: the sidecar must deduplicate by `command_id` to handle the case where the ack was in-flight when the connection dropped.
-5. **Model download from phones behind NAT.** Resolved by design: the `model_push` command instructs the sidecar to *pull* from the coordinator over HTTP. The phone initiates the connection. NAT is not a concern because the phone connects outward. The spec should clarify this to prevent anyone from implementing a coordinator-initiated TCP push.
+4. ~~**WebSocket reconnection semantics.**~~ **Resolved by PR #2 and merged into §5.3.** The spec now defines the command queue + acknowledgment pattern. Each command has a UUID (`command_id`). The sidecar acknowledges `accepted` / `completed` / `failed`. On reconnect, unacknowledged commands are re-sent with the same IDs. The sidecar deduplicates by `command_id` to handle the case where the ack was in-flight when the connection dropped. Implementation must ensure the dedup map has bounded memory (size-based or time-based eviction of old command_ids).
+5. ~~**Model download from phones behind NAT.**~~ **Resolved.** The `model_push` command instructs the sidecar to *pull* from the coordinator over HTTP. The phone initiates the connection. NAT is not a concern. The spec explicitly clarifies this in §8.2 (model cache and distribution).
 6. **Event log schema.** Not fully specified yet. Recommended starting schema:
 
 ```sql
