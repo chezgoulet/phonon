@@ -95,12 +95,13 @@ class PhononService : Service() {
         mdnsAnnouncer = MDNSAnnouncer(this, app.deviceId, app.deviceModel)
         mdnsAnnouncer.start()
 
-        // Inference server — local HTTP proxy to OlliteRT
+        // Model manager — extracts native binaries, manages inference engines
+        modelManager = ModelManager(this)
+        modelManager.extractBinaries()
+
+        // Inference server — local HTTP proxy to OlliteRT / prima.cpp
         inferenceServer = InferenceServer(this)
         inferenceServer.start()
-
-        // Model manager — downloads + starts/stops OlliteRT
-        modelManager = ModelManager(this)
 
         // Coordinator client — REST + WebSocket
         coordinatorClient = CoordinatorClient(
@@ -112,11 +113,11 @@ class PhononService : Service() {
                 connectionStatus = status
                 updateNotification()
             },
-            onModelLoad = { modelName, modelUrl ->
+            onModelLoad = { modelName, modelUrl, engine ->
                 scope.launch {
                     loadedModel = modelName
                     updateNotification()
-                    modelManager.loadModel(modelName, modelUrl)
+                    modelManager.loadModel(modelName, modelUrl, engine)
                 }
             },
             onModelUnload = {

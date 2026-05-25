@@ -3,6 +3,40 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
+// ── prima.cpp NDK build ───────────────────────────────────────────────
+// Cross-compiles llama.cpp fork for arm64-v8a.
+// Runs only when ANDROID_NDK is set or when jniLibs output is missing.
+
+val primaBuildScript = rootProject.projectDir.resolve("scripts/build-prima.sh")
+val primaOutput = project.layout.projectDirectory
+    .dir("src/main/jniLibs/arm64-v8a/libllama.so")
+
+tasks.register<Exec>("buildPrima") {
+    description = "Cross-compile prima.cpp (llama.cpp fork) for arm64-v8a via NDK"
+
+    // Only configure if the script exists (skip on CI without NDK)
+    onlyIf { primaBuildScript.exists() }
+
+    // Run the build script from the repo root
+    workingDir = rootProject.projectDir.parentFile
+    commandLine("bash", primaBuildScript.absolutePath)
+
+    // Environment — ANDROID_NDK must be set
+    environment("ANDROID_NDK", providers.environmentVariable("ANDROID_NDK")
+        .orElse(""))
+}
+
+// Hook into the build pipeline — if the user has ANDROID_NDK set,
+// build prima.cpp before merging resources
+if (System.getenv("ANDROID_NDK") != null) {
+    tasks.matching { it.name.startsWith("merge") && it.name.endsWith("Resources") }
+        .configureEach {
+            dependsOn("buildPrima")
+        }
+}
+
+// ── Android application ──────────────────────────────────────────────
+
 android {
     namespace = "com.chezgoulet.phonon"
     compileSdk = 35
@@ -15,6 +49,11 @@ android {
         versionName = "0.1.0"
 
         // No Play Services — GrapheneOS compatible
+
+        // Bundle assets from extern dependencies
+        assets {
+            // prima.cpp inference binary is placed here by build-prima.sh
+        }
     }
 
     buildTypes {
