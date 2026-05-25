@@ -189,8 +189,7 @@ func TestStatusHandler(t *testing.T) {
 
 // newTestOIDCServer creates an httptest.Server that serves OIDC discovery + JWKS.
 // Returns the server and the URL (pre-resolved for closure use).
-func newTestOIDCServer(discoveryPath, jwksPath string, keys []JWK) (*httptest.Server, string) {
-	var srv *httptest.Server
+func newTestOIDCServer(discoveryPath, jwksPath string, keys []JWK) (srv *httptest.Server, url string) {
 	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "openid-configuration") || r.URL.Path == discoveryPath {
 			json.NewEncoder(w).Encode(openIDConfig{
@@ -260,8 +259,7 @@ func TestDiscoverFailure(t *testing.T) {
 
 func TestJWKSRefresh(t *testing.T) {
 	var jwksCallCount int
-	var srv *httptest.Server
-	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "jwks") {
 			jwksCallCount++
 			json.NewEncoder(w).Encode(JWKSSet{Keys: []JWK{{
@@ -534,7 +532,9 @@ func TestValidateTokenES256RawSig(t *testing.T) {
 	// R||S raw format
 	rPadded := padToSize(r.Bytes())
 	sPadded := padToSize(s.Bytes())
-	rawSig := append(rPadded, sPadded...)
+	rawSig := make([]byte, len(rPadded)+len(sPadded))
+	copy(rawSig, rPadded)
+	copy(rawSig[len(rPadded):], sPadded)
 	sigB64 := base64.RawURLEncoding.EncodeToString(rawSig)
 	token := signedContent + "." + sigB64
 

@@ -188,13 +188,13 @@ func TestManager_DuplicateDiscovery(t *testing.T) {
 	manager := NewManager(nil, callback)
 
 	// First discovery should trigger callback
-	manager.handleDiscovery(device)
+	manager.handleDiscovery(&device)
 	if callCount != 1 {
 		t.Errorf("expected 1 callback, got %d", callCount)
 	}
 
 	// Same device, same IP/port, within 60s — should be deduped
-	manager.handleDiscovery(device)
+	manager.handleDiscovery(&device)
 	if callCount != 1 {
 		t.Errorf("expected 1 callback (dedup), got %d", callCount)
 	}
@@ -209,7 +209,7 @@ func TestManager_DuplicateDiscoveryDifferentIP(t *testing.T) {
 
 	manager := NewManager(nil, callback)
 
-	manager.handleDiscovery(DiscoveredDevice{
+	manager.handleDiscovery(&DiscoveredDevice{
 		DeviceID:    "phone-01",
 		DeviceModel: "Pixel 9 Pro",
 		IP:          net.ParseIP("192.168.1.10"),
@@ -217,7 +217,7 @@ func TestManager_DuplicateDiscoveryDifferentIP(t *testing.T) {
 	})
 
 	// Same device, different IP — should trigger callback again
-	manager.handleDiscovery(DiscoveredDevice{
+	manager.handleDiscovery(&DiscoveredDevice{
 		DeviceID:    "phone-01",
 		DeviceModel: "Pixel 9 Pro",
 		IP:          net.ParseIP("192.168.1.20"),
@@ -232,13 +232,13 @@ func TestManager_DuplicateDiscoveryDifferentIP(t *testing.T) {
 func TestManager_List(t *testing.T) {
 	manager := NewManager(nil, nil)
 
-	manager.handleDiscovery(DiscoveredDevice{
+	manager.handleDiscovery(&DiscoveredDevice{
 		DeviceID:    "phone-01",
 		DeviceModel: "Pixel 9 Pro",
 		IP:          net.ParseIP("192.168.1.10"),
 		Port:        9876,
 	})
-	manager.handleDiscovery(DiscoveredDevice{
+	manager.handleDiscovery(&DiscoveredDevice{
 		DeviceID:    "phone-02",
 		DeviceModel: "Pixel 8",
 		IP:          net.ParseIP("192.168.1.11"),

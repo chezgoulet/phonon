@@ -16,7 +16,7 @@ func TestClusterHealthEmpty(t *testing.T) {
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/cluster/health", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/cluster/health", http.NoBody)
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 
@@ -55,7 +55,7 @@ func TestClusterHealthWithOnlineNodes(t *testing.T) {
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/cluster/health", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/cluster/health", http.NoBody)
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 
@@ -98,7 +98,7 @@ func TestClusterHealthDegraded(t *testing.T) {
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/cluster/health", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/cluster/health", http.NoBody)
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 

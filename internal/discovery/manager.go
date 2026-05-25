@@ -107,7 +107,7 @@ func (m *Manager) processDiscovered(ctx context.Context, ch <-chan DiscoveredDev
 				// Channel closed — discoverer has stopped
 				return
 			}
-			m.handleDiscovery(device)
+			m.handleDiscovery(&device)
 		case <-ctx.Done():
 			return
 		}
@@ -115,13 +115,13 @@ func (m *Manager) processDiscovered(ctx context.Context, ch <-chan DiscoveredDev
 }
 
 // handleDiscovery processes a single discovered device.
-func (m *Manager) handleDiscovery(device DiscoveredDevice) {
+func (m *Manager) handleDiscovery(device *DiscoveredDevice) {
 	now := time.Now()
 	device.LastSeen = now
 
 	m.mu.Lock()
 	prev, seen := m.discovered[device.DeviceID]
-	m.discovered[device.DeviceID] = device
+	m.discovered[device.DeviceID] = *device
 	m.mu.Unlock()
 
 	// Skip if seen before with same IP and port within the last 60 seconds
@@ -149,7 +149,7 @@ func (m *Manager) handleDiscovery(device DiscoveredDevice) {
 // This is used as a fallback when mDNS is unavailable.
 // If the device later sends a heartbeat with a device ID, the registry entry
 // will be updated via the normal path.
-func (m *Manager) RegisterManual(ipStr string, name string) (string, error) {
+func (m *Manager) RegisterManual(ipStr, name string) (string, error) {
 	ip := net.ParseIP(ipStr)
 	if ip == nil {
 		return "", fmt.Errorf("invalid IP address: %s", ipStr)

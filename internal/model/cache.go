@@ -58,7 +58,7 @@ func NewCache(cacheDir string, client *http.Client) *Cache {
 // Init ensures cache directories exist and scans existing files.
 func (c *Cache) Init() error {
 	for _, d := range []string{cacheModelsDir, cacheTmpDir} {
-		if err := os.MkdirAll(filepath.Join(c.rootDir, d), 0755); err != nil {
+		if err := os.MkdirAll(filepath.Join(c.rootDir, d), 0o755); err != nil {
 			return fmt.Errorf("create %s: %w", d, err)
 		}
 	}
@@ -151,13 +151,13 @@ func (c *Cache) Get(ctx context.Context, modelName, upstreamURL, expectedSHA str
 
 // download fetches a file from url, writing to dest, with retry and optional
 // SHA-256 verification. Uses exponential backoff (3 attempts).
-func (c *Cache) download(ctx context.Context, url, dest string, expectedSHA string) error {
+func (c *Cache) download(ctx context.Context, url, dest, expectedSHA string) error {
 	if url == "" {
 		return fmt.Errorf("no download URL for model")
 	}
 
 	// Ensure tmp dir exists
-	if err := os.MkdirAll(filepath.Dir(dest), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 		return err
 	}
 
@@ -193,7 +193,7 @@ func (c *Cache) download(ctx context.Context, url, dest string, expectedSHA stri
 }
 
 // downloadOnce performs a single download attempt.
-func (c *Cache) downloadOnce(ctx context.Context, url, dest string, expectedSHA string) error {
+func (c *Cache) downloadOnce(ctx context.Context, url, dest, expectedSHA string) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return err
@@ -209,7 +209,7 @@ func (c *Cache) downloadOnce(ctx context.Context, url, dest string, expectedSHA 
 		return fmt.Errorf("HTTP %d from %s", resp.StatusCode, url)
 	}
 
-	f, err := os.OpenFile(dest, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+	f, err := os.OpenFile(dest, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
 	if err != nil {
 		return err
 	}

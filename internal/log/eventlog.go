@@ -33,7 +33,7 @@ type EventLog struct {
 	writer  *bufio.Writer
 }
 
-// Opts controls EventLog behaviour.
+// Opts controls EventLog behavior.
 type Opts struct {
 	Path          string       // database file path (default "phonon.db")
 	RetentionDays int          // auto-purge events older than this (default 90)
@@ -62,13 +62,13 @@ func New(opts Opts) (*EventLog, error) {
 	// Ensure directory exists
 	dir := filepath.Dir(path)
 	if dir != "." {
-		if err := os.MkdirAll(dir, 0755); err != nil {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return nil, fmt.Errorf("create event log dir: %w", err)
 		}
 	}
 
 	// Open file for append (create if not exists)
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_RDWR, 0644)
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_RDWR, 0o644)
 	if err != nil {
 		return nil, fmt.Errorf("open event log: %w", err)
 	}
@@ -352,7 +352,7 @@ func (el *EventLog) rewriteFile(events []Event) error {
 	}
 
 	// Reopen the file
-	f, err = os.OpenFile(el.path, os.O_APPEND|os.O_CREATE|os.O_RDWR, 0644)
+	f, err = os.OpenFile(el.path, os.O_APPEND|os.O_CREATE|os.O_RDWR, 0o644)
 	if err != nil {
 		return fmt.Errorf("reopen event log: %w", err)
 	}
@@ -362,7 +362,7 @@ func (el *EventLog) rewriteFile(events []Event) error {
 }
 
 // StartRetentionLoop starts a background goroutine that purges old events
-// periodically. The loop stops when ctx is cancelled.
+// periodically. The loop stops when ctx is canceled.
 func (el *EventLog) StartRetentionLoop(ctx interface{ Done() <-chan struct{} }, retentionDays int, interval time.Duration) {
 	if retentionDays <= 0 {
 		retentionDays = DefaultRetentionDays
@@ -406,4 +406,4 @@ func (el *EventLog) Close() error {
 }
 
 // compile-time check
-var _ = (sort.Interface)(nil)
+var _ sort.Interface
