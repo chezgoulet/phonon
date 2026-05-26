@@ -61,6 +61,14 @@ func main() {
 	openaiHandler := api.NewOpenAIHandler(reg, api.WithMaxQueuePerNode(cfg.Cluster.Queue.MaxPerNode))
 	clusterHandler := api.NewClusterHandler(reg)
 
+	// The inference proxy defaults to a placeholder mock. Warn loudly so
+	// operators don't confuse simulated responses with real inference.
+	logger.Warn("inference proxy using placeholder mock — phone inference not yet implemented",
+		"component", "openai")
+	logger.Warn("set PHONON_INFERENCE_URL or override via SetInferenceProxy for real phone inference",
+		"hint", "see internal/api/openai.go")
+
+
 	// Create auth middleware
 	authMiddleware := auth.New(auth.Config{
 		Mode:     cfg.Cluster.Auth.Mode,
