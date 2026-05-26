@@ -255,7 +255,7 @@ func (h *OpenAIHandler) handleChatCompletion(w http.ResponseWriter, r *http.Requ
 	}
 
 	// Build inference URL from phone's address
-	phoneURL := fmt.Sprintf("http://%s:%d/infer", phone, defaultInferencePort)
+	phoneURL := fmt.Sprintf("http://%s:%d/v1/chat/completions", phone, defaultInferencePort)
 
 	// Send inference request to phone
 	inferResp, err := h.inferenceProxy(phoneURL, PhoneInferenceRequest{
@@ -418,7 +418,7 @@ func (h *OpenAIHandler) handleStreamingChatCompletion(w http.ResponseWriter, r *
 		return
 	}
 
-	phoneURL := fmt.Sprintf("http://%s:%d/infer", phone, defaultInferencePort)
+	phoneURL := fmt.Sprintf("http://%s:%d/v1/chat/completions", phone, defaultInferencePort)
 	completionID := generateCompletionID()
 
 	// SSE headers
