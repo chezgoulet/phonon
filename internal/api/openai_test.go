@@ -141,21 +141,60 @@ func TestChatCompletionMissingMessages(t *testing.T) {
 	}
 }
 
-func TestChatCompletionStreamNotSupported(t *testing.T) {
+func TestChatCompletionStream(t *testing.T) {
 	reg := registry.New()
+
+	reg.Register("phone-01", "test-phone", "10.0.0.5")
+	reg.Pair("phone-01")
+	reg.UpdateHeartbeat("phone-01", registry.HealthTelemetry{})
+	reg.SetModelStatus("phone-01", registry.ModelStatus{Name: "test-model", Loaded: true})
+
 	h := NewOpenAIHandler(reg)
+	h.AddModel("test-model", "test")
+
+	// Override stream proxy to emit test chunks
+	h.streamInferenceProxy = func(_ string, _ PhoneInferenceRequest, onChunk func(string)) (string, error) {
+		onChunk("Hello")
+		onChunk(" world!")
+		return "Hello world!", nil
+	}
 
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
-	body := `{"model":"test","messages":[{"role":"user","content":"hi"}],"stream":true}`
+	body := `{"model":"test-model","messages":[{"role":"user","content":"hi"}],"stream":true}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 
-	if w.Code != http.StatusNotImplemented {
-		t.Errorf("expected 501, got %d", w.Code)
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", w.Code)
+	}
+
+	bodyStr := w.Body.String()
+	t.Logf("SSE body:\n%s", bodyStr)
+
+	if !strings.Contains(bodyStr, "data:") {
+		t.Errorf("expected SSE data events")
+	}
+	if !strings.Contains(bodyStr, "chat.completion.chunk") {
+		t.Errorf("expected chat.completion.chunk object")
+	}
+	if !strings.Contains(bodyStr, "[DONE]") {
+		t.Errorf("expected [DONE] sentinel")
+	}
+	if !strings.Contains(bodyStr, `"Hello"`) {
+		t.Errorf("expected chunk with Hello")
+	}
+	if !strings.Contains(bodyStr, `" world!"`) {
+		t.Errorf("expected chunk with ' world!'")
+	}
+	if v := w.Header().Get("X-Phonon-Device"); v != "phone-01" {
+		t.Errorf("expected X-Phonon-Device: phone-01, got %s", v)
+	}
+	if v := w.Header().Get("Content-Type"); v != "text/event-stream" {
+		t.Errorf("expected text/event-stream, got %s", v)
 	}
 }
 

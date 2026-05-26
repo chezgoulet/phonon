@@ -96,6 +96,11 @@ type OpenAIHandler struct {
 
 	// inferenceProxy sends requests to phones. Override for testing.
 	inferenceProxy func(phoneURL string, req PhoneInferenceRequest) (*PhoneInferenceResponse, error)
+
+	// streamInferenceProxy sends streaming requests to phones. The callback is
+	// called once per delta chunk (content string). Returns the full text for
+	// token counting. Override for testing.
+	streamInferenceProxy func(phoneURL string, req PhoneInferenceRequest, onChunk func(string)) (string, error)
 }
 
 // NewOpenAIHandler creates an OpenAI-compatible handler.
@@ -105,6 +110,7 @@ func NewOpenAIHandler(reg *registry.Registry) *OpenAIHandler {
 		log: slog.With("component", "openai"),
 	}
 	h.inferenceProxy = h.defaultInferenceProxy
+	h.streamInferenceProxy = h.defaultStreamInferenceProxy
 	return h
 }
 
@@ -193,14 +199,9 @@ func (h *OpenAIHandler) handleChatCompletion(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	// Streaming not yet supported
+	// Streaming path
 	if req.Stream {
-		writeJSON(w, http.StatusNotImplemented, map[string]any{
-			"error": map[string]string{
-				"message": "streaming is not yet supported",
-				"type":    "not_implemented",
-			},
-		})
+		h.handleStreamingChatCompletion(w, r, req)
 		return
 	}
 
@@ -313,6 +314,119 @@ func (h *OpenAIHandler) defaultInferenceProxy(phoneURL string, _ PhoneInferenceR
 		Tokens:   10,
 		Duration: 0,
 	}, nil
+}
+
+func (h *OpenAIHandler) handleStreamingChatCompletion(w http.ResponseWriter, r *http.Request, req ChatCompletionRequest) {
+	// Set defaults
+	if req.MaxTokens <= 0 {
+		req.MaxTokens = 2048
+	}
+	if req.Temperature == 0 {
+		req.Temperature = 0.7
+	}
+
+	// Select a phone
+	phone, phoneNode, err := h.selectPhone(req.Model)
+	if err != nil {
+		h.log.Warn("no available phone for streaming", "model", req.Model, "error", err)
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+			"error": map[string]string{
+				"message": fmt.Sprintf("no available phone with model %q loaded", req.Model),
+				"type":    "server_error",
+			},
+		})
+		return
+	}
+
+	phoneURL := fmt.Sprintf("http://%s:%d/infer", phone, defaultInferencePort)
+	completionID := generateCompletionID()
+
+	// SSE headers
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Phonon-Device", phoneNode.DeviceID)
+	w.Header().Set("X-Phonon-Group", phoneNode.Group)
+	w.Header().Set("X-Phonon-Queue-Depth", fmt.Sprintf("%d", phoneNode.Telemetry.QueueDepth))
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		h.log.Error("streaming not supported by ResponseWriter")
+		writeJSON(w, http.StatusInternalServerError, map[string]any{
+			"error": map[string]string{
+				"message": "streaming not supported",
+				"type":    "server_error",
+			},
+		})
+		return
+	}
+
+	// Role stanza
+	roleChunk := fmt.Sprintf(`data: {"id":"%s","object":"chat.completion.chunk","created":%d,"model":"%s","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}`,
+		completionID, time.Now().Unix(), req.Model)
+	fmt.Fprintf(w, "%s\n\n", roleChunk)
+	flusher.Flush()
+
+	// Stream content from phone
+	fullText, err := h.streamInferenceProxy(phoneURL, PhoneInferenceRequest{
+		Model:       req.Model,
+		Messages:    req.Messages,
+		Temperature: req.Temperature,
+		MaxTokens:   req.MaxTokens,
+	}, func(content string) {
+		chunk := fmt.Sprintf(`data: {"id":"%s","object":"chat.completion.chunk","created":%d,"model":"%s","choices":[{"index":0,"delta":{"content":%s},"finish_reason":null}]}`,
+			completionID, time.Now().Unix(), req.Model, jsonString(content))
+		fmt.Fprintf(w, "%s\n\n", chunk)
+		flusher.Flush()
+	})
+
+	if err != nil {
+		h.log.Error("phone streaming inference failed", "phone", phoneURL, "error", err)
+		// Write error as an SSE event so the client can handle it
+		errChunk := fmt.Sprintf(`data: {"error":"inference failed: %s"}`,
+			escapeJSON(err.Error()))
+		fmt.Fprintf(w, "%s\n\n", errChunk)
+		fmt.Fprintf(w, "data: [DONE]\n\n")
+		flusher.Flush()
+		return
+	}
+
+	// Final stanza with usage and finish_reason
+	tokens := estimateTokens(fullText)
+	finalChunk := fmt.Sprintf(`data: {"id":"%s","object":"chat.completion.chunk","created":%d,"model":"%s","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":0,"completion_tokens":%d,"total_tokens":%d}}`,
+		completionID, time.Now().Unix(), req.Model, tokens, tokens)
+	fmt.Fprintf(w, "%s\n\n", finalChunk)
+
+	// End-of-stream marker
+	fmt.Fprintf(w, "data: [DONE]\n\n")
+	flusher.Flush()
+}
+
+// defaultStreamInferenceProxy is a placeholder that simulates a streaming response.
+func (h *OpenAIHandler) defaultStreamInferenceProxy(phoneURL string, req PhoneInferenceRequest, onChunk func(string)) (string, error) {
+	// Simulate streaming tokens for development
+	placeholder := fmt.Sprintf("Simulated streaming response from %s. Model: %s.", phoneURL, req.Model)
+	words := strings.Fields(placeholder)
+	for _, word := range words {
+		onChunk(word + " ")
+	}
+	return placeholder, nil
+}
+
+// jsonString returns a valid JSON string literal (quoted and escaped).
+func jsonString(s string) string {
+	b, _ := json.Marshal(s)
+	return string(b)
+}
+
+// escapeJSON escapes a string for embedding in a JSON value (no surrounding quotes).
+func escapeJSON(s string) string {
+	b, _ := json.Marshal(s)
+	// Strip surrounding quotes
+	if len(b) >= 2 && b[0] == '"' && b[len(b)-1] == '"' {
+		return string(b[1 : len(b)-1])
+	}
+	return string(b)
 }
 
 // --- Helpers ---
