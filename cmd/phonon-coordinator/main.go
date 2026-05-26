@@ -73,6 +73,13 @@ func main() {
 	// Set up routes
 	mux := http.NewServeMux()
 
+	// CORS middleware wraps all routes
+	{
+		base := mux
+		mux = http.NewServeMux()
+		mux.Handle("/", corsMiddleware(base))
+	}
+
 	// Public routes (no auth required)
 	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -127,6 +134,23 @@ func main() {
 }
 
 // serveUI serves the Vite-built React app from /ui/ and redirects / → /ui/.
+// corsMiddleware adds CORS headers to all responses and handles OPTIONS preflight.
+func corsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Phonon-Device")
+		w.Header().Set("Access-Control-Max-Age", "86400")
+
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
 func serveUI(mux *http.ServeMux, log *slog.Logger) {
 	// The embed pattern static/* embeds files from cmd/phonon-coordinator/static/.
 	// Copy ui/dist/ → cmd/phonon-coordinator/static/ before building:
