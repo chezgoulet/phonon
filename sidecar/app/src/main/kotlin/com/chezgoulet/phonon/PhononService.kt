@@ -55,6 +55,23 @@ class PhononService : Service() {
     var loadedModel: String? = null
         private set
 
+    // Telemetry exposed to UI via syncFrom()
+    @Volatile
+    var batteryLevel: Double = -1.0
+        private set
+
+    @Volatile
+    var batteryTempC: Double = -1.0
+        private set
+
+    @Volatile
+    var isCharging: Boolean = false
+        private set
+
+    @Volatile
+    var isProcessing: Boolean = false
+        private set
+
     override fun onCreate() {
         super.onCreate()
         notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
@@ -191,10 +208,16 @@ class PhononService : Service() {
         coordinatorClient.connect()
 
         // Health reporter — reports telemetry every 60s
-        healthReporter = HealthReporter(this, coordinatorClient) {
-            // Get current model status from model manager
-            modelManager.isRunning()
-        }
+        healthReporter = HealthReporter(
+            context = this,
+            coordinatorClient = coordinatorClient,
+            isModelRunning = { modelManager.isRunning() },
+            onTelemetry = { level, temp, charging ->
+                batteryLevel = level
+                batteryTempC = temp
+                isCharging = charging
+            }
+        )
         healthReporter.start()
     }
 

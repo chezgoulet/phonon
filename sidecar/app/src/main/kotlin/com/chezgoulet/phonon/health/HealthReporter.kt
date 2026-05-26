@@ -26,7 +26,8 @@ import kotlinx.coroutines.*
 class HealthReporter(
     private val context: Context,
     private val coordinatorClient: CoordinatorClient,
-    private val isModelRunning: () -> Boolean
+    private val isModelRunning: () -> Boolean,
+    private val onTelemetry: ((batteryLevel: Double, batteryTemp: Double, isCharging: Boolean) -> Unit)? = null
 ) {
     private val tag = "HealthReporter"
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -43,6 +44,7 @@ class HealthReporter(
                 try {
                     val heartbeat = collectTelemetry()
                     coordinatorClient.sendHeartbeat(heartbeat)
+                    onTelemetry?.invoke(heartbeat.batteryLevel, heartbeat.thermalTempC, heartbeat.batteryCharging)
                     Log.d(tag, "Heartbeat sent: battery=${heartbeat.batteryLevel}%")
                 } catch (e: Exception) {
                     Log.w(tag, "Heartbeat error: ${e.message}")
@@ -63,6 +65,7 @@ class HealthReporter(
         try {
             val heartbeat = collectTelemetry()
             coordinatorClient.sendHeartbeat(heartbeat)
+            onTelemetry?.invoke(heartbeat.batteryLevel, heartbeat.thermalTempC, heartbeat.batteryCharging)
             Log.i(tag, "Forced heartbeat sent: battery=${heartbeat.batteryLevel}%")
         } catch (e: Exception) {
             Log.w(tag, "Forced heartbeat error: ${e.message}")

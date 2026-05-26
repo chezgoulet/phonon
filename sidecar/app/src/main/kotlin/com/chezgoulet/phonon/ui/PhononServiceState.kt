@@ -76,7 +76,13 @@ class PhononServiceState {
         connectionStatus = service.connectionStatus
         loadedModel = service.loadedModel
         deviceId = (service.application as com.chezgoulet.phonon.PhononApplication).deviceId
-        engine = "ollitert" // hardcoded for now; service doesn't expose engine yet
+        engine = service.loadedModel?.let { "ollitert" } ?: ""
+        batteryLevel = service.batteryLevel.toInt()
+        batteryTemp = service.batteryTempC.toFloat()
+        isCharging = service.isCharging
+        isProcessing = service.isProcessing
+        coordinatorHost = service.coordinatorHost
+        coordinatorPort = service.coordinatorPort
     }
 
     /** Add a log entry (newest first, capped at 100). */
