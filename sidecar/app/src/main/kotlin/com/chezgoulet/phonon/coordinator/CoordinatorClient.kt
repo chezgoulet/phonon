@@ -173,7 +173,7 @@ class CoordinatorClient(
                 // Resend any pending commands
                 while (true) {
                     val pending = pendingCommands.poll() ?: break
-                    sendCommandAck(pending, ACK_ACCEPTED)
+                    sendCommandAck(pending, AckStatus.Accepted)
                 }
             }
 
@@ -204,56 +204,56 @@ class CoordinatorClient(
         try {
             val json = JSONObject(text)
             val msg = WSMessage.fromJson(json)
+            if (msg == null) {
+                Log.w(tag, "Unknown command type, ignoring")
+                return
+            }
 
             when (msg.type) {
-                CMD_MODEL_PUSH -> {
+                CommandType.ModelPush -> {
                     // Acknowledge and download
-                    sendCommandAck(msg, ACK_ACCEPTED)
+                    sendCommandAck(msg, AckStatus.Accepted)
                     val modelName = msg.payload?.optString("model_name", "")
                     val modelUrl = msg.payload?.optString("download_url", "")
                     if (modelName != null && modelUrl != null) {
                         scope.launch {
                             downloadModel(modelName, modelUrl)
-                            sendCommandAck(msg, ACK_COMPLETED)
+                            sendCommandAck(msg, AckStatus.Completed)
                         }
                     } else {
-                        sendCommandAck(msg, ACK_FAILED, "missing model_name or download_url")
+                        sendCommandAck(msg, AckStatus.Failed, "missing model_name or download_url")
                     }
                 }
-                CMD_MODEL_LOAD -> {
-                    sendCommandAck(msg, ACK_ACCEPTED)
+                CommandType.ModelLoad -> {
+                    sendCommandAck(msg, AckStatus.Accepted)
                     val modelName = msg.payload?.optString("model_name", "")
                     val modelUrl = msg.payload?.optString("download_url", "")
                     val engine = msg.payload?.optString("engine", "prima")
                     if (modelName != null) {
                         onModelLoad(modelName, modelUrl ?: "", engine ?: "prima")
                     } else {
-                        sendCommandAck(msg, ACK_FAILED, "missing model_name")
+                        sendCommandAck(msg, AckStatus.Failed, "missing model_name")
                     }
                 }
-                CMD_MODEL_UNLOAD -> {
-                    sendCommandAck(msg, ACK_ACCEPTED)
+                CommandType.ModelUnload -> {
+                    sendCommandAck(msg, AckStatus.Accepted)
                     onModelUnload()
-                    sendCommandAck(msg, ACK_COMPLETED)
+                    sendCommandAck(msg, AckStatus.Completed)
                 }
-                CMD_MODE_CHANGE -> {
-                    sendCommandAck(msg, ACK_ACCEPTED)
+                CommandType.ModeChange -> {
+                    sendCommandAck(msg, AckStatus.Accepted)
                     val mode = msg.payload?.optString("mode", "pool")
                     Log.i(tag, "Mode change to: $mode")
-                    sendCommandAck(msg, ACK_COMPLETED)
+                    sendCommandAck(msg, AckStatus.Completed)
                 }
-                CMD_STANDBY_PROMOTE -> {
-                    sendCommandAck(msg, ACK_ACCEPTED)
+                CommandType.StandbyPromote -> {
+                    sendCommandAck(msg, AckStatus.Accepted)
                     Log.i(tag, "Promoted from standby")
-                    sendCommandAck(msg, ACK_COMPLETED)
+                    sendCommandAck(msg, AckStatus.Completed)
                 }
-                CMD_SHUTDOWN -> {
-                    sendCommandAck(msg, ACK_ACCEPTED)
+                CommandType.Shutdown -> {
+                    sendCommandAck(msg, AckStatus.Accepted)
                     onShutdown()
-                }
-                else -> {
-                    Log.w(tag, "Unknown command type: ${msg.type}")
-                    sendCommandAck(msg, ACK_FAILED, "unknown command: ${msg.type}")
                 }
             }
         } catch (e: Exception) {
@@ -261,7 +261,7 @@ class CoordinatorClient(
         }
     }
 
-    private fun sendCommandAck(msg: WSMessage, status: String, error: String? = null) {
+    private fun sendCommandAck(msg: WSMessage, status: AckStatus, error: String? = null) {
         val ack = WSAck(
             ackType = "ack",
             commandId = msg.commandId ?: return,

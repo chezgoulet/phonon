@@ -113,45 +113,76 @@ data class PairResponse(
 
 // ─── WebSocket command types (mirrors coordinator's ws.go) ───
 
+sealed class CommandType(val value: String) {
+    object ModelPush : CommandType("model_push")
+    object ModelLoad : CommandType("model_load")
+    object ModelUnload : CommandType("model_unload")
+    object ModeChange : CommandType("mode_change")
+    object StandbyPromote : CommandType("standby_promote")
+    object Shutdown : CommandType("shutdown")
+
+    override fun toString(): String = value
+
+    companion object {
+        private val map = entries().associateBy { it.value }
+
+        fun fromString(s: String): CommandType? = map[s]
+
+        fun entries(): List<CommandType> = listOf(
+            ModelPush, ModelLoad, ModelUnload,
+            ModeChange, StandbyPromote, Shutdown
+        )
+    }
+}
+
+sealed class AckStatus(val value: String) {
+    object Accepted : AckStatus("accepted")
+    object Completed : AckStatus("completed")
+    object Failed : AckStatus("failed")
+
+    override fun toString(): String = value
+
+    companion object {
+        private val map = entries().associateBy { it.value }
+
+        fun fromString(s: String): AckStatus? = map[s]
+
+        fun entries(): List<AckStatus> = listOf(Accepted, Completed, Failed)
+    }
+}
+
 data class WSMessage(
-    val type: String,
+    val type: CommandType,
     val commandId: String?,
     val payload: JSONObject?
 ) {
     companion object {
-        fun fromJson(json: JSONObject) = WSMessage(
-            type = json.getString("type"),
-            commandId = json.optString("command_id", null),
-            payload = json.optJSONObject("payload")
-        )
+        fun fromJson(json: JSONObject): WSMessage? {
+            val rawType = json.getString("type")
+            return CommandType.fromString(rawType)?.let { type ->
+                WSMessage(
+                    type = type,
+                    commandId = json.optString("command_id", null),
+                    payload = json.optJSONObject("payload")
+                )
+            }
+        }
     }
 }
 
 data class WSAck(
     val ackType: String,
     val commandId: String,
-    val status: String,
+    val status: AckStatus,
     val error: String?
 ) {
     fun toJson(): JSONObject = JSONObject().apply {
         put("ack_type", ackType)
         put("command_id", commandId)
-        put("status", status)
+        put("status", status.value)
         if (error != null) put("error", error)
     }
 }
-
-// Command types
-const val CMD_MODEL_PUSH = "model_push"
-const val CMD_MODEL_LOAD = "model_load"
-const val CMD_MODEL_UNLOAD = "model_unload"
-const val CMD_MODE_CHANGE = "mode_change"
-const val CMD_STANDBY_PROMOTE = "standby_promote"
-const val CMD_SHUTDOWN = "shutdown"
-
-const val ACK_ACCEPTED = "accepted"
-const val ACK_COMPLETED = "completed"
-const val ACK_FAILED = "failed"
 
 // ─── Inference request/response (local HTTP server) ───
 
