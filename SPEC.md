@@ -215,6 +215,98 @@ The sidecar communicates with the inference engine (OlliteRT, later prima.cpp) o
 
 ## 5. Coordinator-Sidecar Protocol
 
+### 5.0 Wire Format Schema
+
+All WebSocket messages use JSON-encoded payloads. The following tables are the
+single source of truth for every wire type, its JSON structure, and its mapping
+to Go and Kotlin types.
+
+Changing any field, JSON tag, or type mapping in Go or Kotlin without updating
+this table and the corresponding cross-language test (`TestWS_WireFormat` in
+`internal/api/ws_test.go`) constitutes a protocol break.
+
+#### Outbound Commands (Coordinator → Sidecar)
+
+All commands share this wrapper structure. The `type` field identifies the
+command, and `payload` contains command-specific fields.
+
+| JSON field | Go field | Go type | Kotlin field | Kotlin type | Required |
+|---|---|---|---|---|---|
+| `type` | `Type` | `string` | `type` | `CommandType` (sealed) | yes |
+| `command_id` | `CommandID` | `string` | `commandId` | `String?` | yes |
+| `payload` | `Payload` | `json.RawMessage` | `payload` | `JSONObject?` | yes |
+
+**Go struct:** `WSCommand` in `internal/api/ws.go`
+**Kotlin class:** `WSMessage` in `models.kt`
+**Wire example:**
+```json
+{
+  "type": "model_push",
+  "command_id": "a1b2c3d4-e5f6-4789-abcd-ef0123456789",
+  "payload": { "model": "gemma-4-E2B-it", ... }
+}
+```
+
+**Command types:**
+
+| `type` value | Go constant | Kotlin constant | Payload fields |
+|---|---|---|---|
+| `model_push` | `CmdModelPush` | `CommandType.ModelPush` | `model` (string), `url` (string), `checksum` (string), `size_bytes` (int) |
+| `model_load` | `CmdModelLoad` | `CommandType.ModelLoad` | `model` (string) |
+| `model_unload` | `CmdModelUnload` | `CommandType.ModelUnload` | `{}` (empty) |
+| `mode_change` | `CmdModeChange` | `CommandType.ModeChange` | `mode` (string), `runtime` (string) |
+| `standby_promote` | `CmdStandbyPromote` | `CommandType.StandbyPromote` | `model` (string), `url` (string), `checksum` (string) |
+| `shutdown` | `CmdShutdown` | `CommandType.Shutdown` | `reason` (string) |
+
+#### Inbound Acknowledgments (Sidecar → Coordinator)
+
+| JSON field | Go field | Go type | Kotlin field | Kotlin type | Required |
+|---|---|---|---|---|---|
+| `ack_type` | `AckType` | `string` | `ackType` | `String` | yes |
+| `command_id` | `CommandID` | `string` | `commandId` | `String` | yes |
+| `status` | `Status` | `string` | `status` | `AckStatus` (sealed) | yes |
+| `error` | `Error` | `string` (`omitempty`) | `error` | `String?` | no |
+
+**Go struct:** `WSAck` in `internal/api/ws.go`
+**Kotlin class:** `WSAck` in `models.kt`
+**Wire example:**
+```json
+{
+  "ack_type": "ack",
+  "command_id": "a1b2c3d4-e5f6-4789-abcd-ef0123456789",
+  "status": "accepted"
+}
+```
+
+**Status values:**
+
+| `status` value | Go constant | Kotlin constant | Meaning |
+|---|---|---|---|
+| `accepted` | `AckAccepted` | `AckStatus.Accepted` | Received and will begin processing |
+| `completed` | `AckCompleted` | `AckStatus.Completed` | Executed successfully |
+| `failed` | `AckFailed` | `AckStatus.Failed` | Command failed — `error` field has details |
+
+The `error` field is only present when `status` is `failed`. In Go, it uses
+`omitempty` — an empty string is excluded from serialization.
+
+#### REST Heartbeat Payload
+
+| JSON path | Go field | Go type | Kotlin field | Kotlin type |
+|---|---|---|---|---|
+| `device_id` | — | `string` | `deviceId` | `String` |
+| `battery.level` | — | `float64` | `batteryLevel` | `Double` |
+| `battery.charging` | — | `bool` | `batteryCharging` | `Boolean` |
+| — | — | — | `batteryCapacityPct` | `Double` (nested in Kotlin `toJson`) |
+| `thermal.soc_temp_c` | — | `float64` | `thermalTempC` | `Double` |
+| `storage.total_gb` | — | `float64` | `storageTotalGb` | `Double` |
+| `storage.free_gb` | — | `float64` | `storageFreeGb` | `Double` |
+| `model.loaded` | — | `*string` | `modelLoaded` | `String?` |
+| `queue_depth` | — | `int` | `queueDepth` | `Int` |
+| `network` | — | `string` | `network` | `String` |
+| `timestamp` | — | `string` | `timestamp` | `String` |
+
+---
+
 ### 5.1 Two-Channel Architecture
 
 | Channel | Direction | Transport | Purpose |

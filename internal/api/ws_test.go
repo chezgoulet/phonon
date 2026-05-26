@@ -367,3 +367,126 @@ func TestWS_ReconnectMultiplePending(t *testing.T) {
 		t.Error("first re-sent command doesn't match either original")
 	}
 }
+
+// TestWS_WireFormat validates that WSCommand and WSAck serialize to the
+// exact JSON wire format documented in SPEC.md §5.3. This is the canonical
+// cross-language serialization test — Kotlin sidecar parsers must accept
+// this exact output.
+//
+// See SPEC.md §5.3 for the full schema.
+func TestWS_WireFormat(t *testing.T) {
+	t.Run("WSCommand model_push", func(t *testing.T) {
+		cmd := WSCommand{
+			Type:      "model_push",
+			CommandID: "a1b2c3d4-e5f6-4789-abcd-ef0123456789",
+			Payload:   json.RawMessage(`{"model":"gemma-4-E2B-it","url":"http://coord:8080/download","checksum":"sha256:abc","size_bytes":2000000000}`),
+		}
+		got, err := json.Marshal(cmd)
+		if err != nil {
+			t.Fatalf("marshal error: %v", err)
+		}
+		want := `{"type":"model_push","command_id":"a1b2c3d4-e5f6-4789-abcd-ef0123456789","payload":{"model":"gemma-4-E2B-it","url":"http://coord:8080/download","checksum":"sha256:abc","size_bytes":2000000000}}`
+		if string(got) != want {
+			t.Errorf("wire format mismatch:\ngot:  %s\nwant: %s", string(got), want)
+		}
+	})
+
+	t.Run("WSCommand model_load", func(t *testing.T) {
+		cmd := WSCommand{
+			Type:      "model_load",
+			CommandID: "b2c3d4e5-f6a7-5890-bcde-f0123456789a",
+			Payload:   json.RawMessage(`{"model":"gemma-4-E2B-it"}`),
+		}
+		got, err := json.Marshal(cmd)
+		if err != nil {
+			t.Fatalf("marshal error: %v", err)
+		}
+		want := `{"type":"model_load","command_id":"b2c3d4e5-f6a7-5890-bcde-f0123456789a","payload":{"model":"gemma-4-E2B-it"}}`
+		if string(got) != want {
+			t.Errorf("wire format mismatch:\ngot:  %s\nwant: %s", string(got), want)
+		}
+	})
+
+	t.Run("WSCommand model_unload", func(t *testing.T) {
+		cmd := WSCommand{
+			Type:      "model_unload",
+			CommandID: "c3d4e5f6-a7b8-6901-cdef-0123456789ab",
+			Payload:   json.RawMessage(`{}`),
+		}
+		got, err := json.Marshal(cmd)
+		if err != nil {
+			t.Fatalf("marshal error: %v", err)
+		}
+		want := `{"type":"model_unload","command_id":"c3d4e5f6-a7b8-6901-cdef-0123456789ab","payload":{}}`
+		if string(got) != want {
+			t.Errorf("wire format mismatch:\ngot:  %s\nwant: %s", string(got), want)
+		}
+	})
+
+	t.Run("WSCommand shutdown", func(t *testing.T) {
+		cmd := WSCommand{
+			Type:      "shutdown",
+			CommandID: "d4e5f6a7-b8c9-7012-def0-123456789abc",
+			Payload:   json.RawMessage(`{"reason":"operator_removed"}`),
+		}
+		got, err := json.Marshal(cmd)
+		if err != nil {
+			t.Fatalf("marshal error: %v", err)
+		}
+		want := `{"type":"shutdown","command_id":"d4e5f6a7-b8c9-7012-def0-123456789abc","payload":{"reason":"operator_removed"}}`
+		if string(got) != want {
+			t.Errorf("wire format mismatch:\ngot:  %s\nwant: %s", string(got), want)
+		}
+	})
+
+	t.Run("WSAck accepted", func(t *testing.T) {
+		ack := WSAck{
+			AckType:   "ack",
+			CommandID: "e5f6a7b8-c9d0-8123-ef01-23456789abcd",
+			Status:    "accepted",
+			Error:     "",
+		}
+		got, err := json.Marshal(ack)
+		if err != nil {
+			t.Fatalf("marshal error: %v", err)
+		}
+		want := `{"ack_type":"ack","command_id":"e5f6a7b8-c9d0-8123-ef01-23456789abcd","status":"accepted"}`
+		if string(got) != want {
+			t.Errorf("wire format mismatch:\ngot:  %s\nwant: %s", string(got), want)
+		}
+	})
+
+	t.Run("WSAck failed", func(t *testing.T) {
+		ack := WSAck{
+			AckType:   "ack",
+			CommandID: "f6a7b8c9-d0e1-9234-f012-3456789abcde",
+			Status:    "failed",
+			Error:     "model not found",
+		}
+		got, err := json.Marshal(ack)
+		if err != nil {
+			t.Fatalf("marshal error: %v", err)
+		}
+		want := `{"ack_type":"ack","command_id":"f6a7b8c9-d0e1-9234-f012-3456789abcde","status":"failed","error":"model not found"}`
+		if string(got) != want {
+			t.Errorf("wire format mismatch:\ngot:  %s\nwant: %s", string(got), want)
+		}
+	})
+
+	t.Run("WSAck completed omitempty error", func(t *testing.T) {
+		// When error is empty string with omitempty, it should be excluded from output
+		ack := WSAck{
+			AckType:   "ack",
+			CommandID: "a7b8c9d0-e1f2-0345-abc1-23456789def0",
+			Status:    "completed",
+		}
+		got, err := json.Marshal(ack)
+		if err != nil {
+			t.Fatalf("marshal error: %v", err)
+		}
+		want := `{"ack_type":"ack","command_id":"a7b8c9d0-e1f2-0345-abc1-23456789def0","status":"completed"}`
+		if string(got) != want {
+			t.Errorf("wire format mismatch:\ngot:  %s\nwant: %s", string(got), want)
+		}
+	})
+}

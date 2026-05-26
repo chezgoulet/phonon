@@ -30,6 +30,11 @@ const (
 )
 
 // WSCommand represents an outbound command sent to a sidecar.
+//
+// Wire format documented in SPEC.md §5.0 — the JSON field names below
+// (json tags) are the canonical wire keys. If you rename a Go field,
+// update the json tag and the schema doc; TestWS_WireFormat will catch
+// any drift.
 type WSCommand struct {
 	Type      string          `json:"type"`
 	CommandID string          `json:"command_id"`
@@ -37,6 +42,10 @@ type WSCommand struct {
 }
 
 // WSAck is an acknowledgement received from the sidecar.
+//
+// Wire format documented in SPEC.md §5.0. The Kotlin sidecar reads
+// these exact JSON keys. See sidecar/.../models.kt for the companion
+// Kotlin type. TestWS_WireFormat validates the serialized output.
 type WSAck struct {
 	AckType   string `json:"ack_type"`
 	CommandID string `json:"command_id"`
