@@ -82,10 +82,14 @@ func main() {
 
 	mux.HandleFunc("/api/v1/auth/status", authMiddleware.StatusHandler())
 
+	// Sidecar routes — no auth required (phones don't have OIDC tokens)
+	sidecarMux := http.NewServeMux()
+	wsHandler.RegisterRoutes(sidecarMux)
+	sidecarHandler.RegisterRoutes(sidecarMux)
+	mux.Handle("/api/v1/sidecar/", sidecarMux)
+
 	// Protected routes — wrapped with auth middleware
 	protectedMux := http.NewServeMux()
-	wsHandler.RegisterRoutes(protectedMux)
-	sidecarHandler.RegisterRoutes(protectedMux)
 	openaiHandler.RegisterRoutes(protectedMux)
 	clusterHandler.RegisterRoutes(protectedMux)
 	mux.Handle("/api/v1/", authMiddleware.Handler(protectedMux))

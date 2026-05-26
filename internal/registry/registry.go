@@ -246,6 +246,14 @@ func (r *Registry) SetDeviceIP(deviceID, ipAddress string) error {
 	})
 }
 
+// SetModelStatus updates the model status on a node (what model is loaded).
+// Returns ErrNotFound if the device doesn't exist.
+func (r *Registry) SetModelStatus(deviceID string, status ModelStatus) error {
+	return r.updateField(deviceID, func(n *Node) {
+		n.ModelStatus = status
+	})
+}
+
 // updateField is a helper that locks, looks up the node, and applies a mutation.
 func (r *Registry) updateField(deviceID string, fn func(*Node)) error {
 	r.mu.Lock()

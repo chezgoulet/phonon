@@ -14,11 +14,12 @@ const (
 
 // HealthTelemetry captures battery, thermal, and queue state from heartbeats.
 type HealthTelemetry struct {
-	BatteryLevel      float64   `json:"battery_level"`
-	ThermalTempC      float64   `json:"thermal_temp_c"`
-	IsCharging        bool      `json:"is_charging"`
-	QueueDepth        int       `json:"queue_depth"`
-	HeartbeatRecorded time.Time `json:"-"`
+	BatteryLevel       float64   `json:"battery_level"`
+	BatteryCapacityPct float64   `json:"battery_capacity_pct,omitempty"`
+	ThermalTempC       float64   `json:"thermal_temp_c"`
+	IsCharging         bool      `json:"is_charging"`
+	QueueDepth         int       `json:"queue_depth"`
+	HeartbeatRecorded  time.Time `json:"-"`
 }
 
 // ModelStatus describes what model is loaded and its state.

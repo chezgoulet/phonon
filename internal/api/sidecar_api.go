@@ -136,16 +136,26 @@ func (h *SidecarHandler) handleHeartbeat(w http.ResponseWriter, r *http.Request)
 	}
 
 	telemetry := registry.HealthTelemetry{
-		BatteryLevel: req.Battery.Level,
-		ThermalTempC: req.Thermal.SoCTempC,
-		IsCharging:   req.Battery.Charging,
-		QueueDepth:   req.QueueDepth,
+		BatteryLevel:       req.Battery.Level,
+		BatteryCapacityPct: req.Battery.CapacityPct,
+		ThermalTempC:       req.Thermal.SoCTempC,
+		IsCharging:         req.Battery.Charging,
+		QueueDepth:         req.QueueDepth,
 	}
 
 	err := h.reg.UpdateHeartbeat(req.DeviceID, telemetry)
 	if err != nil {
 		writeError(w, http.StatusNotFound, err.Error())
 		return
+	}
+
+	// Persist model status from heartbeat if present
+	if req.Model != nil && req.Model.Loaded != "" {
+		_ = h.reg.SetModelStatus(req.DeviceID, registry.ModelStatus{
+			Name:     req.Model.Loaded,
+			Loaded:   true,
+			LoadedAt: time.Now(),
+		})
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
@@ -171,7 +181,7 @@ func (h *SidecarHandler) handleModelStatus(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	node, ok := h.reg.Get(req.DeviceID)
+	_, ok := h.reg.Get(req.DeviceID)
 	if !ok {
 		writeError(w, http.StatusNotFound, "device not found")
 		return
@@ -184,8 +194,10 @@ func (h *SidecarHandler) handleModelStatus(w http.ResponseWriter, r *http.Reques
 		ms.Name = *req.Loaded
 		ms.LoadedAt = time.Now()
 	}
-	// Update model status via the registry directly
-	_ = node // model status update via Node struct
+	if err := h.reg.SetModelStatus(req.DeviceID, ms); err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
 
 	h.log.Info("model status update", "device_id", req.DeviceID, "loaded", req.Loaded)
 

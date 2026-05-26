@@ -226,7 +226,7 @@ func (h *OpenAIHandler) handleChatCompletion(w http.ResponseWriter, r *http.Requ
 	}
 
 	// Build inference URL from phone's address
-	phoneURL := fmt.Sprintf("http://%s/infer", phone)
+	phoneURL := fmt.Sprintf("http://%s:%d/infer", phone, defaultInferencePort)
 
 	// Send inference request to phone
 	inferResp, err := h.inferenceProxy(phoneURL, PhoneInferenceRequest{
@@ -306,6 +306,9 @@ func (h *OpenAIHandler) selectPhone(modelName string) (string, *registry.Node, e
 	selected := candidates[rand.Intn(len(candidates))]
 	return selected.IPAddress, selected, nil
 }
+
+// Default port for the sidecar's InferenceServer. Must match sidecar/app/.../InferenceServer.kt.
+const defaultInferencePort = 9876
 
 // defaultInferenceProxy sends an inference request to a phone's local endpoint.
 func (h *OpenAIHandler) defaultInferenceProxy(phoneURL string, _ PhoneInferenceRequest) (*PhoneInferenceResponse, error) {
