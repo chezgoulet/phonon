@@ -40,6 +40,11 @@ func (c *Config) setDefaults() {
 	if h.OfflineTimeout == "" {
 		h.OfflineTimeout = "60s"
 	}
+
+	// Queue defaults
+	if c.Cluster.Queue.MaxPerNode == 0 {
+		c.Cluster.Queue.MaxPerNode = 3
+	}
 }
 
 // OfflineTimeoutDuration parses the offline timeout string into a Duration.

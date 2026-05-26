@@ -101,17 +101,34 @@ type OpenAIHandler struct {
 	// called once per delta chunk (content string). Returns the full text for
 	// token counting. Override for testing.
 	streamInferenceProxy func(phoneURL string, req PhoneInferenceRequest, onChunk func(string)) (string, error)
+
+	// maxQueuePerNode is the max queue depth before returning 429. 0 = unlimited.
+	maxQueuePerNode int
 }
 
 // NewOpenAIHandler creates an OpenAI-compatible handler.
-func NewOpenAIHandler(reg *registry.Registry) *OpenAIHandler {
+func NewOpenAIHandler(reg *registry.Registry, opts ...OpenAIOption) *OpenAIHandler {
 	h := &OpenAIHandler{
-		reg: reg,
-		log: slog.With("component", "openai"),
+		reg:             reg,
+		log:             slog.With("component", "openai"),
+		maxQueuePerNode: 3, // default
+	}
+	for _, opt := range opts {
+		opt(h)
 	}
 	h.inferenceProxy = h.defaultInferenceProxy
 	h.streamInferenceProxy = h.defaultStreamInferenceProxy
 	return h
+}
+
+// OpenAIOption configures an OpenAIHandler.
+type OpenAIOption func(*OpenAIHandler)
+
+// WithMaxQueuePerNode sets the maximum queue depth per node before 429.
+func WithMaxQueuePerNode(n int) OpenAIOption {
+	return func(h *OpenAIHandler) {
+		h.maxQueuePerNode = n
+	}
 }
 
 // RegisterRoutes adds OpenAI-compatible endpoints to the given mux.
@@ -217,12 +234,22 @@ func (h *OpenAIHandler) handleChatCompletion(w http.ResponseWriter, r *http.Requ
 	phone, phoneNode, err := h.selectPhone(req.Model)
 	if err != nil {
 		h.log.Warn("no available phone for inference", "model", req.Model, "error", err)
-		writeJSON(w, http.StatusServiceUnavailable, map[string]any{
-			"error": map[string]string{
-				"message": fmt.Sprintf("no available phone with model %q loaded", req.Model),
-				"type":    "server_error",
-			},
-		})
+		if strings.Contains(err.Error(), "at capacity") {
+			w.Header().Set("Retry-After", "5")
+			writeJSON(w, http.StatusTooManyRequests, map[string]any{
+				"error": map[string]string{
+					"message": "all inference nodes are busy, try again later",
+					"type":    "rate_limit_error",
+				},
+			})
+		} else {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+				"error": map[string]string{
+					"message": fmt.Sprintf("no available phone with model %q loaded", req.Model),
+					"type":    "server_error",
+				},
+			})
+		}
 		return
 	}
 
@@ -294,8 +321,21 @@ func (h *OpenAIHandler) selectPhone(modelName string) (string, registry.Node, er
 			continue
 		}
 		if node.ModelStatus.Loaded && node.ModelStatus.Name == modelName {
-			// First match wins (placeholder for proper load balancing)
+			// Check backpressure: skip phones at capacity
+			if h.maxQueuePerNode > 0 && node.Telemetry.QueueDepth >= h.maxQueuePerNode {
+				continue
+			}
 			return node.IPAddress, node, nil
+		}
+	}
+
+	// Check if any phone has the model but all are at capacity
+	for _, node := range nodes {
+		if node.State != registry.NodeStateOnline {
+			continue
+		}
+		if node.ModelStatus.Loaded && node.ModelStatus.Name == modelName {
+			return "", registry.Node{}, fmt.Errorf("all nodes at capacity (queue depth >= %d)", h.maxQueuePerNode)
 		}
 	}
 
@@ -329,12 +369,22 @@ func (h *OpenAIHandler) handleStreamingChatCompletion(w http.ResponseWriter, r *
 	phone, phoneNode, err := h.selectPhone(req.Model)
 	if err != nil {
 		h.log.Warn("no available phone for streaming", "model", req.Model, "error", err)
-		writeJSON(w, http.StatusServiceUnavailable, map[string]any{
-			"error": map[string]string{
-				"message": fmt.Sprintf("no available phone with model %q loaded", req.Model),
-				"type":    "server_error",
-			},
-		})
+		if strings.Contains(err.Error(), "at capacity") {
+			w.Header().Set("Retry-After", "5")
+			writeJSON(w, http.StatusTooManyRequests, map[string]any{
+				"error": map[string]string{
+					"message": "all inference nodes are busy, try again later",
+					"type":    "rate_limit_error",
+				},
+			})
+		} else {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+				"error": map[string]string{
+					"message": fmt.Sprintf("no available phone with model %q loaded", req.Model),
+					"type":    "server_error",
+				},
+			})
+		}
 		return
 	}
 
