@@ -128,13 +128,13 @@ data class WSMessage(
 }
 
 data class WSAck(
-    val type: String,
+    val ackType: String,
     val commandId: String,
     val status: String,
     val error: String?
 ) {
     fun toJson(): JSONObject = JSONObject().apply {
-        put("type", type)
+        put("ack_type", ackType)
         put("command_id", commandId)
         put("status", status)
         if (error != null) put("error", error)

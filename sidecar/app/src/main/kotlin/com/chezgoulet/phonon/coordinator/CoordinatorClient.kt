@@ -263,7 +263,7 @@ class CoordinatorClient(
 
     private fun sendCommandAck(msg: WSMessage, status: String, error: String? = null) {
         val ack = WSAck(
-            type = msg.type,
+            ackType = "ack",
             commandId = msg.commandId ?: return,
             status = status,
             error = error
