@@ -132,6 +132,22 @@ func WithMaxQueuePerNode(n int) OpenAIOption {
 	}
 }
 
+// WithInferenceProxy overrides the default inference proxy with a custom
+// implementation. Useful for testing or wiring real phone inference.
+func WithInferenceProxy(fn func(phoneURL string, req PhoneInferenceRequest) (*PhoneInferenceResponse, error)) OpenAIOption {
+	return func(h *OpenAIHandler) {
+		h.inferenceProxy = fn
+	}
+}
+
+// WithStreamInferenceProxy overrides the default streaming inference proxy
+// with a custom implementation.
+func WithStreamInferenceProxy(fn func(phoneURL string, req PhoneInferenceRequest, onChunk func(string)) (string, error)) OpenAIOption {
+	return func(h *OpenAIHandler) {
+		h.streamInferenceProxy = fn
+	}
+}
+
 // RegisterRoutes adds OpenAI-compatible endpoints to the given mux.
 func (h *OpenAIHandler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/chat/completions", h.handleChatCompletion)
