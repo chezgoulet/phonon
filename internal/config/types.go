@@ -37,6 +37,11 @@ type EventLogConfig struct {
 	RetentionDays int    `yaml:"retention_days"` // auto-purge events older than this (default 90)
 }
 
+// QueueConfig controls backpressure for inference requests.
+type QueueConfig struct {
+	MaxPerNode int `yaml:"max_per_node"` // max requests queued per phone before returning 429 (default 3)
+}
+
 // ClusterConfig defines the top-level cluster settings.
 type ClusterConfig struct {
 	Name       string           `yaml:"name"`
@@ -45,6 +50,7 @@ type ClusterConfig struct {
 	Discovery  DiscoveryConfig  `yaml:"discovery"`
 	Health     HealthConfig     `yaml:"health"`
 	EventLog   EventLogConfig   `yaml:"event_log"`
+	Queue      QueueConfig      `yaml:"queue"`
 }
 
 // AuthConfig defines authentication for the coordinator API.

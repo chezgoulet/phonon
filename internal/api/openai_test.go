@@ -230,7 +230,7 @@ func TestChatCompletionWithOnlinePhone(t *testing.T) {
 	reg.UpdateHeartbeat("phone-01", registry.HealthTelemetry{
 		BatteryLevel: 85,
 		ThermalTempC: 30,
-		QueueDepth:   3,
+		QueueDepth:   2, // below default maxQueuePerNode (3)
 	})
 
 	// Set model loaded
@@ -268,8 +268,8 @@ func TestChatCompletionWithOnlinePhone(t *testing.T) {
 	if v := w.Header().Get("X-Phonon-Device"); v != "phone-01" {
 		t.Errorf("expected X-Phonon-Device: phone-01, got %s", v)
 	}
-	if v := w.Header().Get("X-Phonon-Queue-Depth"); v != "3" {
-		t.Errorf("expected X-Phonon-Queue-Depth: 3, got %s", v)
+	if v := w.Header().Get("X-Phonon-Queue-Depth"); v != "2" {
+		t.Errorf("expected X-Phonon-Queue-Depth: 2, got %s", v)
 	}
 	if v := w.Header().Get("X-Phonon-Group"); v != "" {
 		t.Errorf("expected empty X-Phonon-Group, got %s", v)
@@ -328,6 +328,51 @@ func TestChatCompletionPhoneFails(t *testing.T) {
 
 	if w.Code != http.StatusBadGateway {
 		t.Errorf("expected 502, got %d", w.Code)
+	}
+}
+
+func TestChatCompletionBackpressure(t *testing.T) {
+	reg := registry.New()
+
+	// Phone at capacity (QueueDepth = 3, default max = 3)
+	reg.Register("phone-01", "test-phone", "10.0.0.5")
+	reg.Pair("phone-01")
+	reg.UpdateHeartbeat("phone-01", registry.HealthTelemetry{
+		QueueDepth: 3,
+	})
+	reg.SetModelStatus("phone-01", registry.ModelStatus{Name: "test-model", Loaded: true})
+
+	// Pass maxQueuePerNode = 2 to force backpressure
+	h := NewOpenAIHandler(reg, WithMaxQueuePerNode(2))
+	h.AddModel("test-model", "test")
+
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	body := `{"model":"test-model","messages":[{"role":"user","content":"hello"}]}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusTooManyRequests {
+		t.Errorf("expected 429, got %d", w.Code)
+	}
+
+	if v := w.Header().Get("Retry-After"); v != "5" {
+		t.Errorf("expected Retry-After: 5, got %s", v)
+	}
+
+	var bodyMap map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&bodyMap); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	errObj, ok := bodyMap["error"].(map[string]any)
+	if !ok {
+		t.Fatal("expected error object")
+	}
+	if errObj["type"] != "rate_limit_error" {
+		t.Errorf("expected rate_limit_error, got %s", errObj["type"])
 	}
 }
 

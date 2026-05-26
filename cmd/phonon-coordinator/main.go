@@ -54,7 +54,7 @@ func main() {
 	wsHandler := api.NewWSHandler(reg)
 
 	sidecarHandler := api.NewSidecarHandler(reg)
-	openaiHandler := api.NewOpenAIHandler(reg)
+	openaiHandler := api.NewOpenAIHandler(reg, api.WithMaxQueuePerNode(cfg.Cluster.Queue.MaxPerNode))
 	clusterHandler := api.NewClusterHandler(reg)
 
 	// Create auth middleware
