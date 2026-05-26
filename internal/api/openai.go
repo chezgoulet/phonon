@@ -462,10 +462,15 @@ func (h *OpenAIHandler) handleStreamingChatCompletion(w http.ResponseWriter, r *
 
 	if err != nil {
 		h.log.Error("phone streaming inference failed", "phone", phoneURL, "error", err)
-		// Write error as an SSE event so the client can handle it
-		errChunk := fmt.Sprintf(`data: {"error":"inference failed: %s"}`,
-			escapeJSON(err.Error()))
-		fmt.Fprintf(w, "%s\n\n", errChunk)
+		// Write error as an SSE event so the client can handle it.
+		// Use json.Marshal for proper escaping at the JSON level.
+		errPayload, _ := json.Marshal(map[string]any{
+			"error": map[string]string{
+				"message": fmt.Sprintf("inference failed: %s", err.Error()),
+				"type":    "inference_error",
+			},
+		})
+		fmt.Fprintf(w, "data: %s\n\n", errPayload)
 		fmt.Fprintf(w, "data: [DONE]\n\n")
 		flusher.Flush()
 		return
@@ -496,16 +501,6 @@ func (h *OpenAIHandler) defaultStreamInferenceProxy(phoneURL string, req PhoneIn
 // jsonString returns a valid JSON string literal (quoted and escaped).
 func jsonString(s string) string {
 	b, _ := json.Marshal(s)
-	return string(b)
-}
-
-// escapeJSON escapes a string for embedding in a JSON value (no surrounding quotes).
-func escapeJSON(s string) string {
-	b, _ := json.Marshal(s)
-	// Strip surrounding quotes
-	if len(b) >= 2 && b[0] == '"' && b[len(b)-1] == '"' {
-		return string(b[1 : len(b)-1])
-	}
 	return string(b)
 }
 

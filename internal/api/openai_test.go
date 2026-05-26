@@ -607,6 +607,70 @@ func TestSelectPhoneWithMultipleCandidates(t *testing.T) {
 	_ = node
 }
 
+func TestStreamChatCompletionProxyError(t *testing.T) {
+	reg := registry.New()
+
+	reg.Register("phone-01", "test-phone", "10.0.0.5")
+	reg.Pair("phone-01")
+	reg.UpdateHeartbeat("phone-01", registry.HealthTelemetry{})
+	reg.SetModelStatus("phone-01", registry.ModelStatus{Name: "test-model", Loaded: true})
+
+	h := NewOpenAIHandler(reg)
+	h.AddModel("test-model", "test")
+
+	// Override stream proxy to fail
+	h.streamInferenceProxy = func(_ string, _ PhoneInferenceRequest, _ func(string)) (string, error) {
+		return "", fmt.Errorf("broken pipe: \"quote\" and \\backslash")
+	}
+
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	body := `{"model":"test-model","messages":[{"role":"user","content":"hi"}],"stream":true}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200 (SSE), got %d", w.Code)
+	}
+
+	bodyStr := w.Body.String()
+	t.Logf("SSE error body:\n%s", bodyStr)
+
+	// Must contain a JSON error payload
+	if !strings.Contains(bodyStr, `"error"`) {
+		t.Errorf("expected error object in SSE, got: %s", bodyStr)
+	}
+	if !strings.Contains(bodyStr, `"inference failed: broken pipe`)+ {
+		t.Errorf("expected inference failed message, got: %s", bodyStr)
+	}
+	if !strings.Contains(bodyStr, `"quote"`)+ {
+		t.Errorf("expected escaped quote in error message, got: %s", bodyStr)
+	}
+	if !strings.Contains(bodyStr, `"type":"inference_error"`) {
+		t.Errorf("expected inference_error type, got: %s", bodyStr)
+	}
+	if !strings.Contains(bodyStr, "[DONE]") {
+		t.Errorf("expected [DONE] sentinel after error event")
+	}
+
+	// Verify the error chunk is valid JSON
+	for _, line := range strings.Split(bodyStr, "\n") {
+		if strings.HasPrefix(line, "data: ") {
+			payload := strings.TrimPrefix(line, "data: ")
+			if payload == "[DONE]" {
+				continue
+			}
+			var parsed map[string]any
+			if err := json.Unmarshal([]byte(payload), &parsed); err != nil {
+				t.Errorf("invalid JSON in SSE data: %v\nline: %s", err, line)
+			}
+		}
+	}
+}
+
 func TestSelectPhoneHealthAware(t *testing.T) {
 	tests := []struct{
 		name string
