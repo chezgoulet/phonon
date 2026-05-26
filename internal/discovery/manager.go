@@ -198,14 +198,22 @@ func (m *Manager) List() []DiscoveredDevice {
 // DefaultRegistrationCallback returns a RegistrationCallback that feeds into
 // the given registry, registering devices in the unpaired state.
 func DefaultRegistrationCallback(reg *registry.Registry) RegistrationCallback {
-	return func(deviceID string, deviceModel string, _ net.IP, _ int) error {
+	return func(deviceID string, deviceModel string, ip net.IP, _ int) error {
+		ipStr := ""
+		if ip != nil {
+			ipStr = ip.String()
+		}
 		// Register or update
-		if err := reg.Register(deviceID, deviceModel, ""); err != nil {
+		if err := reg.Register(deviceID, deviceModel, ipStr); err != nil {
 			if !registry.IsAlreadyRegistered(err) {
 				return fmt.Errorf("register: %w", err)
 			}
-			// Already registered — update device model
+			// Already registered — update IP
+			if ip != nil {
+				_ = reg.SetDeviceIP(deviceID, ipStr)
+			}
 		}
+		// Always set device model (new or existing registration)
 		if deviceModel != "" {
 			_ = reg.SetDeviceModel(deviceID, deviceModel)
 		}

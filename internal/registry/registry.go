@@ -238,6 +238,14 @@ func (r *Registry) SetDeviceModel(deviceID, model string) error {
 	})
 }
 
+// SetDeviceIP sets the IP address for a node.
+// Returns ErrNotFound if the device doesn't exist.
+func (r *Registry) SetDeviceIP(deviceID, ipAddress string) error {
+	return r.updateField(deviceID, func(n *Node) {
+		n.IPAddress = ipAddress
+	})
+}
+
 // SetModelStatus updates the model status on a node (what model is loaded).
 // Returns ErrNotFound if the device doesn't exist.
 func (r *Registry) SetModelStatus(deviceID string, status ModelStatus) error {
