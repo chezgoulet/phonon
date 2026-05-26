@@ -195,8 +195,7 @@ func TestChatCompletionWithOnlinePhone(t *testing.T) {
 	})
 
 	// Set model loaded
-	node1, _ := reg.Get("phone-01")
-	node1.ModelStatus = registry.ModelStatus{Name: "test-model", Loaded: true}
+	reg.SetModelStatus("phone-01", registry.ModelStatus{Name: "test-model", Loaded: true})
 
 	h := NewOpenAIHandler(reg)
 	h.AddModel("test-model", "test")
@@ -269,8 +268,7 @@ func TestChatCompletionPhoneFails(t *testing.T) {
 	reg.Pair("phone-01")
 	reg.UpdateHeartbeat("phone-01", registry.HealthTelemetry{})
 
-	node, _ := reg.Get("phone-01")
-	node.ModelStatus = registry.ModelStatus{Name: "test-model", Loaded: true}
+	reg.SetModelStatus("phone-01", registry.ModelStatus{Name: "test-model", Loaded: true})
 
 	h := NewOpenAIHandler(reg)
 	h.AddModel("test-model", "test")
@@ -301,8 +299,7 @@ func TestSelectPhoneWithModel(t *testing.T) {
 	reg.Pair("phone-01")
 	reg.UpdateHeartbeat("phone-01", registry.HealthTelemetry{})
 
-	node, _ := reg.Get("phone-01")
-	node.ModelStatus = registry.ModelStatus{Name: "my-model", Loaded: true}
+	reg.SetModelStatus("phone-01", registry.ModelStatus{Name: "my-model", Loaded: true})
 
 	h := NewOpenAIHandler(reg)
 
@@ -506,14 +503,12 @@ func TestSelectPhoneWithMultipleCandidates(t *testing.T) {
 	reg.Register("phone-01", "a", "10.0.0.1")
 	reg.Pair("phone-01")
 	reg.UpdateHeartbeat("phone-01", registry.HealthTelemetry{})
-	node1, _ := reg.Get("phone-01")
-	node1.ModelStatus = registry.ModelStatus{Name: "llama", Loaded: true}
+	reg.SetModelStatus("phone-01", registry.ModelStatus{Name: "llama", Loaded: true})
 
 	reg.Register("phone-02", "b", "10.0.0.2")
 	reg.Pair("phone-02")
 	reg.UpdateHeartbeat("phone-02", registry.HealthTelemetry{})
-	node2, _ := reg.Get("phone-02")
-	node2.ModelStatus = registry.ModelStatus{Name: "llama", Loaded: true}
+	reg.SetModelStatus("phone-02", registry.ModelStatus{Name: "llama", Loaded: true})
 
 	h := NewOpenAIHandler(reg)
 

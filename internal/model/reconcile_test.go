@@ -46,14 +46,18 @@ func registerNode(reg *registry.Registry, deviceID string, state registry.NodeSt
 	if err := reg.Register(deviceID, "", ""); err != nil && !registry.IsAlreadyRegistered(err) {
 		panic(err)
 	}
-	reg.SetOnline(deviceID)
 	reg.AssignToGroup(deviceID, "alpha")
-	// Set model status via the returned pointer (single-threaded test)
-	node, _ := reg.Get(deviceID)
-	node.State = state
-	node.ModelStatus = registry.ModelStatus{
+	reg.SetModelStatus(deviceID, registry.ModelStatus{
 		Name:   modelName,
 		Loaded: loaded,
+	})
+	switch state {
+	case registry.NodeStateOnline:
+		reg.SetOnline(deviceID)
+	case registry.NodeStateOffline:
+		reg.SetOffline(deviceID)
+	default:
+		// Paired/Unpaired left as-is
 	}
 }
 

@@ -152,26 +152,26 @@ func (r *Registry) SetOffline(deviceID string) error {
 
 // Get returns a single node by device ID.
 // Returns nil and false if not found.
-func (r *Registry) Get(deviceID string) (*Node, bool) {
+func (r *Registry) Get(deviceID string) (Node, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
 	node, exists := r.nodes[deviceID]
 	if !exists {
-		return nil, false
+		return Node{}, false
 	}
-	return node, true
+	return *node, true
 }
 
 // GetByGroup returns all nodes assigned to the given group.
-func (r *Registry) GetByGroup(group string) []*Node {
+func (r *Registry) GetByGroup(group string) []Node {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	result := make([]*Node, 0)
+	result := make([]Node, 0, len(r.nodes))
 	for _, node := range r.nodes {
 		if node.Group == group {
-			result = append(result, node)
+			result = append(result, *node)
 		}
 	}
 	return result
@@ -180,11 +180,11 @@ func (r *Registry) GetByGroup(group string) []*Node {
 // GetHealthyByGroup returns nodes that are online, not overheating, and
 // not low-battery-unplugged. Battery threshold defaults to 15%.
 // Thermal threshold defaults to 45°C.
-func (r *Registry) GetHealthyByGroup(group string, batteryThreshold, thermalThreshold float64) []*Node {
+func (r *Registry) GetHealthyByGroup(group string, batteryThreshold, thermalThreshold float64) []Node {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	result := make([]*Node, 0)
+	result := make([]Node, 0, len(r.nodes))
 	for _, node := range r.nodes {
 		if node.Group != group {
 			continue
@@ -198,19 +198,19 @@ func (r *Registry) GetHealthyByGroup(group string, batteryThreshold, thermalThre
 		if node.Telemetry.BatteryLevel < batteryThreshold && !node.Telemetry.IsCharging {
 			continue
 		}
-		result = append(result, node)
+		result = append(result, *node)
 	}
 	return result
 }
 
 // List returns all registered nodes.
-func (r *Registry) List() []*Node {
+func (r *Registry) List() []Node {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	result := make([]*Node, 0, len(r.nodes))
+	result := make([]Node, 0, len(r.nodes))
 	for _, node := range r.nodes {
-		result = append(result, node)
+		result = append(result, *node)
 	}
 	return result
 }
@@ -284,14 +284,14 @@ func (r *Registry) ClearExcludeReason(deviceID string) error {
 }
 
 // ListOnline returns all nodes in online state.
-func (r *Registry) ListOnline() []*Node {
+func (r *Registry) ListOnline() []Node {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	result := make([]*Node, 0)
+	result := make([]Node, 0, len(r.nodes))
 	for _, node := range r.nodes {
 		if node.State == NodeStateOnline {
-			result = append(result, node)
+			result = append(result, *node)
 		}
 	}
 	return result

@@ -113,7 +113,7 @@ func (h *ClusterHandler) handleListNodes(w http.ResponseWriter, r *http.Request)
 	// Support group filter
 	groupFilter := r.URL.Query().Get("group")
 
-	slices.SortFunc(nodes, func(a, b *registry.Node) int {
+	slices.SortFunc(nodes, func(a, b registry.Node) int {
 		if a.State != b.State {
 			if a.State == registry.NodeStateOnline {
 				return -1

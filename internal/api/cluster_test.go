@@ -177,8 +177,7 @@ func TestChatCompletionWithGroupHeader(t *testing.T) {
 	reg.UpdateHeartbeat("phone-01", registry.HealthTelemetry{BatteryLevel: 85})
 	reg.AssignToGroup("phone-01", "pool-prime")
 
-	node, _ := reg.Get("phone-01")
-	node.ModelStatus = registry.ModelStatus{Name: "test-model", Loaded: true}
+	reg.SetModelStatus("phone-01", registry.ModelStatus{Name: "test-model", Loaded: true})
 
 	h := NewOpenAIHandler(reg)
 	h.AddModel("test-model", "test")

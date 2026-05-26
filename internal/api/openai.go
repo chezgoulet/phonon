@@ -285,26 +285,20 @@ func (h *OpenAIHandler) handleChatCompletion(w http.ResponseWriter, r *http.Requ
 }
 
 // selectPhone finds an online phone with the requested model loaded.
-func (h *OpenAIHandler) selectPhone(modelName string) (string, *registry.Node, error) {
+func (h *OpenAIHandler) selectPhone(modelName string) (string, registry.Node, error) {
 	nodes := h.reg.List()
 
-	var candidates []*registry.Node
 	for _, node := range nodes {
 		if node.State != registry.NodeStateOnline {
 			continue
 		}
 		if node.ModelStatus.Loaded && node.ModelStatus.Name == modelName {
-			candidates = append(candidates, node)
+			// First match wins (placeholder for proper load balancing)
+			return node.IPAddress, node, nil
 		}
 	}
 
-	if len(candidates) == 0 {
-		return "", nil, fmt.Errorf("no online node has model %q loaded", modelName)
-	}
-
-	// Random selection (weighted by load later)
-	selected := candidates[rand.Intn(len(candidates))]
-	return selected.IPAddress, selected, nil
+	return "", registry.Node{}, fmt.Errorf("no online node has model %q loaded", modelName)
 }
 
 // Default port for the sidecar's InferenceServer. Must match sidecar/app/.../InferenceServer.kt.
