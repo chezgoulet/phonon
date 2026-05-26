@@ -57,6 +57,7 @@ type WSAck struct {
 type pendingCommand struct {
 	Cmd    WSCommand
 	Status string // sent, accepted, completed, failed
+	Error  string // populated on failed acks
 	SentAt time.Time
 }
 
@@ -181,6 +182,7 @@ func (h *WSHandler) handleAck(deviceID string, data []byte) {
 		delete(devicePending, ack.CommandID)
 	case AckFailed:
 		pc.Status = "failed"
+		pc.Error = ack.Error
 		delete(devicePending, ack.CommandID)
 		h.log.Warn("command failed", "device_id", deviceID, "command_id", ack.CommandID, "error", ack.Error)
 	}

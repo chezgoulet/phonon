@@ -211,29 +211,34 @@ class CoordinatorClient(
 
             when (msg.type) {
                 CommandType.ModelPush -> {
-                    // Acknowledge and download
+                    // Acknowledge and download with checksum verification
                     sendCommandAck(msg, AckStatus.Accepted)
-                    val modelName = msg.payload?.optString("model_name", "")
-                    val modelUrl = msg.payload?.optString("download_url", "")
-                    if (modelName != null && modelUrl != null) {
-                        scope.launch {
-                            downloadModel(modelName, modelUrl)
+                    val modelName = msg.payload?.optString("model", "")
+                    val modelUrl = msg.payload?.optString("url", "")
+                    val expectedChecksum = msg.payload?.optString("checksum", "") ?: ""
+                    if (modelName.isNullOrEmpty() || modelUrl.isNullOrEmpty()) {
+                        sendCommandAck(msg, AckStatus.Failed, "missing model or url in push command")
+                        return
+                    }
+                    scope.launch {
+                        val success = downloadModelVerify(modelName, modelUrl, expectedChecksum)
+                        if (success) {
                             sendCommandAck(msg, AckStatus.Completed)
+                        } else {
+                            sendCommandAck(msg, AckStatus.Failed, "download failed or checksum mismatch")
                         }
-                    } else {
-                        sendCommandAck(msg, AckStatus.Failed, "missing model_name or download_url")
                     }
                 }
                 CommandType.ModelLoad -> {
                     sendCommandAck(msg, AckStatus.Accepted)
-                    val modelName = msg.payload?.optString("model_name", "")
-                    val modelUrl = msg.payload?.optString("download_url", "")
+                    val modelName = msg.payload?.optString("model", "")
+                    val modelUrl = msg.payload?.optString("url", "")
                     val engine = msg.payload?.optString("engine", "prima")
-                    if (modelName != null) {
-                        onModelLoad(modelName, modelUrl ?: "", engine ?: "prima")
-                    } else {
-                        sendCommandAck(msg, AckStatus.Failed, "missing model_name")
+                    if (modelName.isNullOrEmpty()) {
+                        sendCommandAck(msg, AckStatus.Failed, "missing model in load command")
+                        return
                     }
+                    onModelLoad(modelName, modelUrl ?: "", engine ?: "prima")
                 }
                 CommandType.ModelUnload -> {
                     sendCommandAck(msg, AckStatus.Accepted)
@@ -271,46 +276,72 @@ class CoordinatorClient(
         webSocket?.send(ack.toJson().toString())
     }
 
-    private suspend fun downloadModel(modelName: String, url: String) {
-        // Download model file from coordinator using Range requests
+    /**
+     * Downloads a model file and verifies its SHA-256 checksum.
+     * @return true if the download succeeded and the checksum matches.
+     */
+    private suspend fun downloadModelVerify(modelName: String, url: String, expectedChecksum: String): Boolean {
         val cacheDir = File(context.cacheDir, "models")
         cacheDir.mkdirs()
         val modelFile = File(cacheDir, modelName.replace("/", "_").replace(":", "_"))
 
-        // Use Range request to support resume
         val request = Request.Builder()
             .url(url)
             .header("Range", "bytes=${modelFile.length()}-")
             .build()
 
-        try {
+        return try {
             val response = withContext(Dispatchers.IO) {
                 client.newCall(request).execute()
             }
 
             if (!response.isSuccessful && response.code != 206) {
                 Log.w(tag, "Model download failed: HTTP ${response.code}")
-                return
+                return false
             }
 
-            val body = response.body ?: return
+            val body = response.body ?: run {
+                Log.w(tag, "Model download: empty response body")
+                return false
+            }
+
             val sourceFile = File.createTempFile("download_", ".tmp", cacheDir)
 
-            withContext(Dispatchers.IO) {
+            var actualSha256 = withContext(Dispatchers.IO) {
+                val digest = java.security.MessageDigest.getInstance("SHA-256")
                 sourceFile.outputStream().use { output ->
                     body.byteStream().use { input ->
-                        input.copyTo(output)
+                        val buffer = ByteArray(8192)
+                        var bytesRead: Int
+                        while (input.read(buffer).also { bytesRead = it } != -1) {
+                            output.write(buffer, 0, bytesRead)
+                            digest.update(buffer, 0, bytesRead)
+                        }
                     }
                 }
+                digest.digest().joinToString("") { "%02x".format(it) }
+            }
+
+            // Verify checksum if the coordinator provided one
+            if (expectedChecksum.isNotEmpty()) {
+                if (actualSha256 != expectedChecksum) {
+                    Log.w(tag, "Checksum mismatch for $modelName: expected $expectedChecksum, got $actualSha256")
+                    sourceFile.delete()
+                    return false
+                }
+                Log.i(tag, "Model verified: $modelName (SHA-256 matches)")
+            } else {
+                Log.i(tag, "Model downloaded: $modelName (no checksum to verify)")
             }
 
             // Atomic rename
             modelFile.delete()
             sourceFile.renameTo(modelFile)
-
-            Log.i(tag, "Model downloaded: $modelName (${modelFile.length()} bytes)")
+            Log.i(tag, "Model cached: $modelName (${modelFile.length()} bytes)")
+            true
         } catch (e: Exception) {
             Log.e(tag, "Model download error: ${e.message}")
+            false
         }
     }
 
