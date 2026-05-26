@@ -341,7 +341,7 @@ func estimateTokens(text string) int {
 
 var (
 	completionMu sync.Mutex
-	completionID int64
+	completionID int64 = rand.Int63n(1 << 48) // random offset per boot avoids collisions after restart
 )
 
 func generateCompletionID() string {
