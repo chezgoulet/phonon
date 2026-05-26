@@ -58,7 +58,7 @@ class CoordinatorClient(
     private val pendingCommands = ConcurrentLinkedQueue<WSMessage>()
 
     private val baseUrl: String get() = "http://$host:$port"
-    private val wsUrl: String get() = "ws://$host:$port/ws"
+    private val wsUrl: String get() = "ws://$host:$port/api/v1/sidecar/ws"
 
     fun connect() {
         stopped = false
