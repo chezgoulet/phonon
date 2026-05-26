@@ -2,20 +2,24 @@ package main
 
 import (
 	"context"
-	"time"
 	"fmt"
 	"io/fs"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"path"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/chezgoulet/phonon/internal/api"
 	"github.com/chezgoulet/phonon/internal/auth"
 	"github.com/chezgoulet/phonon/internal/config"
+	"github.com/chezgoulet/phonon/internal/discovery"
+	"github.com/chezgoulet/phonon/internal/health"
+	"github.com/chezgoulet/phonon/internal/model"
 	"github.com/chezgoulet/phonon/internal/registry"
 	"gopkg.in/yaml.v3"
 )
@@ -38,9 +42,9 @@ func main() {
 		cfgPath = p
 	}
 
-	cfg, err := loadConfig(cfgPath)
-	if err != nil {
-		logger.Warn("config load failed, using defaults", "error", err, "path", cfgPath)
+	cfg, cfgErr := loadConfig(cfgPath)
+	if cfgErr != nil {
+		logger.Warn("config load failed, using defaults", "error", cfgErr, "path", cfgPath)
 		cfg = &config.Config{
 			Cluster: config.ClusterConfig{
 				Auth: config.AuthConfig{Mode: "none"},
@@ -69,6 +73,64 @@ func main() {
 		os.Exit(1)
 	}
 	defer authMiddleware.Stop()
+
+	// --- Background subsystems ---
+
+	// 1. Health monitor — periodic check loop with hysteresis
+	healthCfg := health.DefaultMonitorConfig()
+	if cfgErr == nil {
+		if cfg.Cluster.Health.Overheat.Threshold > 0 {
+			healthCfg.OverheatThreshold = cfg.Cluster.Health.Overheat.Threshold
+		}
+		if cfg.Cluster.Health.Overheat.ReentryThreshold > 0 {
+			healthCfg.OverheatReentryThreshold = cfg.Cluster.Health.Overheat.ReentryThreshold
+		}
+		if cfg.Cluster.Health.Battery.LowThreshold > 0 {
+			healthCfg.BatteryLowThreshold = cfg.Cluster.Health.Battery.LowThreshold
+		}
+		if cfg.Cluster.Health.Battery.ReentryThreshold > 0 {
+			healthCfg.BatteryReentryThreshold = cfg.Cluster.Health.Battery.ReentryThreshold
+		}
+		if cfg.Cluster.Health.Battery.CapacityThreshold > 0 {
+			healthCfg.BatteryCapacityThreshold = cfg.Cluster.Health.Battery.CapacityThreshold
+		}
+		if d := cfg.Cluster.Health.OfflineTimeoutDuration(); d > 0 {
+			healthCfg.OfflineTimeout = d
+		}
+	}
+	healthMonitor := health.NewMonitor(reg, healthCfg)
+	healthMetrics := healthMonitor.RegisterMetrics()
+
+	// 2. Discovery manager — mDNS (unless disabled) + manual registration
+	var mdnsDiscoverer discovery.Discoverer
+	if !cfg.Cluster.Discovery.MDNS.Disabled {
+		mdnsDiscoverer = discovery.NewMDNSDiscoverer()
+	}
+	discoveryMgr := discovery.NewManager(mdnsDiscoverer,
+		func(deviceID, deviceModel string, ip net.IP, _ int) error {
+			return reg.Register(deviceID, deviceModel, ip.String())
+		})
+
+	// 3. Model cache — local file cache for GGUF models
+	cacheDir := os.Getenv("PHONON_CACHE_DIR")
+	if cacheDir == "" {
+		cacheDir = "./cache"
+	}
+	modelCache := model.NewCache(cacheDir, nil)
+	if err := modelCache.Init(); err != nil {
+		logger.Warn("model cache init failed, continuing without disk cache", "error", err)
+	}
+
+	// 4. Model reconciler — desired vs current state loop
+	coordinatorPort := os.Getenv("PHONON_PORT")
+	if coordinatorPort == "" {
+		coordinatorPort = "8080"
+	}
+	coordinatorURL := os.Getenv("PHONON_COORDINATOR_URL")
+	if coordinatorURL == "" {
+		coordinatorURL = fmt.Sprintf("http://localhost:%s", coordinatorPort)
+	}
+	reconciler := model.NewReconciler(modelCache, reg, wsHandler, coordinatorURL)
 
 	// Set up routes
 	mux := http.NewServeMux()
@@ -101,13 +163,13 @@ func main() {
 	clusterHandler.RegisterRoutes(protectedMux)
 	mux.Handle("/api/v1/", authMiddleware.Handler(protectedMux))
 
+	// Metrics — public, served from the health monitor's private Prometheus registry
+	mux.Handle("GET /metrics", healthMetrics.Handler())
+
 	// Serve the Web UI from /ui/ and redirect / → /ui/
 	serveUI(mux, logger)
 
-	addr := ":8080"
-	if p := os.Getenv("PHONON_PORT"); p != "" {
-		addr = ":" + p
-	}
+	addr := ":" + coordinatorPort
 
 	server := &http.Server{
 		Addr:    addr,
@@ -125,9 +187,31 @@ func main() {
 		}
 	}()
 
+	// Start background subsystems now that the HTTP server is running
+	healthMonitor.Start()
+	if err := discoveryMgr.Start(ctx); err != nil {
+		logger.Error("failed to start discovery manager", "error", err)
+	}
+	if err := reconciler.Start(ctx, cfg.Groups); err != nil {
+		logger.Error("failed to start model reconciler", "error", err)
+	}
+
+	logger.Info("all subsystems started",
+		"health_monitor", true,
+		"discovery", mdnsDiscoverer != nil,
+		"model_cache", cacheDir,
+		"reconciler", len(cfg.Groups) > 0,
+	)
+
 	<-ctx.Done()
 	logger.Info("shutting down")
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10 * time.Second)
+
+	// Stop subsystems in reverse order
+	reconciler.Stop()
+	_ = discoveryMgr.Stop()
+	healthMonitor.Stop()
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	_ = server.Shutdown(shutdownCtx)
 	logger.Info("stopped")
