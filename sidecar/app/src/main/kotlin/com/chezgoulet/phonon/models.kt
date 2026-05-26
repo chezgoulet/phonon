@@ -112,6 +112,12 @@ data class PairResponse(
 }
 
 // ─── WebSocket command types (mirrors coordinator's ws.go) ───
+//
+// Wire format documented in SPEC.md §5.0. The Go coordinator produces
+// JSON with the field names in this section's spec tables. When changing
+// these types, update the schema doc and the companion Go types in
+// internal/api/ws.go. The Go test TestWS_WireFormat validates exact wire
+// format output.
 
 sealed class CommandType(val value: String) {
     object ModelPush : CommandType("model_push")
@@ -156,6 +162,8 @@ data class WSMessage(
     val commandId: String?,
     val payload: JSONObject?
 ) {
+    // JSON keys must match Go WSCommand's json tags in internal/api/ws.go.
+    // See SPEC.md §5.0 for the canonical wire format schema.
     companion object {
         fun fromJson(json: JSONObject): WSMessage? {
             val rawType = json.getString("type")
@@ -176,6 +184,8 @@ data class WSAck(
     val status: AckStatus,
     val error: String?
 ) {
+    // JSON keys must match Go WSAck's json tags in internal/api/ws.go.
+    // See SPEC.md §5.0 for the canonical wire format schema.
     fun toJson(): JSONObject = JSONObject().apply {
         put("ack_type", ackType)
         put("command_id", commandId)
