@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"math/rand"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -312,10 +313,12 @@ func (h *OpenAIHandler) handleChatCompletion(w http.ResponseWriter, r *http.Requ
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// selectPhone finds an online phone with the requested model loaded.
+// selectPhone finds the healthiest online phone with the requested model loaded.
+// Candidates are sorted by: queue depth (asc) → temperature (asc) → battery (desc).
 func (h *OpenAIHandler) selectPhone(modelName string) (string, registry.Node, error) {
 	nodes := h.reg.List()
 
+	candidates := make([]registry.Node, 0)
 	for _, node := range nodes {
 		if node.State != registry.NodeStateOnline {
 			continue
@@ -325,21 +328,48 @@ func (h *OpenAIHandler) selectPhone(modelName string) (string, registry.Node, er
 			if h.maxQueuePerNode > 0 && node.Telemetry.QueueDepth >= h.maxQueuePerNode {
 				continue
 			}
-			return node.IPAddress, node, nil
+			candidates = append(candidates, node)
 		}
 	}
 
-	// Check if any phone has the model but all are at capacity
-	for _, node := range nodes {
-		if node.State != registry.NodeStateOnline {
-			continue
+	if len(candidates) == 0 {
+		// Check if the model is loaded somewhere but all nodes are at capacity
+		for _, node := range nodes {
+			if node.State == registry.NodeStateOnline && node.ModelStatus.Loaded && node.ModelStatus.Name == modelName {
+				return "", registry.Node{}, fmt.Errorf("all nodes at capacity (queue depth >= %d)", h.maxQueuePerNode)
+			}
 		}
-		if node.ModelStatus.Loaded && node.ModelStatus.Name == modelName {
-			return "", registry.Node{}, fmt.Errorf("all nodes at capacity (queue depth >= %d)", h.maxQueuePerNode)
-		}
+		return "", registry.Node{}, fmt.Errorf("no online node has model %q loaded", modelName)
 	}
 
-	return "", registry.Node{}, fmt.Errorf("no online node has model %q loaded", modelName)
+	// Sort by health: least queue depth, coolest temperature, most battery
+	slices.SortFunc(candidates, func(a, b registry.Node) int {
+		// Queue depth (ascending — lower is better)
+		if a.Telemetry.QueueDepth != b.Telemetry.QueueDepth {
+			if a.Telemetry.QueueDepth < b.Telemetry.QueueDepth {
+				return -1
+			}
+			return 1
+		}
+		// Temperature (ascending — lower is better)
+		if a.Telemetry.ThermalTempC != b.Telemetry.ThermalTempC {
+			if a.Telemetry.ThermalTempC < b.Telemetry.ThermalTempC {
+				return -1
+			}
+			return 1
+		}
+		// Battery level (descending — higher is better)
+		if a.Telemetry.BatteryLevel != b.Telemetry.BatteryLevel {
+			if a.Telemetry.BatteryLevel > b.Telemetry.BatteryLevel {
+				return -1
+			}
+			return 1
+		}
+		return 0
+	})
+
+	selected := candidates[0]
+	return selected.IPAddress, selected, nil
 }
 
 // Default port for the sidecar's InferenceServer. Must match sidecar/app/.../InferenceServer.kt.

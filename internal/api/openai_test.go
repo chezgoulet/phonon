@@ -596,16 +596,73 @@ func TestSelectPhoneWithMultipleCandidates(t *testing.T) {
 
 	h := NewOpenAIHandler(reg)
 
-	// Run multiple times to ensure we get different results (probabilistic)
-	seen := make(map[string]int)
-	for i := 0; i < 20; i++ {
-		phone, _, err := h.selectPhone("llama")
-		if err != nil {
-			t.Fatalf("selectPhone: %v", err)
-		}
-		seen[phone]++
+	// With equal health metrics, order is deterministic (first registered wins on tie)
+	phone, node, err := h.selectPhone("llama")
+	if err != nil {
+		t.Fatalf("selectPhone: %v", err)
 	}
-	if len(seen) == 0 {
-		t.Error("expected at least one candidate")
+	if phone == "" {
+		t.Error("expected a phone to be selected")
+	}
+	_ = node
+}
+
+func TestSelectPhoneHealthAware(t *testing.T) {
+	tests := []struct{
+		name string
+		phone1Health registry.HealthTelemetry
+		phone2Health registry.HealthTelemetry
+		expectedIP string
+	}{
+		{
+			name: "lower queue depth wins",
+			phone1Health: registry.HealthTelemetry{QueueDepth: 5, ThermalTempC: 30, BatteryLevel: 80},
+			phone2Health: registry.HealthTelemetry{QueueDepth: 1, ThermalTempC: 30, BatteryLevel: 80},
+			expectedIP: "10.0.0.2",
+		},
+		{
+			name: "cooler temperature wins",
+			phone1Health: registry.HealthTelemetry{QueueDepth: 3, ThermalTempC: 35, BatteryLevel: 80},
+			phone2Health: registry.HealthTelemetry{QueueDepth: 3, ThermalTempC: 28, BatteryLevel: 80},
+			expectedIP: "10.0.0.2",
+		},
+		{
+			name: "higher battery wins",
+			phone1Health: registry.HealthTelemetry{QueueDepth: 2, ThermalTempC: 30, BatteryLevel: 60},
+			phone2Health: registry.HealthTelemetry{QueueDepth: 2, ThermalTempC: 30, BatteryLevel: 90},
+			expectedIP: "10.0.0.2",
+		},
+		{
+			name: "combined: queue depth overrides temperature",
+			phone1Health: registry.HealthTelemetry{QueueDepth: 0, ThermalTempC: 40, BatteryLevel: 50},
+			phone2Health: registry.HealthTelemetry{QueueDepth: 5, ThermalTempC: 25, BatteryLevel: 90},
+			expectedIP: "10.0.0.1", // phone-01 has lower queue depth
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reg := registry.New()
+
+			reg.Register("phone-01", "a", "10.0.0.1")
+			reg.Pair("phone-01")
+			reg.UpdateHeartbeat("phone-01", tt.phone1Health)
+			reg.SetModelStatus("phone-01", registry.ModelStatus{Name: "llama", Loaded: true})
+
+			reg.Register("phone-02", "b", "10.0.0.2")
+			reg.Pair("phone-02")
+			reg.UpdateHeartbeat("phone-02", tt.phone2Health)
+			reg.SetModelStatus("phone-02", registry.ModelStatus{Name: "llama", Loaded: true})
+
+			h := NewOpenAIHandler(reg)
+
+			phone, _, err := h.selectPhone("llama")
+			if err != nil {
+				t.Fatalf("selectPhone: %v", err)
+			}
+			if phone != tt.expectedIP {
+				t.Errorf("expected %s, got %s", tt.expectedIP, phone)
+			}
+		})
 	}
 }

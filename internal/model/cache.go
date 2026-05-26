@@ -192,11 +192,20 @@ func (c *Cache) download(ctx context.Context, url, dest, expectedSHA string) err
 	return fmt.Errorf("download failed after %d attempts: %w", maxAttempts+1, lastErr)
 }
 
-// downloadOnce performs a single download attempt.
+// downloadOnce performs a single download attempt with HTTP Range resume support.
+// If a partial file exists, it sends a Range header to resume from the existing size.
 func (c *Cache) downloadOnce(ctx context.Context, url, dest, expectedSHA string) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
 	if err != nil {
 		return err
+	}
+
+	// Check for partial download to resume from
+	var existingSize int64
+	if fi, statErr := os.Stat(dest); statErr == nil && fi.Size() > 0 {
+		existingSize = fi.Size()
+		req.Header.Set("Range", fmt.Sprintf("bytes=%d-", existingSize))
+		c.log.Debug("resuming partial download", "url", url, "existing_bytes", existingSize)
 	}
 
 	resp, err := c.client.Do(req)
@@ -205,16 +214,62 @@ func (c *Cache) downloadOnce(ctx context.Context, url, dest, expectedSHA string)
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
+	// Determine how to open the file and whether to verify existing bytes
+	var resumeOffset int64
+	switch resp.StatusCode {
+	case http.StatusOK:
+		// Server doesn't support Range or returned full file — start fresh
+		c.log.Debug("server returned full file, starting from scratch", "url", url)
+	case http.StatusPartialContent:
+		// Server supports Range — resume from existing size
+		resumeOffset = existingSize
+	case http.StatusRequestedRangeNotSatisfiable:
+		// File is already complete — verify checksum and return
+		c.log.Debug("file already complete, verifying", "url", url, "size", existingSize)
+		if expectedSHA != "" {
+			got, err := fileSHA256(dest)
+			if err != nil {
+				return fmt.Errorf("hash complete file: %w", err)
+			}
+			if !strings.EqualFold(got, expectedSHA) {
+				os.Remove(dest)
+				return fmt.Errorf("SHA-256 mismatch: expected %s, got %s", expectedSHA, got)
+			}
+		}
+		return nil
+	default:
 		return fmt.Errorf("HTTP %d from %s", resp.StatusCode, url)
 	}
 
-	f, err := os.OpenFile(dest, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+	// Open file: append if resuming, truncate if starting fresh
+	var flag int
+	if resumeOffset > 0 {
+		flag = os.O_CREATE | os.O_WRONLY | os.O_APPEND
+	} else {
+		flag = os.O_CREATE | os.O_WRONLY | os.O_TRUNC
+	}
+
+	f, err := os.OpenFile(dest, flag, 0o644)
 	if err != nil {
 		return err
 	}
 
+	// Hash verification: if resuming, hash the existing content too
 	hasher := sha256.New()
+	if resumeOffset > 0 {
+		existing, err := os.Open(dest)
+		if err != nil {
+			f.Close()
+			return fmt.Errorf("open existing for hash: %w", err)
+		}
+		if _, err := io.Copy(hasher, existing); err != nil {
+			existing.Close()
+			f.Close()
+			return fmt.Errorf("hash existing: %w", err)
+		}
+		existing.Close()
+	}
+
 	writer := io.MultiWriter(f, hasher)
 
 	_, err = io.Copy(writer, resp.Body)
@@ -234,7 +289,7 @@ func (c *Cache) downloadOnce(ctx context.Context, url, dest, expectedSHA string)
 		got := hex.EncodeToString(hasher.Sum(nil))
 		if !strings.EqualFold(got, expectedSHA) {
 			os.Remove(dest)
-			return fmt.Errorf("SHA-256 mismatch: expected %s, got %s", expectedSHA, got)
+			return fmt.Errorf("SHA-256 mismatch: expected %s, got %s (downloaded %d bytes, resumed %d)", expectedSHA, got, resp.ContentLength, resumeOffset)
 		}
 	}
 
@@ -310,4 +365,19 @@ func ResolveHuggingFaceURL(modelID string) string {
 // sanitizeName replaces path separators in model names.
 func sanitizeName(name string) string {
 	return strings.NewReplacer("/", "_", ":", "_").Replace(name)
+}
+
+// fileSHA256 computes the hex SHA-256 hash of a file.
+func fileSHA256(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+
+	hasher := sha256.New()
+	if _, err := io.Copy(hasher, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(hasher.Sum(nil)), nil
 }
