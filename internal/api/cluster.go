@@ -51,7 +51,8 @@ func (h *ClusterHandler) handleClusterHealth(w http.ResponseWriter, _ *http.Requ
 	paired := 0
 	unpaired := 0
 	groups := make(map[string]int)
-	for _, node := range nodes {
+	for i := range nodes {
+		node := &nodes[i]
 		switch node.State {
 		case registry.NodeStateOnline:
 			online++
@@ -126,7 +127,8 @@ func (h *ClusterHandler) handleListNodes(w http.ResponseWriter, r *http.Request)
 	})
 
 	items := make([]ListNodeResponse, 0, len(nodes))
-	for _, node := range nodes {
+	for i := range nodes {
+		node := &nodes[i]
 		if groupFilter != "" && node.Group != groupFilter {
 			continue
 		}

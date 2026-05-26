@@ -69,7 +69,6 @@ func TestCacheDownloadResume(t *testing.T) {
 	if !bytes.Equal(result, modelData) {
 		t.Errorf("expected %q, got %q", modelData, result)
 	}
-
 }
 
 // TestCacheDownloadResumeHTTPError verifies that failure during resume cleans up properly.

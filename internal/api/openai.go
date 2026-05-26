@@ -335,7 +335,8 @@ func (h *OpenAIHandler) selectPhone(modelName string) (string, registry.Node, er
 	nodes := h.reg.List()
 
 	candidates := make([]registry.Node, 0)
-	for _, node := range nodes {
+	for i := range nodes {
+		node := &nodes[i]
 		if node.State != registry.NodeStateOnline {
 			continue
 		}
@@ -350,7 +351,8 @@ func (h *OpenAIHandler) selectPhone(modelName string) (string, registry.Node, er
 
 	if len(candidates) == 0 {
 		// Check if the model is loaded somewhere but all nodes are at capacity
-		for _, node := range nodes {
+		for i := range nodes {
+			node := &nodes[i]
 			if node.State == registry.NodeStateOnline && node.ModelStatus.Loaded && node.ModelStatus.Name == modelName {
 				return "", registry.Node{}, fmt.Errorf("all nodes at capacity (queue depth >= %d)", h.maxQueuePerNode)
 			}

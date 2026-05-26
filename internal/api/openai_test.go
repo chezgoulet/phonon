@@ -11,6 +11,8 @@ import (
 	"github.com/chezgoulet/phonon/internal/registry"
 )
 
+const testChatBody = `{"model":"test-model","messages":[{"role":"user","content":"hello"}]}`
+
 func TestNewOpenAIHandler(t *testing.T) {
 	reg := registry.New()
 	h := NewOpenAIHandler(reg)
@@ -210,7 +212,7 @@ func TestChatCompletionNoPhoneAvailable(t *testing.T) {
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
-	body := `{"model":"test-model","messages":[{"role":"user","content":"hello"}]}`
+	body := testChatBody
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -320,7 +322,7 @@ func TestChatCompletionPhoneFails(t *testing.T) {
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
-	body := `{"model":"test-model","messages":[{"role":"user","content":"hello"}]}`
+	body := testChatBody
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -349,7 +351,7 @@ func TestChatCompletionBackpressure(t *testing.T) {
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
-	body := `{"model":"test-model","messages":[{"role":"user","content":"hello"}]}`
+	body := testChatBody
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()

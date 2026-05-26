@@ -10,6 +10,8 @@ import (
 	"github.com/chezgoulet/phonon/internal/registry"
 )
 
+const testPhoneID = "phone-01"
+
 func TestClusterHealthEmpty(t *testing.T) {
 	reg := registry.New()
 	h := NewClusterHandler(reg)
@@ -198,8 +200,8 @@ func TestChatCompletionWithGroupHeader(t *testing.T) {
 		t.Errorf("expected 200, got %d", w.Code)
 	}
 
-	if v := w.Header().Get("X-Phonon-Device"); v != "phone-01" {
-		t.Errorf("expected X-Phonon-Device: phone-01, got %s", v)
+	if v := w.Header().Get("X-Phonon-Device"); v != testPhoneID {
+		t.Errorf("expected X-Phonon-Device: %s, got %s", testPhoneID, v)
 	}
 	if v := w.Header().Get("X-Phonon-Group"); v != "pool-prime" {
 		t.Errorf("expected X-Phonon-Group: pool-prime, got %s", v)
