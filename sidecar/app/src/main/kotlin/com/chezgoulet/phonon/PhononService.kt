@@ -10,6 +10,7 @@ import android.os.Binder
 import android.os.IBinder
 import android.os.PowerManager
 import com.chezgoulet.phonon.coordinator.CoordinatorClient
+import java.io.File
 import com.chezgoulet.phonon.health.HealthReporter
 import com.chezgoulet.phonon.inference.InferenceServer
 import com.chezgoulet.phonon.mdns.MDNSAnnouncer
@@ -31,6 +32,7 @@ class PhononService : Service() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val app: PhononApplication get() = application as PhononApplication
+    private val tag = "PhononService"
 
     private lateinit var notificationManager: NotificationManager
     private lateinit var coordinatorClient: CoordinatorClient
@@ -41,8 +43,8 @@ class PhononService : Service() {
 
     private var wakeLock: PowerManager.WakeLock? = null
 
-    // Configuration (TODO: load from SharedPreferences or coordinator config)
-    private var coordinatorHost: String = "255.255.255.255" // broadcast — updated on mDNS discovery
+    // Coordinator configuration — loaded from phonon.conf, fallback to mDNS, then 255.255.255.255
+    private var coordinatorHost: String = "255.255.255.255"
     private var coordinatorPort: Int = 8080
 
     // Status for notification
@@ -103,7 +105,49 @@ class PhononService : Service() {
         super.onDestroy()
     }
 
+    /**
+     * Loads coordinator URL from phonon.conf if it exists.
+     * Format: coordinator_url=http://host:port
+     * Falls back to defaults (255.255.255.255:8080).
+     */
+    private fun loadCoordinatorConfig() {
+        val configFile = File(filesDir, "phonon.conf")
+        if (!configFile.exists()) return
+
+        try {
+            configFile.useLines { lines ->
+                for (line in lines) {
+                    val trimmed = line.trim()
+                    if (trimmed.startsWith("#") || trimmed.isEmpty()) continue
+
+                    val prefix = "coordinator_url="
+                    if (trimmed.startsWith(prefix)) {
+                        val url = trimmed.removePrefix(prefix).trim()
+                        // Parse "http://host:port"
+                        val afterScheme = url.substringAfter("://")
+                        val hostPort = afterScheme.split("/").first()
+                        val colonIdx = hostPort.lastIndexOf(':')
+                        if (colonIdx > 0) {
+                            coordinatorHost = hostPort.substring(0, colonIdx)
+                            coordinatorPort = hostPort.substring(colonIdx + 1).toIntOrNull() ?: 8080
+                        } else {
+                            coordinatorHost = hostPort
+                            coordinatorPort = 8080
+                        }
+                        Log.i(tag, "Loaded coordinator URL from config: $coordinatorHost:$coordinatorPort")
+                        return@useLines
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(tag, "Failed to read phonon.conf: ${e.message}")
+        }
+    }
+
     private fun startComponents() {
+        // Load coordinator URL from config file (ADB-pushed phonon.conf)
+        loadCoordinatorConfig()
+
         // mDNS announcer — announces this phone on _phonon._tcp
         mdnsAnnouncer = MDNSAnnouncer(this, app.deviceId, app.deviceModel)
         mdnsAnnouncer.start()
