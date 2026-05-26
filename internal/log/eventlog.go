@@ -23,20 +23,22 @@ import (
 
 // EventLog is a file-backed event log with thread-safe writes and queries.
 type EventLog struct {
-	path    string
-	log     *slog.Logger
-	mu      sync.RWMutex
-	events  []Event
-	nextID  atomic.Int64
-	closed  bool
-	file    *os.File
-	writer  *bufio.Writer
+	path      string
+	log       *slog.Logger
+	mu        sync.RWMutex
+	events    []Event
+	nextID    atomic.Int64
+	closed    bool
+	file      *os.File
+	writer    *bufio.Writer
+	maxEvents int  // cap on in-memory events (0 = unlimited)
 }
 
 // Opts controls EventLog behavior.
 type Opts struct {
 	Path          string       // database file path (default "phonon.db")
 	RetentionDays int          // auto-purge events older than this (default 90)
+	MaxEvents     int          // max events held in memory (default 10000)
 	Logger        *slog.Logger // if nil, slog.Default() is used
 }
 
@@ -44,6 +46,7 @@ type Opts struct {
 const (
 	DefaultPath          = "phonon.db"
 	DefaultRetentionDays = 90
+	DefaultMaxEvents     = 10000
 )
 
 // New opens or creates the event log file and loads existing events.
@@ -73,11 +76,17 @@ func New(opts Opts) (*EventLog, error) {
 		return nil, fmt.Errorf("open event log: %w", err)
 	}
 
+	maxEvents := opts.MaxEvents
+	if maxEvents <= 0 {
+		maxEvents = DefaultMaxEvents
+	}
+
 	el := &EventLog{
-		path:   path,
-		log:    logger,
-		file:   f,
-		writer: bufio.NewWriter(f),
+		path:      path,
+		log:       logger,
+		file:      f,
+		writer:    bufio.NewWriter(f),
+		maxEvents: maxEvents,
 	}
 
 	// Load existing events into memory
@@ -138,6 +147,12 @@ func (el *EventLog) load() error {
 	}
 
 	el.nextID.Store(maxID + 1)
+
+	// Enforce in-memory cap: keep only the newest maxEvents
+	if el.maxEvents > 0 && len(el.events) > el.maxEvents {
+		el.events = el.events[len(el.events)-el.maxEvents:]
+	}
+
 	return nil
 }
 
@@ -186,6 +201,12 @@ func (el *EventLog) Write(eventType EventType, deviceID string, severity Severit
 	}
 
 	el.events = append(el.events, e)
+
+	// Enforce in-memory cap: keep only the newest maxEvents
+	if el.maxEvents > 0 && len(el.events) > el.maxEvents {
+		el.events = el.events[len(el.events)-el.maxEvents:]
+	}
+
 	return nil
 }
 
