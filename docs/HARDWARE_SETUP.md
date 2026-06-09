@@ -146,7 +146,34 @@ Compare: RTX 4090 at 450W = $473/year in electricity alone.
 
 - Water cooling (yes, for phones — there's a guide)
 - 40GbE network for large cluster (unlikely needed before 24+ phones)
-- POE-powered phones (no separate USB chargers)
+
+### Power delivery options (investigating)
+
+**PD passthrough Ethernet adapters** — tested, recommended for first cluster.
+A USB-C to Ethernet adapter with PD 2.0/3.0 passthrough lets the phone charge
+and get wired networking through a single USB-C port. The BENFEI USB-C to
+Ethernet Gigabit Adapter with 100W PD (~$18 CAD) or Cable Matters equivalent
+(~$25-37 CAD) are proven on Pixels. One cable to the phone, two cables behind
+the adapter (Ethernet + USB-C PD charger). Cleaner than separate Ethernet +
+charging cables, no hub needed.
+
+**PoE to USB-C converters** — exists but unvalidated for this use case.
+Gigabit PoE to USB-C converters (e.g. Amazon ASIN B0CP296VXN, ~$40 CAD)
+take 802.3af PoE input and output USB-C with 10W charging + data. 10W may
+not sustain a phone under inference load (phones can draw 18-27W under load).
+Worth testing once the thermal/power profile is characterized on real hardware.
+Would eliminate the need for USB-C chargers entirely — one Ethernet cable
+from a PoE switch handles both power and data.
+
+**Wireless charging + USB-C Ethernet** — investigate, thermal risk.
+Putting the phone on a Qi wireless pad while using a plain USB-C Ethernet
+adapter (no PD passthrough) separates power and data into two independent
+paths. Pros: simpler Ethernet adapter (Anker A8313 at $15-20, most proven),
+no PD negotiation complexity, only one cable to manage at the phone. Cons:
+wireless charging is ~70-80% efficient (vs 90%+ wired) and generates waste
+heat — stacked on top of inference heat, this may push Pixels into thermal
+throttling faster. Worth testing with one phone under sustained load before
+committing to this path for the full cluster.
 
 ## See also
 
