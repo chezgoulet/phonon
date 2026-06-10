@@ -344,7 +344,7 @@ func (h *OpenAIHandler) selectPhone(modelName string) (string, registry.Node, er
 			if h.maxQueuePerNode > 0 && node.Telemetry.QueueDepth >= h.maxQueuePerNode {
 				continue
 			}
-			candidates = append(candidates, node)
+			candidates = append(candidates, *node)
 		}
 	}
 

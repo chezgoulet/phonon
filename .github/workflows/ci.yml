@@ -81,10 +81,10 @@ jobs:
             "ndk;27.0.12077973" > /dev/null 2>&1 || true
 
       - name: Test
-        run: ./gradlew test
+        run: gradle test
 
       - name: Build APKs
-        run: ./gradlew assembleDebug assembleRelease
+        run: gradle assembleDebug assembleRelease
 
       - name: Upload APKs
         uses: actions/upload-artifact@v4

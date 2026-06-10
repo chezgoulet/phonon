@@ -9,7 +9,9 @@ import (
 	"testing"
 
 	"github.com/chezgoulet/phonon/internal/registry"
-)
+
+const testChatBody = `{"model":"test-model","messages":[{"role":"user","content":"hello"}]}`
+
 
 func TestNewOpenAIHandler(t *testing.T) {
 	reg := registry.New()
@@ -210,7 +212,7 @@ func TestChatCompletionNoPhoneAvailable(t *testing.T) {
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
-	body := `{"model":"test-model","messages":[{"role":"user","content":"hello"}]}`
+	body := testChatBody
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -320,7 +322,7 @@ func TestChatCompletionPhoneFails(t *testing.T) {
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
-	body := `{"model":"test-model","messages":[{"role":"user","content":"hello"}]}`
+	body := testChatBody
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -349,7 +351,7 @@ func TestChatCompletionBackpressure(t *testing.T) {
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
-	body := `{"model":"test-model","messages":[{"role":"user","content":"hello"}]}`
+	body := testChatBody
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -643,10 +645,10 @@ func TestStreamChatCompletionProxyError(t *testing.T) {
 	if !strings.Contains(bodyStr, `"error"`) {
 		t.Errorf("expected error object in SSE, got: %s", bodyStr)
 	}
-	if !strings.Contains(bodyStr, `"inference failed: broken pipe`)+ {
+	if !strings.Contains(bodyStr, `"inference failed: broken pipe`) {
 		t.Errorf("expected inference failed message, got: %s", bodyStr)
 	}
-	if !strings.Contains(bodyStr, `"quote"`)+ {
+	if !strings.Contains(bodyStr, `"quote"`) {
 		t.Errorf("expected escaped quote in error message, got: %s", bodyStr)
 	}
 	if !strings.Contains(bodyStr, `"type":"inference_error"`) {
