@@ -20,7 +20,7 @@ func setupSidecarServer(t *testing.T) (*WSHandler, *httptest.Server) {
 	t.Helper()
 	reg := registry.New()
 	ws := NewWSHandler(reg)
-	sh := NewSidecarHandler(reg, ws)
+	sh := NewSidecarHandler(reg)
 
 	mux := http.NewServeMux()
 	sh.RegisterRoutes(mux)
@@ -159,10 +159,10 @@ func TestIntegration_FullSidecarLifecycle(t *testing.T) {
 
 	// Verify heartbeat updated the registry
 	node2, _ := ws.reg.Get("PHONE-001")
-	if node2.BatteryLevel != 0.85 {
-		t.Errorf("expected battery 0.85, got %f", node2.BatteryLevel)
+	if node2.Telemetry.BatteryLevel != 0.85 {
+		t.Errorf("expected battery 0.85, got %f", node2.Telemetry.BatteryLevel)
 	}
-	if !node2.BatteryCharging {
+	if !node2.Telemetry.IsCharging {
 		t.Error("expected battery charging")
 	}
 

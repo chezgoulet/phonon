@@ -335,7 +335,8 @@ func (h *OpenAIHandler) selectPhone(modelName string) (string, registry.Node, er
 	nodes := h.reg.List()
 
 	candidates := make([]registry.Node, 0)
-	for _, node := range nodes {
+	for i := range nodes {
+		node := &nodes[i]
 		if node.State != registry.NodeStateOnline {
 			continue
 		}
