@@ -1,3 +1,4 @@
+import java.util.Properties
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -78,10 +79,10 @@ tasks.matching { it.name == "mergeReleaseAssets" || it.name == "mergeDebugAssets
 
 // ── Android application ──────────────────────────────────────────────
 
-fun keystoreProperties(): java.util.Properties? {
+fun keystoreProperties(): Properties? {
     val propsFile = rootProject.projectDir.parentFile?.resolve("keystore.properties")
     if (propsFile?.exists() == true) {
-        val props = java.util.Properties()
+        val props = Properties()
         props.load(propsFile.inputStream())
         return props
     }
