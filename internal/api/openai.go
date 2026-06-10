@@ -351,7 +351,8 @@ func (h *OpenAIHandler) selectPhone(modelName string) (string, registry.Node, er
 
 	if len(candidates) == 0 {
 		// Check if the model is loaded somewhere but all nodes are at capacity
-		for _, node := range nodes {
+		for i := range nodes {
+			node := &nodes[i]
 			if node.State == registry.NodeStateOnline && node.ModelStatus.Loaded && node.ModelStatus.Name == modelName {
 				return "", registry.Node{}, fmt.Errorf("all nodes at capacity (queue depth >= %d)", h.maxQueuePerNode)
 			}
@@ -403,7 +404,7 @@ func (h *OpenAIHandler) defaultInferenceProxy(phoneURL string, _ PhoneInferenceR
 	}, nil
 }
 
-func (h *OpenAIHandler) handleStreamingChatCompletion(w http.ResponseWriter, r *http.Request, req ChatCompletionRequest) {
+func (h *OpenAIHandler) handleStreamingChatCompletion(w http.ResponseWriter, _ *http.Request, req ChatCompletionRequest) {
 	// Set defaults
 	if req.MaxTokens <= 0 {
 		req.MaxTokens = 2048
@@ -459,7 +460,7 @@ func (h *OpenAIHandler) handleStreamingChatCompletion(w http.ResponseWriter, r *
 	}
 
 	// Role stanza
-	roleChunk := fmt.Sprintf(`data: {"id":"%s","object":"chat.completion.chunk","created":%d,"model":"%s","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}`,
+	roleChunk := fmt.Sprintf(`data: {"id":"%s","object":"chat.completion.chunk","created":%d,"model":%q,"choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}`,
 		completionID, time.Now().Unix(), req.Model)
 	fmt.Fprintf(w, "%s\n\n", roleChunk)
 	flusher.Flush()
@@ -471,7 +472,7 @@ func (h *OpenAIHandler) handleStreamingChatCompletion(w http.ResponseWriter, r *
 		Temperature: req.Temperature,
 		MaxTokens:   req.MaxTokens,
 	}, func(content string) {
-		chunk := fmt.Sprintf(`data: {"id":"%s","object":"chat.completion.chunk","created":%d,"model":"%s","choices":[{"index":0,"delta":{"content":%s},"finish_reason":null}]}`,
+		chunk := fmt.Sprintf(`data: {"id":"%s","object":"chat.completion.chunk","created":%d,"model":%q,"choices":[{"index":0,"delta":{"content":%s},"finish_reason":null}]}`,
 			completionID, time.Now().Unix(), req.Model, jsonString(content))
 		fmt.Fprintf(w, "%s\n\n", chunk)
 		flusher.Flush()
@@ -495,7 +496,7 @@ func (h *OpenAIHandler) handleStreamingChatCompletion(w http.ResponseWriter, r *
 
 	// Final stanza with usage and finish_reason
 	tokens := estimateTokens(fullText)
-	finalChunk := fmt.Sprintf(`data: {"id":"%s","object":"chat.completion.chunk","created":%d,"model":"%s","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":0,"completion_tokens":%d,"total_tokens":%d}}`,
+	finalChunk := fmt.Sprintf(`data: {"id":"%s","object":"chat.completion.chunk","created":%d,"model":%q,"choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":0,"completion_tokens":%d,"total_tokens":%d}}`,
 		completionID, time.Now().Unix(), req.Model, tokens, tokens)
 	fmt.Fprintf(w, "%s\n\n", finalChunk)
 

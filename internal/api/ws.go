@@ -176,12 +176,12 @@ func (h *WSHandler) handleAck(deviceID string, data []byte) {
 
 	switch ack.Status {
 	case AckAccepted:
-		pc.Status = "accepted"
+		pc.Status = AckAccepted
 	case AckCompleted:
-		pc.Status = "completed"
+		pc.Status = AckCompleted
 		delete(devicePending, ack.CommandID)
 	case AckFailed:
-		pc.Status = "failed"
+		pc.Status = AckFailed
 		pc.Error = ack.Error
 		delete(devicePending, ack.CommandID)
 		h.log.Warn("command failed", "device_id", deviceID, "command_id", ack.CommandID, "error", ack.Error)
@@ -284,7 +284,7 @@ func (h *WSHandler) resendPending(deviceID string) {
 	toRemove := make([]string, 0, len(devicePending))
 
 	for cmdID, pc := range devicePending {
-		if pc.Status == "completed" || pc.Status == "failed" {
+		if pc.Status == AckCompleted || pc.Status == AckFailed {
 			toRemove = append(toRemove, cmdID)
 			continue
 		}

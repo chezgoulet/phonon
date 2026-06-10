@@ -266,7 +266,8 @@ func (m *Monitor) updateMetrics() {
 
 	totalOverheating := 0
 
-	for _, n := range nodes {
+	for i := range nodes {
+		n := &nodes[i]
 		m.metrics.BatteryLevel.WithLabelValues(n.DeviceID).Set(n.Telemetry.BatteryLevel)
 		m.metrics.ThermalTempC.WithLabelValues(n.DeviceID).Set(n.Telemetry.ThermalTempC)
 		m.metrics.QueueDepth.WithLabelValues(n.DeviceID).Set(0) // TODO: wired from API
