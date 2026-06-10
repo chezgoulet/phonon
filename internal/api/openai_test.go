@@ -9,6 +9,8 @@ import (
 	"testing"
 
 	"github.com/chezgoulet/phonon/internal/registry"
+)
+
 
 const testChatBody = `{"model":"test-model","messages":[{"role":"user","content":"hello"}]}`
 
