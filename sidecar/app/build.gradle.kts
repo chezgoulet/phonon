@@ -1,80 +1,20 @@
 import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
-// ── prima.cpp NDK build ───────────────────────────────────────────────
-// Cross-compiles llama.cpp fork for arm64-v8a.
-// Runs only when ANDROID_NDK is set or when jniLibs output is missing.
+// ── Android application ──────────────────────────────────────────────
 
-val primaBuildScript = rootProject.projectDir.resolve("scripts/build-prima.sh")
-val primaOutput = project.layout.projectDirectory
-    .dir("src/main/jniLibs/arm64-v8a/libllama.so")
+// ── Kotlin compiler ───────────────────────────────────────────────
 
-tasks.register<Exec>("buildPrima") {
-    description = "Cross-compile prima.cpp (llama.cpp fork) for arm64-v8a via NDK"
-
-    // Only configure if the script exists (skip on CI without NDK)
-    onlyIf { primaBuildScript.exists() }
-
-    // Run the build script from the repo root
-    workingDir = rootProject.projectDir.parentFile
-    commandLine("bash", primaBuildScript.absolutePath)
-
-    // ANDROID_NDK inherited from shell environment (set in CI or local profile)
-}
-
-// Hook into the build pipeline — if the user has ANDROID_NDK set,
-// build prima.cpp before merging resources
-if (System.getenv("ANDROID_NDK") != null) {
-    tasks.matching { it.name.startsWith("merge") && it.name.endsWith("Resources") }
-        .configureEach {
-            dependsOn("buildPrima")
-        }
-}
-
-// ── OlliteRT release fetch ─────────────────────────────────────────
-// Downloads the pinned APK release, verifies SHA-256, extracts libollitert.so
-// into assets/ollitert/ for bundling in the APK.
-
-val olliteFetchScript = rootProject.projectDir.parentFile
-    .resolve("sidecar/scripts/fetch-ollitert.sh")
-
-var haveOlliteOutput = file(
-    "src/main/assets/ollitert/libollitert.so"
-).exists()
-
-tasks.register<Exec>("fetchOlliteRT") {
-    description = "Download, verify SHA-256, and extract libollitert.so from release APK"
-    group = "phonon-build"
-
-    onlyIf {
-        olliteFetchScript.exists() && !haveOlliteOutput
-    }
-
-    workingDir = rootProject.projectDir.parentFile
-    commandLine("bash", olliteFetchScript.absolutePath)
-
-    // Output must exist after run
-    doLast {
-        haveOlliteOutput = file(
-            "src/main/assets/ollitert/libollitert.so"
-        ).exists()
-        if (!haveOlliteOutput) {
-            throw GradleException(
-                "fetchOlliteRT completed but libollitert.so not found in assets"
-            )
-        }
+kotlin {
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
     }
 }
-
-// Auto-run before APK packaging when output is missing
-tasks.matching { it.name == "mergeReleaseAssets" || it.name == "mergeDebugAssets" }
-    .configureEach {
-        dependsOn("fetchOlliteRT")
-    }
 
 // ── Android application ──────────────────────────────────────────────
 
@@ -131,9 +71,8 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    kotlinOptions {
-        jvmTarget = "17"
-    }
+    // Note: jvmTarget migrated to top-level kotlin.compilerOptions below
+    // (kotlinOptions is removed in Kotlin 2.3)
 
     buildFeatures {
         compose = true
@@ -157,6 +96,9 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
+
+    // LiteRT-LM — on-device LLM inference (replaces prima.cpp JNI + OlliteRT subprocess)
+    implementation("com.google.ai.edge.litertlm:litertlm-android:0.13.0")
 
     // OkHttp for coordinator communication
     implementation("com.squareup.okhttp3:okhttp:4.12.0")

@@ -44,8 +44,8 @@ The sidecar is a Kotlin Android app that runs as a foreground service on each ph
 - Maintains a WebSocket command channel
 - Reports health telemetry (battery, temperature, storage) every 60s
 - Downloads model files via HTTP Range requests
-- Starts/stops the OlliteRT inference engine
-- Proxies inference requests to OlliteRT
+- Loads and runs LiteRT-LM models directly (NPU-accelerated on Pixel Tensor chips)
+- Serves inference via LiteRT-LM's Kotlin SDK (no separate engine process)
 
 Build: `cd sidecar && ./gradlew assembleRelease` (Android SDK 35+, Kotlin 2.1)
 

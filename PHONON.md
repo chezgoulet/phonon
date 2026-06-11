@@ -8,13 +8,13 @@ Phonon is infrastructure software. It does not perform inference. It coordinates
 
 ## What Phonon Is Not
 
-Phonon is not an inference engine, a model runtime, an agent framework, a home automation platform, or a voice assistant. It consumes inference engines (OlliteRT, prima.cpp, llama.cpp) as dependencies. It exposes endpoints that agent frameworks and automation platforms consume. It stays in its lane: discovery, routing, health, configuration.
+Phonon is not an inference engine, a model runtime, an agent framework, a home automation platform, or a voice assistant. It consumes inference engines (LiteRT-LM, prima.cpp, llama.cpp) as dependencies. It exposes endpoints that agent frameworks and automation platforms consume. It stays in its lane: discovery, routing, health, configuration.
 
 ## Why Phonon Exists
 
 The gap between "hit a cloud API" and "run inference yourself" currently costs $1,000+ minimum (a desktop GPU or a Mac Studio). Used phones with cracked screens cost $50–100 each, draw 5–10W, have 6–12 GB of RAM, NPUs capable of accelerating inference, and built-in batteries that act as per-node UPS. A cluster of six phones aggregates 36–48 GB of usable memory at a total cost of $300–600 and a power draw of 25–50W.
 
-The models are ready. Gemma 4 E2B runs multimodal inference (text, vision, audio) in under 2 GB. The inference engines are ready. OlliteRT ships a pre-built APK that turns any Android phone into an OpenAI-compatible inference server. The agent frameworks are ready. OpenClaw, Home Assistant, and dozens of others consume OpenAI-compatible endpoints.
+The models are ready. Gemma 4 E2B runs multimodal inference (text, vision, audio) in under 2 GB. The inference engines are ready. LiteRT-LM brings NPU-accelerated inference via a Kotlin SDK, no separate APK needed. The agent frameworks are ready. OpenClaw, Home Assistant, and dozens of others consume OpenAI-compatible endpoints.
 
 The missing piece is pure orchestration: install an APK on a handful of phones, they self-organize into a compute pool, one endpoint appears on your network, your agent framework points at it and gets local, private, zero-cost inference. Phonon is that missing piece.
 
@@ -100,15 +100,15 @@ Phonon consists of exactly two components:
 
 **The coordinator.** A single Go binary that serves three functions: discovery and pairing (finds phones on the LAN, establishes trust), cluster management (assigns phones to groups, monitors health, manages model lifecycle), and request routing (exposes the unified API endpoint, routes to the appropriate group, load-balances, streams responses). The coordinator also serves the web UI — a React frontend embedded in the Go binary via `go:embed`. No separate frontend deployment. One binary, one port, serves the API and the UI.
 
-**The phone app.** A single APK installed on every phone. The phone is always a worker node. The phone runs two sub-components: the inference engine (OlliteRT in pool mode, prima.cpp in shard mode) and the cluster sidecar (a lightweight service that handles mDNS announcement, coordinator pairing, health telemetry, and control commands).
+**The phone app.** A single APK installed on every phone. The phone is always a worker node. The phone runs two sub-components: the inference engine (LiteRT-LM in pool mode, prima.cpp in shard mode) and the cluster sidecar (a lightweight service that handles mDNS announcement, coordinator pairing, health telemetry, and control commands).
 
 The coordinator runs on a Raspberry Pi, a laptop, a NAS, a home server, or any device on the network that can run a Go binary or a Docker container. The coordinator does not run on a phone. This is a deliberate simplification — running a Go binary with embedded React assets inside an Android app via gomobile or Termux introduces significant complexity for a marginal convenience. Phones are workers; the coordinator runs on a more reliable host.
 
 ### Sidecar Architecture
 
-The sidecar architecture is critical for long-term maintainability. The inference engine (OlliteRT, prima.cpp) is a dependency, not a fork. The sidecar communicates with it over localhost HTTP or IPC. When OlliteRT updates, the new version drops in without touching the cluster-awareness code. Small, upstreamable patches to OlliteRT (model lifecycle callbacks, queue depth metrics) are contributed upstream. If any upstream dependency dies or changes direction, only the adapter layer in the sidecar needs to be rewritten.
+The sidecar architecture is critical for long-term maintainability. The inference engine (LiteRT-LM, prima.cpp) is a dependency, not a fork. The sidecar communicates with it over the Kotlin SDK (LiteRT-LM) or localhost IPC (prima.cpp, future). When LiteRT-LM updates, the new version drops in via Gradle dependency version bump without touching the cluster-awareness code. If any upstream dependency dies or changes direction, only the adapter layer in the sidecar needs replacement.
 
-The coordinator is owned code. The sidecar is owned code. Everything underneath (OlliteRT, LiteRT-LM, prima.cpp, llama.cpp) is consumed but not owned.
+The coordinator is owned code. The sidecar is owned code. Everything underneath (LiteRT-LM, prima.cpp, llama.cpp) is consumed but not owned.
 
 ### Coordinator-Sidecar Protocol
 
@@ -118,7 +118,7 @@ The coordinator and sidecars communicate over two channels:
 
 **WebSocket (coordinator → sidecar).** The coordinator maintains a persistent WebSocket connection to each paired sidecar for pushing commands that require immediate action: model push initiation, load/unload commands, mode changes (pool to shard), standby promotion, and graceful shutdown. The WebSocket gives the coordinator a push channel without requiring sidecars to poll for pending commands. If the WebSocket connection drops (coordinator restart, network interruption), the sidecar reconnects and the coordinator re-sends any pending commands.
 
-The sidecar communicates with its local inference engine (OlliteRT, prima.cpp) over localhost HTTP or IPC. This is a separate interface from the coordinator-sidecar protocol — the sidecar translates between coordinator commands and inference engine operations.
+The sidecar communicates with its local inference engine over the Kotlin SDK (LiteRT-LM) or localhost IPC (prima.cpp, future). This is a separate interface from the coordinator-sidecar protocol — the sidecar translates between coordinator commands and inference engine operations.
 
 ### Node Configurations
 
@@ -327,7 +327,7 @@ Under sustained load: ~10–20% performance drop after 5 minutes, ~30–40% afte
 | Coordinator | Go | Single static binary, cross-compiles to ARM64, no runtime deps. The language of the infrastructure tools the target audience trusts (Traefik, Prometheus, Caddy). |
 | Web UI | React + Tailwind, embedded via `go:embed` | No separate frontend deployment. |
 | Phone app | Kotlin | Native Android, first-class LiteRT-LM SDK support. |
-| Pool mode inference | OlliteRT (LiteRT-LM runtime) | Pre-built APK, NPU acceleration, OpenAI-compatible API. Consumed as a dependency via sidecar. |
+| Pool mode inference | LiteRT-LM (Kotlin SDK) | Direct Gradle dependency, NPU acceleration, OpenAI-compatible API. No separate engine process. Apache 2.0. |
 | Shard mode inference | prima.cpp | Pipeline parallelism designed for home clusters with heterogeneous devices and Wi-Fi tolerance. MIT licensed. |
 | Shard mode fallback | llama.cpp RPC | Mature, widely tested. Fallback if prima.cpp integration proves problematic. MIT licensed. |
 
@@ -337,7 +337,7 @@ Under sustained load: ~10–20% performance drop after 5 minutes, ~30–40% afte
 |---|---|---|
 | Coordinator | Owned code (greenfield) | No existing project does this. Own it entirely. |
 | Phone app sidecar | Owned code (greenfield) | Cluster-awareness, health telemetry, coordinator control API. |
-| OlliteRT | Dependency (Git submodule / Gradle module) | No source modifications. Integration via localhost HTTP. Small upstream PRs for hooks where needed. If rejected, maintain minimal patch set. |
+| LiteRT-LM | Direct Gradle dependency (Kotlin SDK) | No modifications. NPU-accelerated inference via bundled native library. |
 | prima.cpp | Runtime dependency | Packaged and invoked in shard mode. No modifications. |
 | llama.cpp | Runtime dependency | Foundation layer. No modifications. |
 | LiteRT / LiteRT-LM | Runtime dependency | Google's on-device ML runtime. No modifications. |
@@ -400,12 +400,12 @@ Version 1.0 ships two phases that together constitute a complete, production-usa
 
 #### Phase 1 — Pool Mode (Alpha)
 
-Each phone runs independently with LiteRT-LM and NPU acceleration via OlliteRT. The coordinator discovers phones, manages configuration, routes requests, serves the web UI, handles OIDC. The unified API endpoint works.
+- Each phone runs independently with LiteRT-LM (NPU-accelerated via Kotlin SDK). The coordinator discovers phones, manages configuration, routes requests, serves the web UI, handles OIDC. The unified API endpoint works.
 
 Deliverables:
 
 - Coordinator binary (Go, cross-compiled for amd64 and arm64) and Docker image
-- Phone APK with sidecar and OlliteRT integration
+- Phone APK with sidecar and LiteRT-LM inference
 - Web UI with phone tiles (status, battery, temperature, network, queue depth), group management, drag-and-drop assignment, API endpoint display
 - Declarative YAML configuration
 - mDNS discovery and zero-touch pairing (mDNS token broadcast + click-to-accept in coordinator UI, with device audit)
@@ -507,7 +507,7 @@ All upstream dependencies are license-clean for open-source distribution and com
 
 | Component | License |
 |---|---|
-| OlliteRT | Apache 2.0 |
+| LiteRT-LM | Apache 2.0 |
 | LiteRT / LiteRT-LM | Apache 2.0 |
 | prima.cpp | MIT |
 | llama.cpp | MIT |
@@ -526,8 +526,8 @@ License for Phonon itself is undecided. Options:
 
 Phonon must not depend on Google Play Services. The target audience includes users running degoogled phones (GrapheneOS, CalyxOS, LineageOS without GApps). All upstream dependencies must be audited for Google Play Services requirements before inclusion:
 
-- **LiteRT / LiteRT-LM:** Some LiteRT features historically depended on Google Play Services for GPU delegate initialization. Verify that the CPU and NPU paths used by OlliteRT work without Play Services. Test on a clean GrapheneOS install without sandboxed Play Services early in development.
-- **OlliteRT:** Check whether OlliteRT's APK bundles any Play Services dependencies (Firebase, Google Analytics, Play Core). If it does, either contribute upstream patches to remove them or maintain a de-googled build variant.
+- **LiteRT / LiteRT-LM:** Some LiteRT features historically depended on Google Play Services for GPU delegate initialization. Verify that the CPU and NPU paths used by LiteRT-LM work without Play Services. Test on a clean GrapheneOS install without sandboxed Play Services early in development. LiteRT-LM is direct Kotlin SDK, no separate APK — this simplifies GrapheneOS deployment.
+- **OlliteRT:** ~~Check whether OlliteRT's APK bundles any Play Services dependencies.~~ **Resolved.** Switched to LiteRT-LM direct Kotlin SDK — no separate APK, no Play Services concerns beyond LiteRT's own GPU delegate path (checked above).
 - **Model downloads:** The coordinator handles model downloads, so phones don't need internet access or any Google services for model acquisition.
 
 If any dependency proves incompatible with degoogled Android, document the limitation and explore alternatives. Play Services compatibility is a hard requirement, not a nice-to-have.
@@ -585,7 +585,7 @@ The following ideas have been evaluated and deferred. They are recorded here to 
 
 | What | Status |
 |---|---|
-| Single phone as inference server | Works today (OlliteRT, Ollama via Termux) |
+| Single phone as inference server | Works today (LiteRT-LM CLI, Ollama via Termux) |
 | Independent phones behind a manual router | Works today (manual LiteLLM/nginx config) |
 | Declarative phone cluster with unified API | **Phonon 1.0 — Phase 1** |
 | Shard mode (model across multiple phones, CPU) | **Phonon 1.0 — Phase 2** |

@@ -2,9 +2,9 @@ name: CI
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, testing]
   push:
-    branches: [main]
+    branches: [main, testing]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -40,17 +40,16 @@ jobs:
           path: ui/dist/
           if-no-files-found: error
 
-  # ─── Sidecar (Kotlin / Android) ───────────────────────────────────
+  # ─── Sidecar (Kotlin / Android / LiteRT-LM) ───────────────────────
   kotlin:
     name: Sidecar
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: sidecar
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: recursive
 
       - uses: actions/setup-java@v4
         with:
@@ -59,13 +58,6 @@ jobs:
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
-
-      - name: Cache NDK
-        id: cache-ndk
-        uses: actions/cache@v4
-        with:
-          path: /usr/local/lib/android/sdk/ndk
-          key: ndk-${{ runner.os }}-27.0.12077973
 
       - name: Setup Android SDK
         run: |
@@ -82,38 +74,70 @@ jobs:
             mv "$ANDROID_HOME/cmdline-tools/cmdline-tools" "$ANDROID_HOME/cmdline-tools/latest"
           fi
 
-          # If NDK was restored from cache (4.2 GB!), skip the install.
-          if [ -d "$ANDROID_HOME/ndk/27.0.12077973" ]; then
-            echo "NDK cache hit – skipping NDK installation"
-          else
-            yes | "$SDKMANAGER" --install \
-              "platforms;android-35" \
-              "build-tools;35.0.0" \
-              "ndk;27.0.12077973" > /dev/null 2>&1 || true
-          fi
-
-      - name: Set ANDROID_NDK
-        run: echo "ANDROID_NDK=$ANDROID_HOME/ndk/27.0.12077973" >> "$GITHUB_ENV"
-
-      - name: Install Ninja
-        run: sudo apt-get install -y -qq ninja-build
+          yes | "$SDKMANAGER" --install \
+            "platforms;android-35" \
+            "build-tools;35.0.0" > /dev/null 2>&1 || true
 
       - name: Test
         env:
           GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx1536m -XX:MaxMetaspaceSize=512m"
         run: gradle test --max-workers 2
 
-      - name: Cache libllama.so
-        id: cache-llama
-        uses: actions/cache@v4
-        with:
-          path: sidecar/app/src/main/jniLibs/arm64-v8a/libllama.so
-          key: libllama-${{ hashFiles('extern/prima.cpp/**', 'sidecar/scripts/build-prima.sh', 'sidecar/app/build.gradle.kts') }}
-
       - name: Build APKs
         env:
           GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx1536m -XX:MaxMetaspaceSize=512m"
         run: gradle assembleDebug assembleRelease --max-workers 2
+
+      - name: Sign Release APK
+        env:
+          KEYSTORE_BASE64: ${{ secrets.PHONON_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.PHONON_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.PHONON_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.PHONON_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "⚠️ PHONON_KEYSTORE_BASE64 not set — skipping APK signing"
+            echo "   (expected on PR builds from forks; secrets are available on push events)"
+            exit 0
+          fi
+
+          echo "🔐 Decoding keystore..."
+          KEYSTORE_FILE="/tmp/release.keystore"
+          echo "$KEYSTORE_BASE64" | base64 -d > "$KEYSTORE_FILE"
+
+          APK_DIR="$GITHUB_WORKSPACE/sidecar/app/build/outputs/apk/release"
+          UNSIGNED_APK="$APK_DIR/app-release-unsigned.apk"
+          SIGNED_APK="$APK_DIR/app-release.apk"
+
+          if [ ! -f "$UNSIGNED_APK" ]; then
+            echo "❌ Release APK not found at $UNSIGNED_APK"
+            exit 1
+          fi
+
+          echo "📝 Signing with jarsigner..."
+          jarsigner -verbose \
+            -keystore "$KEYSTORE_FILE" \
+            -storepass "$KEYSTORE_PASSWORD" \
+            -keypass "$KEY_PASSWORD" \
+            -sigalg SHA256withRSA \
+            -digestalg SHA-256 \
+            "$UNSIGNED_APK" "$KEY_ALIAS"
+
+          echo "✅ Verifying signature..."
+          jarsigner -verify -verbose "$UNSIGNED_APK"
+
+          echo "📦 Aligning with zipalign..."
+          ANDROID_HOME="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+          ANDROID_HOME="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          ZIPALIGN="$ANDROID_HOME/build-tools/35.0.0/zipalign"
+          "$ZIPALIGN" -f -v 4 "$UNSIGNED_APK" "$SIGNED_APK"
+
+          # Remove the unsigned APK (signed + aligned version replaces it)
+          rm "$UNSIGNED_APK"
+
+          echo "✅ Release APK signed and aligned: $SIGNED_APK"
 
       - name: Upload APKs
         uses: actions/upload-artifact@v4

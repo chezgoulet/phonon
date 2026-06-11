@@ -1,0 +1,51 @@
+version: "3.9"
+
+# Phonon Coordinator — inference mesh coordinator service.
+#
+# Quick start:
+#   docker compose up -d
+#   curl http://localhost:8080/health
+#
+# Configuration via environment variables (see phonon.yaml for all options):
+#   PHONON_CONFIG     — path to config file (default: phonon.yaml)
+#   PHONON_PORT       — HTTP listen port (default: 8080)
+#   PHONON_CACHE_DIR  — model cache directory (default: ./cache)
+#   PHONON_COORDINATOR_URL — external URL for model distribution (default: http://localhost:8080)
+#
+# For TLS, see phonon.yaml → cluster.tls section and pass certificate files.
+
+services:
+  coordinator:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: chezgoulet/phonon-coordinator:latest
+    container_name: phonon-coordinator
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      # Config (optional — defaults are used if file doesn't exist)
+      - ./phonon.yaml:/app/phonon.yaml:ro
+      # Model cache (persistent downloads across restarts)
+      - phonon-cache:/app/cache
+      # Persistent event log
+      - phonon-data:/app/data
+    environment:
+      PHONON_CONFIG: /app/phonon.yaml
+      PHONON_PORT: "8080"
+      PHONON_CACHE_DIR: /app/cache
+      PHONON_COORDINATOR_URL: http://localhost:8080
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    # Network: host mode is recommended when phones need to reach the coordinator
+    # on a LAN IP without NAT. Remove network_mode if port mapping suffices.
+    # network_mode: "host"
+
+volumes:
+  phonon-cache:
+  phonon-data:

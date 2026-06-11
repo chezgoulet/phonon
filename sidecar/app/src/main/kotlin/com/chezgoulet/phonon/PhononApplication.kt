@@ -41,10 +41,10 @@ class PhononApplication : Application() {
         deviceId = androidId
 
         // Read initial IP
-        ipAddress = getIpAddress()
+        ipAddress = resolveIpAddress()
     }
 
-    private fun getIpAddress(): String {
+    private fun resolveIpAddress(): String {
         return try {
             val wifiManager = applicationContext
                 .getSystemService(Context.WIFI_SERVICE) as? android.net.wifi.WifiManager

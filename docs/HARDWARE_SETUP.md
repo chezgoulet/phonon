@@ -33,7 +33,7 @@ For a **first cluster**, buy 6 matching Pixel 7a units. They're cheap, well
 supported by GrapheneOS, and the Tensor TPU handles 2-3B models comfortably.
 
 For a **mixed cluster**, use Pixel 7a for pool mode (NPU inference) and
-Samsung Galaxy S23 for shard mode (CPU inference with prima.cpp).
+Samsung Galaxy S23 for shard mode (CPU inference with prima.cpp, Phase 2).
 
 ### Networking
 

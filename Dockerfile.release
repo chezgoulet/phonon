@@ -1,0 +1,14 @@
+# Release image — expects pre-built coordinator binaries at build context
+# Multi-arch: TARGETARCH is set automatically by Docker Buildx
+#   amd64 → copies phonon-coordinator-linux-amd64
+#   arm64 → copies phonon-coordinator-linux-arm64
+
+FROM alpine:3.20 AS certs
+RUN apk add --no-cache ca-certificates
+
+FROM scratch
+ARG TARGETARCH
+COPY --from=certs /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+COPY phonon-coordinator-linux-${TARGETARCH} /phonon-coordinator
+EXPOSE 8080
+ENTRYPOINT ["/phonon-coordinator"]

@@ -3,6 +3,7 @@ package com.chezgoulet.phonon
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.util.Log
 import android.app.Service
 import android.content.Context
 import android.content.Intent
@@ -44,8 +45,8 @@ class PhononService : Service() {
     private var wakeLock: PowerManager.WakeLock? = null
 
     // Coordinator configuration — loaded from phonon.conf, fallback to mDNS, then 255.255.255.255
-    private var coordinatorHost: String = "255.255.255.255"
-    private var coordinatorPort: Int = 8080
+    internal var coordinatorHost: String = "255.255.255.255"
+    internal var coordinatorPort: Int = 8080
 
     // Status for notification
     @Volatile
@@ -169,12 +170,11 @@ class PhononService : Service() {
         mdnsAnnouncer = MDNSAnnouncer(this, app.deviceId, app.deviceModel)
         mdnsAnnouncer.start()
 
-        // Model manager — extracts native binaries, manages inference engines
+        // Model manager — loads .litertlm models via LiteRT-LM SDK
         modelManager = ModelManager(this)
-        modelManager.extractBinaries()
 
-        // Inference server — local HTTP proxy to OlliteRT / prima.cpp
-        inferenceServer = InferenceServer(this)
+        // Inference server — local HTTP server backed by LiteRT-LM
+        inferenceServer = InferenceServer(this, modelManager)
         inferenceServer.start()
 
         // Coordinator client — REST + WebSocket
@@ -191,7 +191,7 @@ class PhononService : Service() {
                 scope.launch {
                     loadedModel = modelName
                     updateNotification()
-                    modelManager.loadModel(modelName, modelUrl, engine)
+                    modelManager.loadModel(modelName, modelUrl)
                 }
             },
             onModelUnload = {
@@ -256,7 +256,6 @@ class PhononService : Service() {
             .setContentText("Device: $deviceText · $statusText · $modelText")
             .setSmallIcon(android.R.drawable.ic_menu_compass)
             .setOngoing(true)
-            .setSilent(true)
             .build()
     }
 

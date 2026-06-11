@@ -74,7 +74,7 @@ func main() {
 	})
 	if err != nil {
 		logger.Error("event log init failed", "error", err)
-		os.Exit(1)
+		return
 	}
 	defer eventLog.Close()
 
@@ -87,12 +87,11 @@ func main() {
 	openaiHandler := api.NewOpenAIHandler(reg, api.WithMaxQueuePerNode(cfg.Cluster.Queue.MaxPerNode))
 	clusterHandler := api.NewClusterHandler(reg)
 
-	// The inference proxy defaults to a placeholder mock. Warn loudly so
-	// operators don't confuse simulated responses with real inference.
-	logger.Warn("inference proxy using placeholder mock — phone inference not yet implemented",
+	// The inference proxy now routes to phones via HTTP on the default
+	// sidecar port (9876). The phone must be running the Phonon sidecar
+	// with an active model load for inference to succeed.
+	logger.Info("inference proxy ready — routing to phones via HTTP",
 		"component", "openai")
-	logger.Warn("set PHONON_INFERENCE_URL or override via SetInferenceProxy for real phone inference",
-		"hint", "see internal/api/openai.go")
 
 
 	// Create auth middleware
@@ -104,7 +103,7 @@ func main() {
 
 	if err := authMiddleware.Start(); err != nil {
 		logger.Error("auth middleware start failed", "error", err)
-		os.Exit(1)
+		return
 	}
 	defer authMiddleware.Stop()
 
@@ -127,6 +126,9 @@ func main() {
 		}
 		if cfg.Cluster.Health.Battery.CapacityThreshold > 0 {
 			healthCfg.BatteryCapacityThreshold = cfg.Cluster.Health.Battery.CapacityThreshold
+		}
+		if cfg.Cluster.Health.DrainingThreshold > 0 {
+			healthCfg.DrainingThreshold = cfg.Cluster.Health.DrainingThreshold
 		}
 		if d := cfg.Cluster.Health.OfflineTimeoutDuration(); d > 0 {
 			healthCfg.OfflineTimeout = d
@@ -203,6 +205,10 @@ func main() {
 	eventAPI := phononlog.NewAPIHandler(eventLog)
 	eventAPI.RegisterRoutes(protectedMux)
 
+	// Model download endpoint (protected) — serves cached GGUF files
+	modelAPI := api.NewModelDownloadHandler(modelCache, cacheDir)
+	modelAPI.RegisterRoutes(protectedMux)
+
 	mux.Handle("/api/v1/", authMiddleware.Handler(protectedMux))
 
 	// Metrics — public, served from the health monitor's private Prometheus registry
@@ -222,10 +228,25 @@ func main() {
 	defer cancel()
 
 	go func() {
-		logger.Info("listening", "addr", addr, "auth_mode", authMiddleware.Status().Mode)
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			logger.Error("server error", "error", err)
-			os.Exit(1)
+		// Start with TLS if configured, otherwise plain HTTP
+		if cfg != nil && cfg.Cluster.TLS.Enabled {
+			cert := cfg.Cluster.TLS.CertFile
+			key := cfg.Cluster.TLS.KeyFile
+			if cert == "" || key == "" {
+				logger.Error("TLS enabled but cert_file or key_file not set")
+				os.Exit(1)
+			}
+			logger.Info("listening (TLS)", "addr", addr, "auth_mode", authMiddleware.Status().Mode, "cert", cert)
+			if err := server.ListenAndServeTLS(cert, key); err != nil && err != http.ErrServerClosed {
+				logger.Error("server error", "error", err)
+				os.Exit(1)
+			}
+		} else {
+			logger.Info("listening", "addr", addr, "auth_mode", authMiddleware.Status().Mode, "tls", false)
+			if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				logger.Error("server error", "error", err)
+				os.Exit(1)
+			}
 		}
 	}()
 

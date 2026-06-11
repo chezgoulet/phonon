@@ -160,6 +160,7 @@ func TestLowBattery_ChargingNodeStaysIncluded(t *testing.T) {
 
 func TestLowBattery_HysteresisReentry(t *testing.T) {
 	m, reg := setupTest(t)
+	m.cfg.DrainingThreshold = 0
 	m.cfg.BatteryLowThreshold = 15
 	m.cfg.BatteryReentryThreshold = 30
 
@@ -264,6 +265,7 @@ func TestDegradedCapacity_MarksDegraded(t *testing.T) {
 
 func TestDegradedCapacity_IgnoresBatteryLevel(t *testing.T) {
 	m, reg := setupTest(t)
+	m.cfg.DrainingThreshold = 0
 	m.cfg.BatteryCapacityThreshold = 80
 
 	registerNode(t, reg, "device-1", "test-phone")

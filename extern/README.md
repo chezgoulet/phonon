@@ -1,31 +1,19 @@
 # extern — External dependency sources
 
-This directory holds pinned upstream sources for native inference engines
-used by the sidecar APK.
+This directory exists for tooling documentation and legacy artifact references.
+LiteRT-LM (the sole inference engine) is consumed as a standard Maven artifact
+from Google's Maven repository — no submodules or manual builds needed.
 
-| Dependency | Method | License | Purpose |
-|---|---|---|---|
-| `prima.cpp/` | Git submodule | MIT | CPU inference engine (shard mode) |
-| `ollitert/` | Pinned release artifact (see README) | Apache 2.0 | NPU inference engine (pool mode) |
+| Dependency | Source | Method |
+|---|---|---|
+| `LiteRT-LM` | `com.google.ai.edge.litertlm:litertlm-android:0.13.0` | Maven artifact (Google Maven) |
 
-## Updating a submodule
+## LiteRT-LM
 
-```bash
-cd extern/prima.cpp
-git fetch origin
-git checkout <new-tag-or-commit>
-cd ..
-git add prima.cpp
-git commit -m "chore: bump prima.cpp to <version>"
-```
+- SDK: https://ai.google.dev/edge/litert-lm/android
+- Source: https://github.com/google-ai-edge/LiteRT-LM
+- Models: https://huggingface.co/litert-community
 
-## Adding a new submodule
-
-```bash
-git submodule add <url> extern/<name>
-cd extern/<name>
-git checkout <pinned-commit>
-cd ../..
-git add .gitmodules extern/<name>
-git commit -m "feat: add <name> as extern dependency"
-```
+Models are downloaded at runtime from the LiteRT Community HuggingFace
+organization in `.litertlm` format (not GGUF). The SDK handles all
+hardware acceleration (CPU, GPU, NPU) internally.

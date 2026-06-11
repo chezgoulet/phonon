@@ -7,7 +7,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
+
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -75,7 +75,7 @@ private fun DrawScope.drawNeuralVisualizer(
     drawCircle(
         color = ringColor.copy(alpha = if (isProcessing) 0.6f else 0.2f),
         radius = radius + 8f,
-        center = Offset(cx, cy),
+        center = androidx.compose.ui.geometry.Offset(cx, cy),
         style = Stroke(width = 2f)
     )
 
@@ -83,7 +83,7 @@ private fun DrawScope.drawNeuralVisualizer(
     drawCircle(
         color = ringColor.copy(alpha = if (isProcessing) 0.4f else 0.1f),
         radius = radius * 0.6f + 4f,
-        center = Offset(cx, cy),
+        center = androidx.compose.ui.geometry.Offset(cx, cy),
         style = Stroke(width = 1.5f)
     )
 
@@ -92,12 +92,12 @@ private fun DrawScope.drawNeuralVisualizer(
     drawCircle(
         color = ringColor.copy(alpha = 0.15f),
         radius = glowRadius * 2f,
-        center = Offset(cx, cy)
+        center = androidx.compose.ui.geometry.Offset(cx, cy)
     )
     drawCircle(
         color = ringColor.copy(alpha = if (isProcessing) 0.3f else 0.1f),
         radius = glowRadius,
-        center = Offset(cx, cy)
+        center = androidx.compose.ui.geometry.Offset(cx, cy)
     )
 
     if (degraded) return // Skip particles when battery is low
@@ -113,14 +113,14 @@ private fun DrawScope.drawNeuralVisualizer(
         drawCircle(
             color = ringColor.copy(alpha = nodeAlpha),
             radius = 4f,
-            center = Offset(nx, ny)
+            center = androidx.compose.ui.geometry.Offset(nx.toFloat(), ny.toFloat())
         )
 
         // Connection line to center
         drawLine(
             color = ringColor.copy(alpha = nodeAlpha * 0.3f),
-            start = Offset(nx, ny),
-            end = Offset(cx, cy),
+            start = androidx.compose.ui.geometry.Offset(nx.toFloat(), ny.toFloat()),
+            end = androidx.compose.ui.geometry.Offset(cx, cy),
             strokeWidth = 1f
         )
     }
@@ -143,7 +143,7 @@ private fun DrawScope.drawNeuralVisualizer(
                 drawCircle(
                     color = Color(0xFF22C55E).copy(alpha = 0.4f),
                     radius = 2f,
-                    center = Offset(gx, gy)
+                    center = androidx.compose.ui.geometry.Offset(gx.toFloat(), gy.toFloat())
                 )
             }
         }
@@ -155,7 +155,7 @@ private fun DrawScope.drawNeuralVisualizer(
         drawCircle(
             color = Color(0xFF22C55E).copy(alpha = (1f - pulsePhase) * 0.3f),
             radius = radius + 16f + pulsePhase * 40f,
-            center = Offset(cx, cy),
+            center = androidx.compose.ui.geometry.Offset(cx, cy),
             style = Stroke(width = 2f * (1f - pulsePhase))
         )
     }

@@ -208,10 +208,10 @@ sidecar/src/main/java/com/phonon/worker/
     HealthReporter.kt   # Battery, thermal, storage, queue depth
     ControlServer.kt    # HTTP server for coordinator commands
     ConfigManager.kt    # Local config file management (phonon.conf)
-  inference/            # Adapter layer for inference engines
+  inference/            # Inference layer via LiteRT-LM SDK
     InferenceEngine.kt  # Interface/abstraction
-    OlliteRTAdapter.kt  # OlliteRT over localhost HTTP
-    PrimaAdapter.kt     # prima.cpp via NDK bridge (Phase 2)
+    LiteRtAdapter.kt    # LiteRT-LM Kotlin SDK integration (current — pool mode)
+    PrimaAdapter.kt     # prima.cpp via NDK bridge (Phase 2 — shard mode)
   model/                # Model lifecycle
     ModelManager.kt     # Download, verify, load, unload
   network/
@@ -245,7 +245,7 @@ sidecar/src/main/java/com/phonon/worker/
 - **JUnit 5** for unit tests. **MockK** for mocking.
 - Compose UI tests for the (minimal) setup UI.
 - `@MediumTest` for sidecar integration tests (pairing, health reporting).
-- Mock the inference engine. Never call OlliteRT or prima.cpp in unit tests.
+- Mock the inference engine. Never call LiteRT-LM or prima.cpp in unit tests.
 
 ---
 
