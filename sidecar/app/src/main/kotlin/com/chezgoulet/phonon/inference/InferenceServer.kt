@@ -40,12 +40,18 @@ class InferenceServer(private val context: Context) {
             httpServer = HttpServer.create(InetSocketAddress(port), 0)
             httpServer?.executor = Executors.newFixedThreadPool(4)
 
+            // OpenAI-compatible chat completions endpoint — used by coordinator
+            httpServer?.createContext("/v1/chat/completions") { exchange ->
+                handleInference(exchange)
+            }
+
+            // Legacy inference endpoint
             httpServer?.createContext("/infer") { exchange ->
                 handleInference(exchange)
             }
 
             httpServer?.createContext("/health") { exchange ->
-                val response = """{"status":"ok","ollite_running":false}"""
+                val response = """{"status":"ok"}"""
                 exchange.sendResponseHeaders(200, response.length.toLong())
                 exchange.responseBody.write(response.toByteArray())
                 exchange.responseBody.close()
@@ -85,7 +91,7 @@ class InferenceServer(private val context: Context) {
                 org.json.JSONObject(body)
             )
 
-            // Proxy to OlliteRT
+                // Build inference request
             val olliteBody = buildOlliteRequest(request)
             val olliteRequest = Request.Builder()
                 .url(olliteUrl)
@@ -96,13 +102,13 @@ class InferenceServer(private val context: Context) {
             val olliteBodyStr = olliteResponse.body?.string() ?: "{}"
 
             if (!olliteResponse.isSuccessful) {
-                sendError(exchange, 502, "OlliteRT error: ${olliteResponse.code}")
+                sendError(exchange, 502, "Inference engine error: ${olliteResponse.code}")
                 return
             }
 
-            // Parse OlliteRT response and extract text
-            val olliteJson = org.json.JSONObject(olliteBodyStr)
-            val choices = olliteJson.optJSONArray("choices")
+            // Parse inference engine response
+            val engineJson = org.json.JSONObject(olliteBodyStr)
+            val choices = engineJson.optJSONArray("choices")
             val text = if (choices != null && choices.length() > 0) {
                 choices.getJSONObject(0)
                     .optJSONObject("message")
@@ -111,10 +117,11 @@ class InferenceServer(private val context: Context) {
                 ""
             }
 
-            val usage = olliteJson.optJSONObject("usage")
+            val usage = engineJson.optJSONObject("usage")
             val totalTokens = usage?.optInt("total_tokens", text.length / 4) ?: (text.length / 4)
             val completionTokens = usage?.optInt("completion_tokens", totalTokens) ?: totalTokens
 
+            // Return non-streaming response
             val response = InferenceResponse(
                 text = text,
                 tokens = completionTokens,

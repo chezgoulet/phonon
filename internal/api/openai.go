@@ -2,8 +2,10 @@
 package api
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"math/rand"
 	"net/http"
@@ -79,6 +81,7 @@ type PhoneInferenceRequest struct {
 	Messages    []Message `json:"messages"`
 	Temperature float64   `json:"temperature"`
 	MaxTokens   int       `json:"max_tokens"`
+	Stream      bool      `json:"stream,omitempty"`
 }
 
 // PhoneInferenceResponse is returned by the phone after inference.
@@ -393,15 +396,48 @@ func (h *OpenAIHandler) selectPhone(modelName string) (string, registry.Node, er
 // Default port for the sidecar's InferenceServer. Must match sidecar/app/.../InferenceServer.kt.
 const defaultInferencePort = 9876
 
-// defaultInferenceProxy sends an inference request to a phone's local endpoint.
-func (h *OpenAIHandler) defaultInferenceProxy(phoneURL string, _ PhoneInferenceRequest) (*PhoneInferenceResponse, error) {
-	// Phone inference is not yet implemented on the sidecar side.
-	// This returns a placeholder response for development.
-	return &PhoneInferenceResponse{
-		Text:     "Inference endpoint not yet available. Phone URL: " + phoneURL,
-		Tokens:   10,
-		Duration: 0,
-	}, nil
+// openaiCompatibleEndpoint is the path on the sidecar's HTTP server that accepts
+// OpenAI-compatible chat completion requests.
+const openaiCompatibleEndpoint = "/v1/chat/completions"
+
+// InferenceHTTPClient is the shared HTTP client for outbound inference requests.
+// Exposed as a variable so tests can override it with a short-lived client.
+var InferenceHTTPClient = &http.Client{
+	Timeout: 120 * time.Second,
+}
+
+// defaultInferenceProxy sends an inference request to a phone's local endpoint
+// and returns the parsed response.
+func (h *OpenAIHandler) defaultInferenceProxy(phoneURL string, req PhoneInferenceRequest) (*PhoneInferenceResponse, error) {
+	payload, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("marshal inference request: %w", err)
+	}
+
+	httpReq, err := http.NewRequest(http.MethodPost, phoneURL+openaiCompatibleEndpoint, strings.NewReader(string(payload)))
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("X-Phonon-Proxy", "coordinator")
+
+	resp, err := InferenceHTTPClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("phone request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("phone returned HTTP %d: %s", resp.StatusCode, string(body))
+	}
+
+	var phoneResp PhoneInferenceResponse
+	if err := json.NewDecoder(resp.Body).Decode(&phoneResp); err != nil {
+		return nil, fmt.Errorf("decode phone response: %w", err)
+	}
+
+	return &phoneResp, nil
 }
 
 func (h *OpenAIHandler) handleStreamingChatCompletion(w http.ResponseWriter, _ *http.Request, req *ChatCompletionRequest) {
@@ -471,6 +507,7 @@ func (h *OpenAIHandler) handleStreamingChatCompletion(w http.ResponseWriter, _ *
 		Messages:    req.Messages,
 		Temperature: req.Temperature,
 		MaxTokens:   req.MaxTokens,
+		Stream:      true,
 	}, func(content string) {
 		chunk := fmt.Sprintf(`data: {"id":%q,"object":"chat.completion.chunk","created":%d,"model":%q,"choices":[{"index":0,"delta":{"content":%s},"finish_reason":null}]}`,
 			completionID, time.Now().Unix(), req.Model, jsonString(content))
@@ -505,15 +542,68 @@ func (h *OpenAIHandler) handleStreamingChatCompletion(w http.ResponseWriter, _ *
 	flusher.Flush()
 }
 
-// defaultStreamInferenceProxy is a placeholder that simulates a streaming response.
+// defaultStreamInferenceProxy sends a streaming inference request to a phone
+// and feeds each SSE data chunk to the onChunk callback.
 func (h *OpenAIHandler) defaultStreamInferenceProxy(phoneURL string, req PhoneInferenceRequest, onChunk func(string)) (string, error) {
-	// Simulate streaming tokens for development
-	placeholder := fmt.Sprintf("Simulated streaming response from %s. Model: %s.", phoneURL, req.Model)
-	words := strings.Fields(placeholder)
-	for _, word := range words {
-		onChunk(word + " ")
+	payload, err := json.Marshal(req)
+	if err != nil {
+		return "", fmt.Errorf("marshal inference request: %w", err)
 	}
-	return placeholder, nil
+
+	httpReq, err := http.NewRequest(http.MethodPost, phoneURL+openaiCompatibleEndpoint, strings.NewReader(string(payload)))
+	if err != nil {
+		return "", fmt.Errorf("create request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("X-Phonon-Proxy", "coordinator")
+	httpReq.Header.Set("Accept", "text/event-stream")
+
+	resp, err := InferenceHTTPClient.Do(httpReq)
+	if err != nil {
+		return "", fmt.Errorf("phone streaming request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("phone returned HTTP %d: %s", resp.StatusCode, string(body))
+	}
+
+	var fullText strings.Builder
+	scanner := bufio.NewScanner(resp.Body)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+		data := strings.TrimPrefix(line, "data: ")
+		if data == "[DONE]" {
+			break
+		}
+		// Parse SSE JSON chunk for content delta
+		var chunk struct {
+			Choices []struct {
+				Delta struct {
+					Content string `json:"content"`
+				} `json:"delta"`
+			} `json:"choices"`
+		}
+		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+			continue // skip malformed chunks
+		}
+		for _, choice := range chunk.Choices {
+			if choice.Delta.Content != "" {
+				onChunk(choice.Delta.Content)
+				fullText.WriteString(choice.Delta.Content)
+			}
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return fullText.String(), fmt.Errorf("stream read error: %w", err)
+	}
+
+	return fullText.String(), nil
 }
 
 // jsonString returns a valid JSON string literal (quoted and escaped).
