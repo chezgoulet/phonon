@@ -35,6 +35,39 @@ echo "==> Cleaning previous build..."
 rm -rf "$BUILD_DIR"
 mkdir -p "$JNILIBS_DIR" "$ASSETS_DIR"
 
+# ── Cross-compile libzmq for Android ───────────────────────────
+# prima.cpp links against libzmq, which isn't available in the NDK
+# sysroot. Build a static version targeting the same ABI.
+ZMQ_VERSION="4.3.5"
+ZMQ_BUILD_DIR="$BUILD_DIR/zmq-build"
+ZMQ_INSTALL_DIR="$BUILD_DIR/zmq-install"
+
+if [ ! -d "$ZMQ_INSTALL_DIR/lib" ]; then
+    echo "==> Cross-compiling libzmq $ZMQ_VERSION for Android $ABI..."
+    ZMQ_SRC_DIR="$ZMQ_BUILD_DIR/zeromq-${ZMQ_VERSION}"
+    if [ ! -d "$ZMQ_SRC_DIR" ]; then
+        mkdir -p "$ZMQ_BUILD_DIR"
+        curl -sL "https://github.com/zeromq/libzmq/releases/download/v${ZMQ_VERSION}/zeromq-${ZMQ_VERSION}.tar.gz" \
+          | tar xz -C "$ZMQ_BUILD_DIR"
+    fi
+    mkdir -p "$ZMQ_BUILD_DIR/build"
+    "$CMAKE" -S "$ZMQ_SRC_DIR" -B "$ZMQ_BUILD_DIR/build" -G Ninja \
+        -DCMAKE_TOOLCHAIN_FILE="$NDK/build/cmake/android.toolchain.cmake" \
+        -DANDROID_ABI="$ABI" \
+        -DANDROID_PLATFORM="$ANDROID_PLATFORM" \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DBUILD_SHARED_LIBS=OFF \
+        -DBUILD_STATIC_LIBS=ON \
+        -DWITH_TLS=OFF \
+        -DWITH_VMCI=OFF \
+        -DWITH_RADIX_TREE=OFF \
+        -DCMAKE_INSTALL_PREFIX="$ZMQ_INSTALL_DIR"
+    "$CMAKE" --build "$ZMQ_BUILD_DIR/build" --parallel
+    "$CMAKE" --install "$ZMQ_BUILD_DIR/build" --prefix "$ZMQ_INSTALL_DIR"
+else
+    echo "==> libzmq already built for Android, skipping..."
+fi
+
 # ── Configure ──────────────────────────────────────────────────
 echo "==> Configuring CMake for $ABI (API $ANDROID_PLATFORM)..."
 "$CMAKE" -S "$PRIMA_DIR" -B "$BUILD_DIR" -G Ninja \
@@ -48,7 +81,8 @@ echo "==> Configuring CMake for $ABI (API $ANDROID_PLATFORM)..."
     -DLLAMA_BUILD_SERVER=ON \
     -DLLAMA_CURL=OFF \
     -DLLAMA_FATAL_WARNINGS=OFF \
-    -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR"
+    -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
+    -DCMAKE_PREFIX_PATH="$ZMQ_INSTALL_DIR"
 
 # ── Build ──────────────────────────────────────────────────────
 echo "==> Building..."
