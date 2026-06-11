@@ -92,6 +92,9 @@ jobs:
       - name: Set ANDROID_NDK
         run: echo "ANDROID_NDK=$ANDROID_HOME/ndk/27.0.12077973" >> "$GITHUB_ENV"
 
+      - name: Install Ninja
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ninja-build
+
       - name: Cache libllama.so
         id: cache-llama
         uses: actions/cache@v4
