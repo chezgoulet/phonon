@@ -100,10 +100,10 @@ Phonon is not an inference engine, a model runtime, an agent framework, a home a
 
 | Dependency | Purpose | Integration |
 |---|---|---|
-| OlliteRT | Pool mode inference, NPU-accelerated via LiteRT-LM | Localhost HTTP over sidecar |
+| LiteRT-LM | Pool mode inference, NPU-accelerated via Kotlin SDK | Direct Gradle dependency, no separate process |
 | prima.cpp | Shard mode, CPU-based pipeline parallelism (Phase 2) | NDK shared library invoked by sidecar |
 | llama.cpp RPC | Shard mode fallback (Phase 2) | Runtime process |
-| LiteRT / LiteRT-LM | Google's on-device ML runtime | Used by OlliteRT, not called directly |
+| LiteRT / LiteRT-LM | Google's on-device ML runtime | Direct Kotlin SDK in sidecar |
 
 ---
 
@@ -175,8 +175,8 @@ sidecar/src/main/java/com/phonon/worker/
     ConfigManager.kt    # Local config file management (phonon.conf)
   inference/            # Adapter layer for inference engines
     InferenceEngine.kt  # Interface/abstraction
-    OlliteRTAdapter.kt  # OlliteRT over localhost HTTP
-    PrimaAdapter.kt     # prima.cpp via NDK bridge (Phase 2)
+    LiteRtAdapter.kt    # LiteRT-LM Kotlin SDK (current — pool mode)
+    PrimaAdapter.kt     # prima.cpp via NDK bridge (Phase 2 — shard mode)
   model/                # Model lifecycle
     ModelManager.kt     # Download, verify, load, unload
   network/
@@ -208,8 +208,8 @@ If present, the sidecar connects directly to the coordinator on startup instead 
 
 The sidecar communicates with the inference engine (OlliteRT, later prima.cpp) over **localhost HTTP or IPC**. This is a separate interface from the coordinator-sidecar protocol. The sidecar translates between coordinator commands and inference engine operations.
 
-- **Pool mode (Phase 1):** OlliteRT via localhost HTTP. OlliteRT is a pre-built APK consumed as a dependency. The sidecar sends inference requests to OlliteRT's local API and returns responses.
-- **Shard mode (Phase 2):** prima.cpp via NDK bridge. The sidecar invokes prima.cpp as a shared library, which handles pipelined-ring parallelism across phones.
+- **Pool mode (Phase 1):** LiteRT-LM Kotlin SDK, direct Gradle dependency. No separate engine process. The sidecar loads models via `LiteRtLmModel` and runs inference inline.
+- **Shard mode (Phase 2):** prima.cpp via NDK bridge. The sidecar invokes prima.cpp as a shared library, which handles pipeline parallelism across multiple phones via TCP.
 
 ---
 
@@ -743,7 +743,7 @@ In secure mode, the coordinator validates bearer tokens against a configured OID
 **Deliverables:**
 
 1. **Coordinator binary** — Go, cross-compiled for amd64 and arm64. Docker image.
-2. **Phone APK** — Kotlin, with sidecar + OlliteRT integration (pool mode only).
+2. **Phone APK** — Kotlin, with sidecar + LiteRT-LM inference (pool mode, NPU-accelerated).
 3. **Web UI** — Dashboard with phone tiles, group management, drag-and-drop assignment, API endpoint display.
 4. **Declarative YAML configuration** — `phonon.yaml` with validation.
 5. **mDNS discovery and zero-touch pairing** — Token broadcast + click-to-accept + device audit.
@@ -812,7 +812,7 @@ Phase 1 + Phase 2. A complete product: fast parallel pool mode, large model shar
 - `ktlint` with default rules. `detekt` with zero-tolerance config.
 - Coroutines for all async work. Raw threads prohibited.
 - No Google Play Services dependencies. Build-time verification.
-- JUnit 5 + MockK for tests. Never call OlliteRT/prima.cpp in unit tests.
+- JUnit 5 + MockK for tests. Never call LiteRT-LM/prima.cpp in unit tests.
 
 ### 14.3 React Web UI
 
@@ -836,7 +836,7 @@ Three parallel jobs (Go, Kotlin, React). All must pass green before merge. Each 
 
 ## 15. Open Questions
 
-1. **OlliteRT license verification.** The document lists OlliteRT as Apache 2.0 but this should be verified from the actual repo before Phase 1 begins. If it's GPL or has non-commercial restrictions, it constrains how the APK is distributed.
+1. ~~**OlliteRT license verification.**~~ **Resolved.** Switched to LiteRT-LM directly (Apache 2.0, confirmed). See https://github.com/google-ai-edge/LiteRT-LM.
 2. **LiteRT NPU path on GrapheneOS.** The Play Services audit flags LiteRT GPU delegate as a potential Play Services dependency. The NPU path (which Phonon relies on for pool mode) must be tested on a clean GrapheneOS install without sandboxed Play Services before Phase 1 ships.
 3. **prima.cpp phone-only performance.** Shard mode estimates use a 0.5–0.7× multiplier on prima.cpp's published desktop-GPU benchmarks. The first real phone cluster test will either validate or invalidate these numbers, which affects the shard mode hardware requirements table.
 4. ~~**WebSocket reconnection semantics.**~~ **Resolved by PR #2 and merged into §5.3.** The spec now defines the command queue + acknowledgment pattern. Each command has a UUID (`command_id`). The sidecar acknowledges `accepted` / `completed` / `failed`. On reconnect, unacknowledged commands are re-sent with the same IDs. The sidecar deduplicates by `command_id` to handle the case where the ack was in-flight when the connection dropped. Implementation must ensure the dedup map has bounded memory (size-based or time-based eviction of old command_ids).
