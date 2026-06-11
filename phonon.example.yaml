@@ -1,0 +1,70 @@
+# Phonon Coordinator Configuration
+# Copy to phonon.yaml and adjust for your deployment.
+#
+# Quick start (no auth, no TLS):
+#   cp phonon.example.yaml phonon.yaml
+#   docker compose up -d
+#
+# Production (with TLS + OIDC):
+#   See cluster.tls and cluster.auth sections below.
+
+cluster:
+  name: "chezgoulet"
+
+  # ── Authentication ─────────────────────────────────────────
+  auth:
+    mode: "none"          # "none" for development, "oidc" for production
+    # issuer: "https://authentik.chezgoulet.net/application/o/phonon/"
+    # client_id: "phonon-coordinator"
+
+  # ── TLS / HTTPS ────────────────────────────────────────────
+  # Generate a self-signed cert for LAN use:
+  #   openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+  #     -keyout phonon.key -out phonon.crt \
+  #     -subj "/CN=phonon.local"
+  tls:
+    enabled: false
+    # cert_file: /app/phonon.crt
+    # key_file:  /app/phonon.key
+
+  # ── Networking ─────────────────────────────────────────────
+  networking:
+    prefer: "ethernet"    # "ethernet" or "wifi"
+
+  # ── mDNS Discovery ─────────────────────────────────────────
+  discovery:
+    mdns:
+      disabled: false     # set true for static IP deployments
+      # port: 0           # 0 = auto
+
+  # ── Health Monitoring ──────────────────────────────────────
+  health:
+    overheat:
+      threshold: 45.0           # °C — removed from pool (default)
+      reentry_threshold: 40.0   # °C — re-entered below (default)
+    battery:
+      low_threshold: 15         # % — removed when below AND not charging
+      reentry_threshold: 30     # % — re-entered above this
+      capacity_threshold: 80    # % — "charger-dependent" marked below
+    offline_timeout: "60s"      # phone removed after this long without heartbeat
+
+  # ── Event Log (SQLite) ─────────────────────────────────────
+  event_log:
+    path: /app/data/phonon.db
+    retention_days: 90
+
+  # ── Queue Backpressure ─────────────────────────────────────
+  queue:
+    max_per_node: 3             # max concurrent requests per phone
+
+# ── Inference Groups ─────────────────────────────────────────
+# Each group defines a model and the phones that serve it.
+groups:
+  # - name: "llama-3.2-1b"
+  #   mode: "shard"             # "pool" or "shard"
+  #   model: "llama-3.2-1b-instruct-q4_k_m.gguf"
+  #   runtime: "prima"          # "prima" (CPU) or "litert" (NPU)
+  #   phones: ["phone-kitchen", "phone-livingroom"]
+  #   standby: ["phone-bedroom"]
+  #   download_url: "http://coordinator:8080/api/v1/models/llama-3.2-1b-instruct-q4_k_m.gguf"
+  #   checksum: "sha256:..."
