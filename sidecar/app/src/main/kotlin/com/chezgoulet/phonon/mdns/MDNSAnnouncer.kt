@@ -41,10 +41,10 @@ class MDNSAnnouncer(
                 port = 0 // No port needed — coordinator uses REST discovery
 
                 // TXT records for coordinator discovery
-                attributes = mapOf(
-                    "device_id" to deviceId,
-                    "device_model" to deviceModel
-                )
+                attributes = mutableMapOf(
+                        "device_id" to deviceId.encodeToByteArray(),
+                        "device_model" to deviceModel.encodeToByteArray()
+                    )
             }
 
             nsdManager?.registerService(

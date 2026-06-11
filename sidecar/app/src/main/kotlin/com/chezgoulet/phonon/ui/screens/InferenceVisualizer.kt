@@ -75,7 +75,7 @@ private fun DrawScope.drawNeuralVisualizer(
     drawCircle(
         color = ringColor.copy(alpha = if (isProcessing) 0.6f else 0.2f),
         radius = radius + 8f,
-        center = Offset(cx, cy),
+        center = Offset(x = cx, y = cy),
         style = Stroke(width = 2f)
     )
 
@@ -83,7 +83,7 @@ private fun DrawScope.drawNeuralVisualizer(
     drawCircle(
         color = ringColor.copy(alpha = if (isProcessing) 0.4f else 0.1f),
         radius = radius * 0.6f + 4f,
-        center = Offset(cx, cy),
+        center = Offset(x = cx, y = cy),
         style = Stroke(width = 1.5f)
     )
 
@@ -92,12 +92,12 @@ private fun DrawScope.drawNeuralVisualizer(
     drawCircle(
         color = ringColor.copy(alpha = 0.15f),
         radius = glowRadius * 2f,
-        center = Offset(cx, cy)
+        center = Offset(x = cx, y = cy)
     )
     drawCircle(
         color = ringColor.copy(alpha = if (isProcessing) 0.3f else 0.1f),
         radius = glowRadius,
-        center = Offset(cx, cy)
+        center = Offset(x = cx, y = cy)
     )
 
     if (degraded) return // Skip particles when battery is low
@@ -113,14 +113,14 @@ private fun DrawScope.drawNeuralVisualizer(
         drawCircle(
             color = ringColor.copy(alpha = nodeAlpha),
             radius = 4f,
-            center = Offset(nx, ny)
+            center = Offset(x = nx, y = ny)
         )
 
         // Connection line to center
         drawLine(
             color = ringColor.copy(alpha = nodeAlpha * 0.3f),
-            start = Offset(nx, ny),
-            end = Offset(cx, cy),
+            start = Offset(x = nx, y = ny),
+            end = Offset(x = cx, y = cy),
             strokeWidth = 1f
         )
     }
@@ -143,7 +143,7 @@ private fun DrawScope.drawNeuralVisualizer(
                 drawCircle(
                     color = Color(0xFF22C55E).copy(alpha = 0.4f),
                     radius = 2f,
-                    center = Offset(gx, gy)
+                    center = Offset(x = gx, y = gy)
                 )
             }
         }
@@ -155,7 +155,7 @@ private fun DrawScope.drawNeuralVisualizer(
         drawCircle(
             color = Color(0xFF22C55E).copy(alpha = (1f - pulsePhase) * 0.3f),
             radius = radius + 16f + pulsePhase * 40f,
-            center = Offset(cx, cy),
+            center = Offset(x = cx, y = cy),
             style = Stroke(width = 2f * (1f - pulsePhase))
         )
     }

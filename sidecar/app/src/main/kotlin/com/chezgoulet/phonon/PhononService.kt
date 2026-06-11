@@ -45,8 +45,8 @@ class PhononService : Service() {
     private var wakeLock: PowerManager.WakeLock? = null
 
     // Coordinator configuration — loaded from phonon.conf, fallback to mDNS, then 255.255.255.255
-    private var coordinatorHost: String = "255.255.255.255"
-    private var coordinatorPort: Int = 8080
+    internal var coordinatorHost: String = "255.255.255.255"
+    internal var coordinatorPort: Int = 8080
 
     // Status for notification
     @Volatile
