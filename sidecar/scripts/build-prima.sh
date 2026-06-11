@@ -87,7 +87,11 @@ echo "==> Configuring CMake for $ABI (API $ANDROID_PLATFORM)..."
     -DCMAKE_PREFIX_PATH="$ZMQ_INSTALL_DIR" \
     -DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=BOTH \
     -DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=BOTH \
-    -DCMAKE_LIBRARY_PATH="$ZMQ_INSTALL_DIR/lib"
+    -DCMAKE_LIBRARY_PATH="$ZMQ_INSTALL_DIR/lib" \
+    -DCMAKE_CXX_FLAGS="-I$ZMQ_INSTALL_DIR/include" \
+    -DCMAKE_C_FLAGS="-I$ZMQ_INSTALL_DIR/include" \
+    -DCMAKE_EXE_LINKER_FLAGS="-L$ZMQ_INSTALL_DIR/lib" \
+    -DCMAKE_SHARED_LINKER_FLAGS="-L$ZMQ_INSTALL_DIR/lib"
 
 # ── Build ──────────────────────────────────────────────────────
 echo "==> Building..."
