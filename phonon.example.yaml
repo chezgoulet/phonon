@@ -46,6 +46,7 @@ cluster:
       low_threshold: 15         # % — removed when below AND not charging
       reentry_threshold: 30     # % — re-entered above this
       capacity_threshold: 80    # % — "charger-dependent" marked below
+    draining_threshold: 50    # % — enter "draining" state when unplugged below this
     offline_timeout: "60s"      # phone removed after this long without heartbeat
 
   # ── Event Log (SQLite) ─────────────────────────────────────

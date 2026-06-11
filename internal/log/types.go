@@ -18,6 +18,9 @@ const (
 	EventPairing        EventType = "pairing"
 	EventPairingDone    EventType = "pairing_complete"
 	EventConfigChanged  EventType = "config_changed"
+	EventNodeDraining   EventType = "node_draining"
+	EventNodeDrained    EventType = "node_drained"
+	EventNodeReEntered  EventType = "node_reentered"
 	EventError          EventType = "error"
 	EventInfo           EventType = "info"
 )

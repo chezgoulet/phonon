@@ -127,6 +127,9 @@ func main() {
 		if cfg.Cluster.Health.Battery.CapacityThreshold > 0 {
 			healthCfg.BatteryCapacityThreshold = cfg.Cluster.Health.Battery.CapacityThreshold
 		}
+		if cfg.Cluster.Health.DrainingThreshold > 0 {
+			healthCfg.DrainingThreshold = cfg.Cluster.Health.DrainingThreshold
+		}
 		if d := cfg.Cluster.Health.OfflineTimeoutDuration(); d > 0 {
 			healthCfg.OfflineTimeout = d
 		}

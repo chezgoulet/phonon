@@ -15,11 +15,14 @@ type ActionType string
 
 const (
 	reasonOverheating = "overheating"
-	reasonLowBattery = "low-battery"
-	reasonDegraded = "degraded"
+	reasonLowBattery  = "low-battery"
+	reasonDraining    = "battery-draining"
+	reasonDegraded    = "degraded"
 	ActionStandbyPromote ActionType = "standby_promote"
 	ActionNodeOffline    ActionType = "node_offline"
 	ActionNodeOverheat   ActionType = "node_overheat"
+	ActionNodeDraining   ActionType = "node_draining"
+	ActionNodeDrained    ActionType = "node_drained"
 	ActionNodeReEntered  ActionType = "node_reentered"
 )
 
@@ -36,6 +39,10 @@ func WithEventLog(el *log.EventLog) Action {
 			_ = el.Write(log.EventNodeOverheated, deviceID, log.SeverityError, "node overheating or low battery")
 		case ActionNodeReEntered:
 			_ = el.Write(log.EventNodeOnline, deviceID, log.SeverityInfo, "node re-entered routing pool")
+		case ActionNodeDraining:
+			_ = el.Write(log.EventNodeDraining, deviceID, log.SeverityWarning, "battery draining — reducing routing priority")
+		case ActionNodeDrained:
+			_ = el.Write(log.EventNodeDrained, deviceID, log.SeverityError, "battery depleted — offloading models")
 		case ActionStandbyPromote:
 			_ = el.Write(log.EventInfo, deviceID, log.SeverityInfo, "standby node promoted to active")
 		}
@@ -48,6 +55,7 @@ func WithEventLog(el *log.EventLog) Action {
 type MonitorConfig struct {
 	OverheatThreshold        float64 // °C
 	OverheatReentryThreshold float64 // °C
+	DrainingThreshold        float64 // % — enter draining state when unplugged below this
 	BatteryLowThreshold      float64 // %
 	BatteryReentryThreshold  float64 // %
 	BatteryCapacityThreshold float64 // % — mark charger-dependent below this
@@ -60,6 +68,7 @@ func DefaultMonitorConfig() MonitorConfig {
 	return MonitorConfig{
 		OverheatThreshold:        45,
 		OverheatReentryThreshold: 40,
+		DrainingThreshold:        50,
 		BatteryLowThreshold:      15,
 		BatteryReentryThreshold:  30,
 		BatteryCapacityThreshold: 80,
@@ -178,14 +187,11 @@ func (m *Monitor) checkStaleNodes(ctx context.Context) {
 	if stale > 0 {
 		m.log.Info("marked stale nodes offline", "count", stale)
 	}
-
-	// Fire actions for nodes that just went offline
-	// Don't iterate here since PurgeStale already handled state transitions
 	_ = ctx
 }
 
-// evaluateNodes checks each online node for overheat, low battery, and
-// degraded capacity. Sets or clears ExcludeReason with hysteresis.
+// evaluateNodes checks each online node for overheat, low battery, draining,
+// and degraded capacity. Sets or clears ExcludeReason with hysteresis.
 func (m *Monitor) evaluateNodes(ctx context.Context) {
 	nodes := m.reg.ListOnline()
 
@@ -203,7 +209,15 @@ func (m *Monitor) evaluateNodes(ctx context.Context) {
 					"battery", node.Telemetry.BatteryLevel,
 					"charging", node.Telemetry.IsCharging)
 				_ = m.reg.SetExcludeReason(node.DeviceID, newReason)
-				m.fireActions(ctx, node, ActionNodeOverheat)
+
+				switch newReason {
+				case reasonDraining:
+					m.fireActions(ctx, node, ActionNodeDraining)
+				case reasonLowBattery:
+					m.fireActions(ctx, node, ActionNodeDrained)
+				default:
+					m.fireActions(ctx, node, ActionNodeOverheat)
+				}
 			} else {
 				m.log.Info("node re-entered routing",
 					"device_id", node.DeviceID,
@@ -218,6 +232,7 @@ func (m *Monitor) evaluateNodes(ctx context.Context) {
 }
 
 // evaluateNode determines why a node should be excluded (or empty if healthy).
+// Priority: overheating > low battery > draining > degraded > healthy.
 func (m *Monitor) evaluateNode(node *registry.Node) string {
 	reason := node.ExcludeReason
 
@@ -225,33 +240,39 @@ func (m *Monitor) evaluateNode(node *registry.Node) string {
 	if node.Telemetry.ThermalTempC >= m.cfg.OverheatThreshold {
 		return reasonOverheating
 	}
-	// Stay excluded until below re-entry threshold
 	if reason == reasonOverheating && node.Telemetry.ThermalTempC >= m.cfg.OverheatReentryThreshold {
 		return reasonOverheating
 	}
 
-	// --- Low battery check with hysteresis ---
+	// --- Low battery check (highest priority among battery states) ---
 	if node.Telemetry.BatteryLevel < m.cfg.BatteryLowThreshold && !node.Telemetry.IsCharging {
 		return reasonLowBattery
 	}
-	// Stay excluded until charging OR above re-entry threshold
 	if reason == reasonLowBattery {
 		if !node.Telemetry.IsCharging && node.Telemetry.BatteryLevel < m.cfg.BatteryReentryThreshold {
 			return reasonLowBattery
 		}
 	}
 
+	// --- Draining check (unplugged, above low-battery threshold) ---
+	if !node.Telemetry.IsCharging && node.Telemetry.BatteryLevel < m.cfg.DrainingThreshold {
+		return reasonDraining
+	}
+	if reason == reasonDraining {
+		// Stay draining until plugged in OR battery drops to low threshold
+		if !node.Telemetry.IsCharging && node.Telemetry.BatteryLevel > m.cfg.BatteryLowThreshold {
+			return reasonDraining
+		}
+	}
+
 	// --- Degraded capacity (charger-dependent) ---
-	// Uses BatteryCapacityPct (max capacity relative to original), not BatteryLevel (current charge %).
-	// Sidecar reports this from Android's BatteryManager; 0 means sidecar hasn't sent data yet.
-	if node.Telemetry.BatteryCapacityPct > 0 && node.Telemetry.BatteryCapacityPct < m.cfg.BatteryCapacityThreshold &&
-		!node.Telemetry.IsCharging && node.ExcludeReason == "" {
-		// Mark as charger-dependent if max battery capacity is degraded below threshold.
-		// Only fires when capacity data is available (>0).
+	if node.Telemetry.BatteryCapacityPct > 0 &&
+		node.Telemetry.BatteryCapacityPct < m.cfg.BatteryCapacityThreshold &&
+		!node.Telemetry.IsCharging &&
+		node.ExcludeReason == "" {
 		return reasonDegraded
 	}
 	if reason == reasonDegraded && node.Telemetry.IsCharging {
-		// Clear degraded while charging — UI shows it differently when plugged in
 		return ""
 	}
 	if reason == reasonDegraded {
@@ -277,8 +298,6 @@ func (m *Monitor) fireActions(ctx context.Context, node *registry.Node, actionTy
 func (m *Monitor) updateMetrics() {
 	nodes := m.reg.List()
 
-	// Reset per-group gauges before counting — otherwise Inc() would
-	// double-count on each check cycle (Issue #25).
 	m.metrics.NodesOnline.Reset()
 	m.metrics.NodesOffline.Reset()
 
@@ -288,13 +307,12 @@ func (m *Monitor) updateMetrics() {
 		n := &nodes[i]
 		m.metrics.BatteryLevel.WithLabelValues(n.DeviceID).Set(n.Telemetry.BatteryLevel)
 		m.metrics.ThermalTempC.WithLabelValues(n.DeviceID).Set(n.Telemetry.ThermalTempC)
-		m.metrics.QueueDepth.WithLabelValues(n.DeviceID).Set(0) // TODO: wired from API
+		m.metrics.QueueDepth.WithLabelValues(n.DeviceID).Set(0)
 
 		if n.State == registry.NodeStateOnline && n.ExcludeReason == reasonOverheating {
 			totalOverheating++
 		}
 
-		// Per-group online/offline gauges
 		if n.Group != "" {
 			groupLabel := n.Group
 			switch n.State {
