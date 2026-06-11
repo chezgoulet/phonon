@@ -15,9 +15,10 @@ type BatteryConfig struct {
 
 // HealthConfig controls health monitoring and automatic actions.
 type HealthConfig struct {
-	Overheat       OverheatConfig `yaml:"overheat"`
-	Battery        BatteryConfig  `yaml:"battery"`
-	OfflineTimeout string         `yaml:"offline_timeout"` // e.g. "60s" (default 60s)
+	Overheat          OverheatConfig `yaml:"overheat"`
+	Battery           BatteryConfig  `yaml:"battery"`
+	DrainingThreshold float64        `yaml:"draining_threshold"` // % — enter draining when unplugged below this (default 50)
+	OfflineTimeout    string         `yaml:"offline_timeout"`    // e.g. "60s" (default 60s)
 }
 
 // MDNSConfig controls mDNS auto-discovery behavior.

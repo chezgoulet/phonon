@@ -127,6 +127,9 @@ func main() {
 		if cfg.Cluster.Health.Battery.CapacityThreshold > 0 {
 			healthCfg.BatteryCapacityThreshold = cfg.Cluster.Health.Battery.CapacityThreshold
 		}
+		if cfg.Cluster.Health.DrainingThreshold > 0 {
+			healthCfg.DrainingThreshold = cfg.Cluster.Health.DrainingThreshold
+		}
 		if d := cfg.Cluster.Health.OfflineTimeoutDuration(); d > 0 {
 			healthCfg.OfflineTimeout = d
 		}
@@ -201,6 +204,10 @@ func main() {
 	// Event log query endpoint (protected)
 	eventAPI := phononlog.NewAPIHandler(eventLog)
 	eventAPI.RegisterRoutes(protectedMux)
+
+	// Model download endpoint (protected) — serves cached GGUF files
+	modelAPI := api.NewModelDownloadHandler(modelCache, cacheDir)
+	modelAPI.RegisterRoutes(protectedMux)
 
 	mux.Handle("/api/v1/", authMiddleware.Handler(protectedMux))
 

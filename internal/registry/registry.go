@@ -202,8 +202,9 @@ func (r *Registry) GetByGroup(group string) []Node {
 }
 
 // GetHealthyByGroup returns nodes that are online, not overheating, and
-// not low-battery-unplugged. Battery threshold defaults to 15%.
-// Thermal threshold defaults to 45°C.
+// not low-battery-unplugged or draining. Battery threshold defaults to 15%.
+// Thermal threshold defaults to 45°C. Draining nodes are excluded because
+// the model reconciler should migrate models from them before they go offline.
 func (r *Registry) GetHealthyByGroup(group string, batteryThreshold, thermalThreshold float64) []Node {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -217,6 +218,10 @@ func (r *Registry) GetHealthyByGroup(group string, batteryThreshold, thermalThre
 			continue
 		}
 		if node.Telemetry.ThermalTempC > thermalThreshold {
+			continue
+		}
+		// Exclude nodes in draining or low-battery state (matching health package reasons)
+		if node.ExcludeReason == "battery-draining" || node.ExcludeReason == "low-battery" {
 			continue
 		}
 		if node.Telemetry.BatteryLevel < batteryThreshold && !node.Telemetry.IsCharging {
