@@ -171,7 +171,8 @@ func (m *Monitor) checkStaleNodes(ctx context.Context) {
 func (m *Monitor) evaluateNodes(ctx context.Context) {
 	nodes := m.reg.ListOnline()
 
-	for _, node := range nodes {
+	for i := range nodes {
+		node := &nodes[i]
 		oldReason := node.ExcludeReason
 		newReason := m.evaluateNode(node)
 
@@ -199,7 +200,7 @@ func (m *Monitor) evaluateNodes(ctx context.Context) {
 }
 
 // evaluateNode determines why a node should be excluded (or empty if healthy).
-func (m *Monitor) evaluateNode(node registry.Node) string {
+func (m *Monitor) evaluateNode(node *registry.Node) string {
 	reason := node.ExcludeReason
 
 	// --- Overheat check with hysteresis ---
@@ -243,7 +244,7 @@ func (m *Monitor) evaluateNode(node registry.Node) string {
 }
 
 // fireActions calls all registered actions for a node state transition.
-func (m *Monitor) fireActions(ctx context.Context, node registry.Node, actionType ActionType) {
+func (m *Monitor) fireActions(ctx context.Context, node *registry.Node, actionType ActionType) {
 	m.mu.Lock()
 	actions := make([]Action, len(m.actions))
 	copy(actions, m.actions)
@@ -265,7 +266,8 @@ func (m *Monitor) updateMetrics() {
 
 	totalOverheating := 0
 
-	for _, n := range nodes {
+	for i := range nodes {
+		n := &nodes[i]
 		m.metrics.BatteryLevel.WithLabelValues(n.DeviceID).Set(n.Telemetry.BatteryLevel)
 		m.metrics.ThermalTempC.WithLabelValues(n.DeviceID).Set(n.Telemetry.ThermalTempC)
 		m.metrics.QueueDepth.WithLabelValues(n.DeviceID).Set(0) // TODO: wired from API
