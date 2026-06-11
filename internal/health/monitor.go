@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/chezgoulet/phonon/internal/log"
 	"github.com/chezgoulet/phonon/internal/registry"
 )
 
@@ -24,6 +25,23 @@ const (
 
 // Action is a hook called when the health monitor detects a state transition.
 type Action func(ctx context.Context, deviceID string, groupName string, actionType ActionType)
+
+// WithEventLog returns an action that writes health state transitions to an event log.
+func WithEventLog(el *log.EventLog) Action {
+	return func(ctx context.Context, deviceID, groupName string, actionType ActionType) {
+		switch actionType {
+		case ActionNodeOffline:
+			el.Write(log.EventNodeOffline, deviceID, log.SeverityWarning, "node went offline")
+		case ActionNodeOverheat:
+			el.Write(log.EventNodeOverheated, deviceID, log.SeverityError, "node overheating or low battery")
+		case ActionNodeReEntered:
+			el.Write(log.EventNodeOnline, deviceID, log.SeverityInfo, "node re-entered routing pool")
+		case ActionStandbyPromote:
+			el.Write(log.EventInfo, deviceID, log.SeverityInfo, "standby node promoted to active")
+		}
+		_ = groupName
+	}
+}
 
 // MonitorConfig holds the thresholds and settings for the health monitor.
 // Defaults match the config package defaults.

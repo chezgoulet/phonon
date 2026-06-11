@@ -4,13 +4,16 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	"github.com/chezgoulet/phonon/internal/log"
 )
 
 // Registry is the thread-safe in-memory node registry.
 // All runtime state is ephemeral and reconstructed from heartbeats.
 type Registry struct {
-	mu    sync.RWMutex
-	nodes map[string]*Node
+	mu       sync.RWMutex
+	nodes    map[string]*Node
+	eventLog *log.EventLog
 }
 
 // New creates an empty registry.
@@ -18,6 +21,13 @@ func New() *Registry {
 	return &Registry{
 		nodes: make(map[string]*Node),
 	}
+}
+
+// SetEventLog attaches an event log for recording node lifecycle events.
+func (r *Registry) SetEventLog(el *log.EventLog) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.eventLog = el
 }
 
 // Register adds a new node in unpaired state.
@@ -37,6 +47,10 @@ func (r *Registry) Register(deviceID, name, ipAddress string) error {
 		State:       NodeStateUnpaired,
 		RegisteredAt: now,
 		IPAddress:   ipAddress,
+	}
+
+	if r.eventLog != nil {
+		r.eventLog.Write(log.EventNodeJoined, deviceID, log.SeverityInfo, "node registered: "+name)
 	}
 
 	return nil
@@ -59,6 +73,11 @@ func (r *Registry) Pair(deviceID string) error {
 
 	node.State = NodeStatePaired
 	node.PairedAt = time.Now()
+
+	if r.eventLog != nil {
+		r.eventLog.Write(log.EventPairingDone, deviceID, log.SeverityInfo, "node paired")
+	}
+
 	return nil
 }
 
@@ -74,12 +93,17 @@ func (r *Registry) UpdateHeartbeat(deviceID string, telemetry HealthTelemetry) e
 		return fmt.Errorf("%w: %s", ErrNotFound, deviceID)
 	}
 
+	wasOffline := node.State == NodeStateOffline
 	node.Telemetry = telemetry
 	node.LastHeartbeat = time.Now()
 
 	// If paired or offline, transition to online on first heartbeat
 	if node.State == NodeStatePaired || node.State == NodeStateOffline {
 		node.State = NodeStateOnline
+	}
+
+	if r.eventLog != nil && wasOffline {
+		r.eventLog.Write(log.EventNodeOnline, deviceID, log.SeverityInfo, "node came online")
 	}
 
 	return nil
@@ -305,11 +329,19 @@ func (r *Registry) PurgeStale(timeout time.Duration) int {
 
 	deadline := time.Now().Add(-timeout)
 	count := 0
+	var staleIDs []string
 
 	for _, node := range r.nodes {
 		if node.State == NodeStateOnline && node.LastHeartbeat.Before(deadline) {
 			node.State = NodeStateOffline
+			staleIDs = append(staleIDs, node.DeviceID)
 			count++
+		}
+	}
+
+	if count > 0 && r.eventLog != nil {
+		for _, id := range staleIDs {
+			r.eventLog.Write(log.EventNodeLeft, id, log.SeverityWarning, "node went offline (stale heartbeat)")
 		}
 	}
 
