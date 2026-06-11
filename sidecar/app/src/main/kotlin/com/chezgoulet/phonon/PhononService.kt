@@ -191,7 +191,7 @@ class PhononService : Service() {
                 scope.launch {
                     loadedModel = modelName
                     updateNotification()
-                    modelManager.loadModel(modelName, modelUrl, engine)
+                    modelManager.loadModel(modelName, modelUrl)
                 }
             },
             onModelUnload = {

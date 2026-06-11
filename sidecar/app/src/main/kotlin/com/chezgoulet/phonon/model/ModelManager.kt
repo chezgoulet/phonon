@@ -40,7 +40,7 @@ class ModelManager(private val context: Context) {
      * @param modelName Logical model name
      * @param modelUrl  URL to download from coordinator (blank if cached)
      */
-    suspend fun loadModel(modelName: String, modelUrl: String, engine: String = "litert-lm") {
+    suspend fun loadModel(modelName: String, modelUrl: String) {
         Log.i(tag, "Loading model: $modelName (LiteRT-LM)")
 
         if (isRunning()) {
