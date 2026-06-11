@@ -31,7 +31,7 @@ class PhononServiceState {
     var loadedModel by mutableStateOf<String?>(null)
         private set
 
-    /** Engine in use (prima / ollitert). */
+    /** Engine in use (always litert-lm with LiteRT-LM SDK). */
     var engine by mutableStateOf("")
         private set
 
@@ -76,7 +76,7 @@ class PhononServiceState {
         connectionStatus = service.connectionStatus
         loadedModel = service.loadedModel
         deviceId = (service.application as com.chezgoulet.phonon.PhononApplication).deviceId
-        engine = service.loadedModel?.let { "ollitert" } ?: ""
+        engine = service.loadedModel?.let { "litert-lm" } ?: ""
         batteryLevel = service.batteryLevel.toInt()
         batteryTemp = service.batteryTempC.toFloat()
         isCharging = service.isCharging

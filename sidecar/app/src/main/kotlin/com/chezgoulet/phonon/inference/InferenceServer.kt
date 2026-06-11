@@ -2,13 +2,11 @@ package com.chezgoulet.phonon.inference
 
 import android.content.Context
 import android.util.Log
+import com.chezgoulet.phonon.model.ModelManager
 import com.chezgoulet.phonon.models.InferenceRequest
 import com.chezgoulet.phonon.models.InferenceResponse
 import kotlinx.coroutines.*
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONObject
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.net.InetSocketAddress
@@ -18,21 +16,23 @@ import java.net.Socket
 /**
  * Local HTTP inference server running on port 9876.
  *
- * Proxies inference requests to OlliteRT's OpenAI-compatible endpoint
- * running on localhost:8085. If OlliteRT is not running, returns an
- * error response.
+ * Exposes an OpenAI-compatible /v1/chat/completions endpoint backed by
+ * LiteRT-LM engine (via ModelManager). Each request creates a fresh
+ * conversation on the shared Engine instance.
  *
  * Uses a simple ServerSocket-based HTTP server (no com.sun.net.httpserver,
  * which is unavailable on Android).
  */
-class InferenceServer(private val context: Context) {
+class InferenceServer(
+    private val context: Context,
+    private val modelManager: ModelManager
+) {
     private val tag = "InferenceServer"
     private var serverSocket: ServerSocket? = null
     private var scope: CoroutineScope? = null
-    private val client = OkHttpClient()
-    private val jsonMediaType = "application/json".toMediaType()
 
-    private val olliteUrl = "http://127.0.0.1:8085/v1/chat/completions"
+    // Secondary constructor for backward compatibility
+    constructor(context: Context) : this(context, ModelManager(context))
 
     /**
      * Starts the HTTP server on port 9876.
@@ -141,47 +141,54 @@ class InferenceServer(private val context: Context) {
     }
 
     private suspend fun handleInference(socket: Socket, writer: java.io.OutputStream, body: String) {
+        val startTime = System.currentTimeMillis()
         try {
-            val request = InferenceRequest.fromJson(org.json.JSONObject(body))
+            val request = InferenceRequest.fromJson(JSONObject(body))
 
-            // Build inference request to OlliteRT
-            val olliteBodyJson = buildOlliteRequest(request)
-            val olliteRequest = Request.Builder()
-                .url(olliteUrl)
-                .post(olliteBodyJson.toRequestBody(jsonMediaType))
-                .build()
+            // Build the prompt from the message history
+            val prompt = buildPrompt(request)
 
-            val olliteResponse = withContext(Dispatchers.IO) {
-                client.newCall(olliteRequest).execute()
-            }
-            val olliteBodyStr = olliteResponse.body?.string() ?: "{}"
+            // Run inference via LiteRT-LM
+            val text = modelManager.generate(prompt, request.maxTokens)
 
-            if (!olliteResponse.isSuccessful) {
-                sendResponse(writer, 502, "application/json",
-                    """{"error":"Inference engine error: ${olliteResponse.code}"}""")
-                return
-            }
-
-            // Parse inference engine response
-            val engineJson = org.json.JSONObject(olliteBodyStr)
-            val choices = engineJson.optJSONArray("choices")
-            val text = if (choices != null && choices.length() > 0) {
-                choices.getJSONObject(0)
-                    .optJSONObject("message")
-                    ?.optString("content", "") ?: ""
-            } else ""
-
-            val usage = engineJson.optJSONObject("usage")
-            val totalTokens = usage?.optInt("total_tokens", text.length / 4) ?: (text.length / 4)
-            val completionTokens = usage?.optInt("completion_tokens", totalTokens) ?: totalTokens
+            val elapsed = (System.currentTimeMillis() - startTime).toInt()
+            val estimatedTokens = text.length / 4 // rough estimate
 
             val response = InferenceResponse(
                 text = text,
-                tokens = completionTokens,
-                durationMs = 0
+                tokens = estimatedTokens,
+                durationMs = elapsed
             )
 
-            sendResponse(writer, 200, "application/json", response.toJson().toString())
+            // Build OpenAI-compatible response
+            val responseJson = JSONObject().apply {
+                put("id", "chatcmpl-${System.currentTimeMillis()}")
+                put("object", "chat.completion")
+                put("created", System.currentTimeMillis() / 1000)
+                put("model", request.model)
+                put("choices", org.json.JSONArray().apply {
+                    put(JSONObject().apply {
+                        put("index", 0)
+                        put("message", JSONObject().apply {
+                            put("role", "assistant")
+                            put("content", text)
+                        })
+                        put("finish_reason", "stop")
+                    })
+                })
+                put("usage", JSONObject().apply {
+                    put("prompt_tokens", request.messages.sumOf { it.content.length / 4 })
+                    put("completion_tokens", estimatedTokens)
+                    put("total_tokens", (request.messages.sumOf { it.content.length / 4 }) + estimatedTokens)
+                })
+            }
+
+            sendResponse(writer, 200, "application/json", responseJson.toString())
+            Log.i(tag, "Inference completed in ${elapsed}ms")
+        } catch (e: IllegalStateException) {
+            Log.w(tag, "No model loaded: ${e.message}")
+            sendResponse(writer, 502, "application/json",
+                """{"error":"No model loaded","code":"no_model"}""")
         } catch (e: Exception) {
             Log.w(tag, "Inference error: ${e.message}")
             sendResponse(writer, 502, "application/json",
@@ -189,22 +196,22 @@ class InferenceServer(private val context: Context) {
         }
     }
 
-    private fun buildOlliteRequest(request: InferenceRequest): String {
-        val messages = org.json.JSONArray()
-        for (msg in request.messages) {
-            messages.put(org.json.JSONObject().apply {
-                put("role", msg.role)
-                put("content", msg.content)
-            })
-        }
-
-        return org.json.JSONObject().apply {
-            put("model", request.model)
-            put("messages", messages)
-            put("temperature", request.temperature)
-            put("max_tokens", request.maxTokens)
-            put("stream", false)
-        }.toString()
+    /**
+     * Builds a consolidated prompt from the message history.
+     *
+     * Since the LiteRT-LM Kotlin API's Conversation.sendMessage() takes
+     * a single text input (not a message list), we concatenate the history
+     * into a single prompt string using a standard chat format.
+     */
+    private fun buildPrompt(request: InferenceRequest): String {
+        return request.messages.joinToString("\n") { msg ->
+            when (msg.role) {
+                "user" -> "<|user|>\n${msg.content}\n<|end|>"
+                "assistant" -> "<|assistant|>\n${msg.content}\n<|end|>"
+                "system" -> "<|system|>\n${msg.content}\n<|end|>"
+                else -> "${msg.role}: ${msg.content}"
+            }
+        } + "\n<|assistant|>\n"
     }
 
     private fun sendResponse(writer: java.io.OutputStream, status: Int, contentType: String, body: String) {
@@ -223,11 +230,6 @@ class InferenceServer(private val context: Context) {
                 body
         writer.write(response.toByteArray())
         writer.flush()
-    }
-
-    private fun sendError(writer: java.io.OutputStream, status: Int, message: String) {
-        val body = """{"error":"$message"}"""
-        sendResponse(writer, status, "application/json", body)
     }
 
     private val CoroutineScope.isActive: Boolean
