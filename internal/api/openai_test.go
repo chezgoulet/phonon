@@ -481,20 +481,38 @@ func TestGenerateCompletionID(t *testing.T) {
 }
 
 func TestDefaultInferenceProxy(t *testing.T) {
+	// Start a local HTTP server acting as the phone inference endpoint
+	phoneSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Errorf("expected POST, got %s", r.Method)
+		}
+		if r.URL.Path != "/v1/chat/completions" {
+			t.Errorf("expected /v1/chat/completions, got %s", r.URL.Path)
+		}
+		if r.Header.Get("X-Phonon-Proxy") != "coordinator" {
+			t.Errorf("expected X-Phonon-Proxy: coordinator")
+		}
+		_ = json.NewEncoder(w).Encode(PhoneInferenceResponse{
+			Text:     "response from " + r.Host,
+			Tokens:   42,
+			Duration: 100,
+		})
+	}))
+	defer phoneSrv.Close()
+
 	reg := registry.New()
 	h := NewOpenAIHandler(reg)
-
-	resp, err := h.defaultInferenceProxy("http://10.0.0.1:8080", PhoneInferenceRequest{
+	resp, err := h.defaultInferenceProxy(phoneSrv.URL, PhoneInferenceRequest{
 		Model: "test", Messages: []Message{{Role: "user", Content: "hi"}},
 	})
 	if err != nil {
 		t.Fatalf("defaultInferenceProxy: %v", err)
 	}
-	if resp.Tokens != 10 {
-		t.Errorf("expected 10 tokens, got %d", resp.Tokens)
+	if resp.Tokens != 42 {
+		t.Errorf("expected 42 tokens, got %d", resp.Tokens)
 	}
-	if !strings.Contains(resp.Text, "10.0.0.1") {
-		t.Errorf("expected phone URL in response, got %s", resp.Text)
+	if !strings.Contains(resp.Text, phoneSrv.Listener.Addr().String()) {
+		t.Errorf("expected phone address in response, got %s", resp.Text)
 	}
 }
 

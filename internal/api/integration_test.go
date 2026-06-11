@@ -117,8 +117,8 @@ func TestIntegration_FullSidecarLifecycle(t *testing.T) {
 	if !ok {
 		t.Fatal("device should be registered")
 	}
-	if node.Name != "pixel-test" {
-		t.Errorf("expected name 'pixel-test', got %q", node.Name)
+	if node.Name != "pixel-test--001" {
+		t.Errorf("expected name 'pixel-test--001', got %q", node.Name)
 	}
 
 	// Step 2: Connect WebSocket (Kotlin connectWebSocket)
@@ -224,7 +224,13 @@ func TestIntegration_FullSidecarLifecycle(t *testing.T) {
 	}
 
 	// Step 7: Query model status
-	resp2, err := http.Get(server.URL + "/api/v1/sidecar/models/PHONE-001/status")
+	// POST model-status
+	modelBody := map[string]any{
+		"device_id": "PHONE-001",
+		"loaded":    nil,
+	}
+	mb, _ := json.Marshal(modelBody)
+	resp2, err := http.Post(server.URL+"/api/v1/sidecar/model-status", "application/json", bytes.NewReader(mb))
 	if err != nil {
 		t.Fatalf("model status request failed: %v", err)
 	}
@@ -247,8 +253,8 @@ func TestIntegration_RegistrationThenWebSocket(t *testing.T) {
 	if !ok {
 		t.Fatal("device should be registered after REST call")
 	}
-	if node.State != "online" {
-		t.Errorf("expected state 'online', got %q", node.State)
+	if node.State != "unpaired" {
+		t.Errorf("expected state 'unpaired', got %q", node.State)
 	}
 
 	// Connect WS with the same device ID

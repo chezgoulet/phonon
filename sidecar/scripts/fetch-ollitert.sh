@@ -51,10 +51,12 @@ echo "    SHA-256 OK"
 # ── Extract libollitert.so ─────────────────────────────────────
 echo "==> Extracting libollitert.so..."
 # APK is a ZIP — extract the native library for arm64-v8a
-EXTRACTED=$(unzip -l "$APK_PATH" "lib/arm64-v8a/libollitert.so" 2>/dev/null | grep "libollitert.so" | head -1)
+EXTRACTED=$(unzip -l "$APK_PATH" "lib/arm64-v8a/libollitert.so" 2>/dev/null | grep "libollitert.so" | head -1) || true
 if [ -z "$EXTRACTED" ]; then
+    APK_LIBS=$(unzip -l "$APK_PATH" "lib/arm64-v8a/*" 2>/dev/null) || true
     echo "ERROR: libollitert.so not found in APK"
-    unzip -l "$APK_PATH" "lib/arm64-v8a/*" 2>/dev/null || true
+    echo "Available lib/arm64-v8a files:"
+    echo "$APK_LIBS"
     exit 1
 fi
 

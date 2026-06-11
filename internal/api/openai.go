@@ -3,6 +3,7 @@ package api
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -414,7 +415,7 @@ func (h *OpenAIHandler) defaultInferenceProxy(phoneURL string, req PhoneInferenc
 		return nil, fmt.Errorf("marshal inference request: %w", err)
 	}
 
-	httpReq, err := http.NewRequest(http.MethodPost, phoneURL+openaiCompatibleEndpoint, strings.NewReader(string(payload)))
+	httpReq, err := http.NewRequestWithContext(context.Background(), http.MethodPost, phoneURL+openaiCompatibleEndpoint, strings.NewReader(string(payload)))
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
@@ -550,7 +551,7 @@ func (h *OpenAIHandler) defaultStreamInferenceProxy(phoneURL string, req PhoneIn
 		return "", fmt.Errorf("marshal inference request: %w", err)
 	}
 
-	httpReq, err := http.NewRequest(http.MethodPost, phoneURL+openaiCompatibleEndpoint, strings.NewReader(string(payload)))
+	httpReq, err := http.NewRequestWithContext(context.Background(), http.MethodPost, phoneURL+openaiCompatibleEndpoint, strings.NewReader(string(payload)))
 	if err != nil {
 		return "", fmt.Errorf("create request: %w", err)
 	}

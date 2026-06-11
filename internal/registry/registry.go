@@ -50,7 +50,7 @@ func (r *Registry) Register(deviceID, name, ipAddress string) error {
 	}
 
 	if r.eventLog != nil {
-		r.eventLog.Write(log.EventNodeJoined, deviceID, log.SeverityInfo, "node registered: "+name)
+		_ = r.eventLog.Write(log.EventNodeJoined, deviceID, log.SeverityInfo, "node registered: "+name)
 	}
 
 	return nil
@@ -75,7 +75,7 @@ func (r *Registry) Pair(deviceID string) error {
 	node.PairedAt = time.Now()
 
 	if r.eventLog != nil {
-		r.eventLog.Write(log.EventPairingDone, deviceID, log.SeverityInfo, "node paired")
+		_ = r.eventLog.Write(log.EventPairingDone, deviceID, log.SeverityInfo, "node paired")
 	}
 
 	return nil
@@ -103,7 +103,7 @@ func (r *Registry) UpdateHeartbeat(deviceID string, telemetry HealthTelemetry) e
 	}
 
 	if r.eventLog != nil && wasOffline {
-		r.eventLog.Write(log.EventNodeOnline, deviceID, log.SeverityInfo, "node came online")
+		_ = r.eventLog.Write(log.EventNodeOnline, deviceID, log.SeverityInfo, "node came online")
 	}
 
 	return nil
@@ -341,7 +341,7 @@ func (r *Registry) PurgeStale(timeout time.Duration) int {
 
 	if count > 0 && r.eventLog != nil {
 		for _, id := range staleIDs {
-			r.eventLog.Write(log.EventNodeLeft, id, log.SeverityWarning, "node went offline (stale heartbeat)")
+			_ = r.eventLog.Write(log.EventNodeLeft, id, log.SeverityWarning, "node went offline (stale heartbeat)")
 		}
 	}
 

@@ -3,6 +3,7 @@ package com.chezgoulet.phonon
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.util.Log
 import android.app.Service
 import android.content.Context
 import android.content.Intent
@@ -44,8 +45,8 @@ class PhononService : Service() {
     private var wakeLock: PowerManager.WakeLock? = null
 
     // Coordinator configuration — loaded from phonon.conf, fallback to mDNS, then 255.255.255.255
-    private var coordinatorHost: String = "255.255.255.255"
-    private var coordinatorPort: Int = 8080
+    internal var coordinatorHost: String = "255.255.255.255"
+    internal var coordinatorPort: Int = 8080
 
     // Status for notification
     @Volatile
@@ -256,7 +257,6 @@ class PhononService : Service() {
             .setContentText("Device: $deviceText · $statusText · $modelText")
             .setSmallIcon(android.R.drawable.ic_menu_compass)
             .setOngoing(true)
-            .setSilent(true)
             .build()
     }
 
