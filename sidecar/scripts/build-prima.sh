@@ -27,24 +27,21 @@ INSTALL_DIR="$BUILD_DIR/install"
 
 # Output locations in the sidecar project
 JNILIBS_DIR="$REPO_ROOT/sidecar/app/src/main/jniLibs/$ABI"
-# ── Clean ──────────────────────────────────────────────────────
-echo "==> Cleaning previous build..."
-rm -rf "$BUILD_DIR"
-mkdir -p "$JNILIBS_DIR"
+
+# Persistent dependency cache (outside BUILD_DIR so it survives clean)
+DEPS_DIR="$REPO_ROOT/.deps"
+ZMQ_INSTALL_DIR="$DEPS_DIR/zmq-android"
 
 # ── Cross-compile libzmq for Android ───────────────────────────
 # prima.cpp links against libzmq, which isn't available in the NDK
 # sysroot. Build a static version targeting the same ABI.
-ZMQ_VERSION="4.3.5"
-ZMQ_BUILD_DIR="$BUILD_DIR/zmq-build"
-ZMQ_INSTALL_DIR="$BUILD_DIR/zmq-install"
-
-if [ ! -d "$ZMQ_INSTALL_DIR/lib" ]; then
-    echo "==> Cross-compiling libzmq $ZMQ_VERSION for Android $ABI..."
-    ZMQ_SRC_DIR="$ZMQ_BUILD_DIR/zeromq-${ZMQ_VERSION}"
+if [ ! -f "$ZMQ_INSTALL_DIR/lib/libzmq.a" ]; then
+    echo "==> Cross-compiling libzmq 4.3.5 for Android $ABI..."
+    ZMQ_BUILD_DIR="$DEPS_DIR/zmq-build"
+    ZMQ_SRC_DIR="$ZMQ_BUILD_DIR/zeromq-4.3.5"
     if [ ! -d "$ZMQ_SRC_DIR" ]; then
         mkdir -p "$ZMQ_BUILD_DIR"
-        curl -sL "https://github.com/zeromq/libzmq/releases/download/v${ZMQ_VERSION}/zeromq-${ZMQ_VERSION}.tar.gz" \
+        curl -sL "https://github.com/zeromq/libzmq/releases/download/v4.3.5/zeromq-4.3.5.tar.gz" \
           | tar xz -C "$ZMQ_BUILD_DIR"
     fi
     mkdir -p "$ZMQ_BUILD_DIR/build"
@@ -63,9 +60,15 @@ if [ ! -d "$ZMQ_INSTALL_DIR/lib" ]; then
         -DCMAKE_INSTALL_PREFIX="$ZMQ_INSTALL_DIR"
     "$CMAKE" --build "$ZMQ_BUILD_DIR/build" --parallel
     "$CMAKE" --install "$ZMQ_BUILD_DIR/build" --prefix "$ZMQ_INSTALL_DIR"
+    rm -rf "$ZMQ_BUILD_DIR"
 else
     echo "==> libzmq already built for Android, skipping..."
 fi
+
+# ── Clean ──────────────────────────────────────────────────────
+echo "==> Cleaning previous build..."
+rm -rf "$BUILD_DIR"
+mkdir -p "$JNILIBS_DIR"
 
 # ── Configure ──────────────────────────────────────────────────
 echo "==> Configuring CMake for $ABI (API $ANDROID_PLATFORM)..."
