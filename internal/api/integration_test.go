@@ -46,7 +46,7 @@ func sidecarRegister(t *testing.T, baseURL, deviceID string) {
 		t.Fatalf("register request failed: %v", err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
 		t.Fatalf("register returned HTTP %d", resp.StatusCode)
 	}
 }

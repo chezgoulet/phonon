@@ -245,8 +245,8 @@ func TestChatCompletionWithOnlinePhone(t *testing.T) {
 
 	// Override inference proxy to return a controlled response
 	h.inferenceProxy = func(phoneURL string, _ PhoneInferenceRequest) (*PhoneInferenceResponse, error) {
-		if !strings.Contains(phoneURL, "10.0.0.5:9876/infer") {
-			t.Errorf("expected phone URL to contain 10.0.0.5:9876/infer, got %s", phoneURL)
+		if !strings.Contains(phoneURL, "10.0.0.5:9876/v1/chat/completions") {
+			t.Errorf("expected phone URL to contain 10.0.0.5:9876/v1/chat/completions, got %s", phoneURL)
 		}
 		return &PhoneInferenceResponse{
 			Text:     "Hello! How can I help you?",
@@ -650,7 +650,8 @@ func TestStreamChatCompletionProxyError(t *testing.T) {
 	if !strings.Contains(bodyStr, `"inference failed: broken pipe`) {
 		t.Errorf("expected inference failed message, got: %s", bodyStr)
 	}
-	if !strings.Contains(bodyStr, `"quote"`) {
+	// The error message contains real quotes which are JSON-escaped in the SSE payload
+	if !strings.Contains(bodyStr, `\"quote\"`) {
 		t.Errorf("expected escaped quote in error message, got: %s", bodyStr)
 	}
 	if !strings.Contains(bodyStr, `"type":"inference_error"`) {
@@ -722,7 +723,7 @@ func TestSelectPhoneHealthAware(t *testing.T) {
 			reg.UpdateHeartbeat("phone-02", tt.phone2Health)
 			reg.SetModelStatus("phone-02", registry.ModelStatus{Name: "llama", Loaded: true})
 
-			h := NewOpenAIHandler(reg)
+			h := NewOpenAIHandler(reg, WithMaxQueuePerNode(0))
 
 			phone, _, err := h.selectPhone("llama")
 			if err != nil {
