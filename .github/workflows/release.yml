@@ -9,7 +9,7 @@ jobs:
   # ─── Web UI (React) ────────────────────────────────────────────────
   react:
     name: Web UI
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     defaults:
       run:
         working-directory: ui
@@ -38,7 +38,7 @@ jobs:
   # ─── Sidecar (Kotlin / Android / LiteRT-LM) ───────────────────────
   kotlin:
     name: Sidecar
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     defaults:
       run:
         working-directory: sidecar
@@ -142,7 +142,7 @@ jobs:
   # ─── Coordinator (Go) ─────────────────────────────────────────────
   go:
     name: Coordinator
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     needs: [react]
     steps:
       - uses: actions/checkout@v4
@@ -190,7 +190,7 @@ jobs:
   release:
     name: Publish Release
     needs: [react, kotlin, go]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     permissions:
       contents: write
     steps:
