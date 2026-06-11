@@ -202,6 +202,10 @@ func main() {
 	eventAPI := phononlog.NewAPIHandler(eventLog)
 	eventAPI.RegisterRoutes(protectedMux)
 
+	// Model download endpoint (protected) — serves cached GGUF files
+	modelAPI := api.NewModelDownloadHandler(modelCache, cacheDir)
+	modelAPI.RegisterRoutes(protectedMux)
+
 	mux.Handle("/api/v1/", authMiddleware.Handler(protectedMux))
 
 	// Metrics — public, served from the health monitor's private Prometheus registry
