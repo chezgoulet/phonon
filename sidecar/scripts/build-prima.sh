@@ -56,11 +56,13 @@ if [ ! -d "$ZMQ_INSTALL_DIR/lib" ]; then
         -DANDROID_ABI="$ABI" \
         -DANDROID_PLATFORM="$ANDROID_PLATFORM" \
         -DCMAKE_BUILD_TYPE=Release \
-        -DBUILD_SHARED_LIBS=OFF \
-        -DBUILD_STATIC_LIBS=ON \
+        -DBUILD_SHARED=OFF \
+        -DBUILD_STATIC=ON \
         -DWITH_TLS=OFF \
         -DWITH_VMCI=OFF \
         -DWITH_RADIX_TREE=OFF \
+        -DWITH_LIBBSD=OFF \
+        -DWITH_NORM=OFF \
         -DCMAKE_INSTALL_PREFIX="$ZMQ_INSTALL_DIR"
     "$CMAKE" --build "$ZMQ_BUILD_DIR/build" --parallel
     "$CMAKE" --install "$ZMQ_BUILD_DIR/build" --prefix "$ZMQ_INSTALL_DIR"
@@ -82,7 +84,10 @@ echo "==> Configuring CMake for $ABI (API $ANDROID_PLATFORM)..."
     -DLLAMA_CURL=OFF \
     -DLLAMA_FATAL_WARNINGS=OFF \
     -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
-    -DCMAKE_PREFIX_PATH="$ZMQ_INSTALL_DIR"
+    -DCMAKE_PREFIX_PATH="$ZMQ_INSTALL_DIR" \
+    -DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=BOTH \
+    -DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=BOTH \
+    -DCMAKE_LIBRARY_PATH="$ZMQ_INSTALL_DIR/lib"
 
 # ── Build ──────────────────────────────────────────────────────
 echo "==> Building..."
