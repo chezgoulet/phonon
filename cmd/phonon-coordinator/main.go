@@ -74,7 +74,7 @@ func main() {
 	})
 	if err != nil {
 		logger.Error("event log init failed", "error", err)
-		os.Exit(1)
+		return
 	}
 	defer eventLog.Close()
 
@@ -103,7 +103,7 @@ func main() {
 
 	if err := authMiddleware.Start(); err != nil {
 		logger.Error("auth middleware start failed", "error", err)
-		os.Exit(1)
+		return
 	}
 	defer authMiddleware.Stop()
 

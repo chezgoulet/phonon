@@ -7,17 +7,20 @@ plugins {
 
 // ── prima.cpp NDK build ───────────────────────────────────────────────
 // Cross-compiles llama.cpp fork for arm64-v8a.
-// Runs only when ANDROID_NDK is set or when jniLibs output is missing.
+// Runs only when ANDROID_NDK is set and NOT on CI (ZMQ headers not available).
 
 val primaBuildScript = rootProject.projectDir.resolve("scripts/build-prima.sh")
-val primaOutput = project.layout.projectDirectory
-    .dir("src/main/jniLibs/arm64-v8a/libllama.so")
 
 tasks.register<Exec>("buildPrima") {
     description = "Cross-compile prima.cpp (llama.cpp fork) for arm64-v8a via NDK"
 
-    // Only configure if the script exists (skip on CI without NDK)
-    onlyIf { primaBuildScript.exists() }
+    // Skip on CI — prima.cpp depends on ZMQ which isn't available.
+    // Skip if the script doesn't exist (fresh checkout w/o submodules).
+    onlyIf {
+        val isCI = System.getenv("CI") == "true"
+        val hasNDK = System.getenv("ANDROID_NDK") != null
+        primaBuildScript.exists() && hasNDK && !isCI
+    }
 
     // Run the build script from the repo root
     workingDir = rootProject.projectDir.parentFile
@@ -28,9 +31,8 @@ tasks.register<Exec>("buildPrima") {
         .orElse(""))
 }
 
-// Hook into the build pipeline — if the user has ANDROID_NDK set,
-// build prima.cpp before merging resources
-if (System.getenv("ANDROID_NDK") != null) {
+// Hook into the build pipeline — only when NDK is configured AND not on CI
+if (System.getenv("ANDROID_NDK") != null && System.getenv("CI") != "true") {
     tasks.matching { it.name.startsWith("merge") && it.name.endsWith("Resources") }
         .configureEach {
             dependsOn("buildPrima")
