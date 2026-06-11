@@ -81,10 +81,14 @@ jobs:
             "ndk;27.0.12077973" > /dev/null 2>&1 || true
 
       - name: Test
-        run: gradle test
+        env:
+          GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx1536m -XX:MaxMetaspaceSize=512m"
+        run: gradle test --max-workers 2
 
       - name: Build APKs
-        run: gradle assembleDebug assembleRelease
+        env:
+          GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx1536m -XX:MaxMetaspaceSize=512m"
+        run: gradle assembleDebug assembleRelease --max-workers 2
 
       - name: Upload APKs
         uses: actions/upload-artifact@v4
