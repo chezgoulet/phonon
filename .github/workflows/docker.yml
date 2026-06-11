@@ -1,13 +1,13 @@
 name: Docker
+env:
+  ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: "true"
+  REGISTRY: docker.io
+  IMAGE_NAME: chezgoulet/phonon-coordinator
 
 on:
   push:
     tags:
       - "v*"
-
-env:
-  REGISTRY: docker.io
-  IMAGE_NAME: chezgoulet/phonon-coordinator
 
 jobs:
   docker:
