@@ -58,7 +58,7 @@ if [ ! -f "$ZMQ_INSTALL_DIR/lib/libzmq.a" ]; then
         -DWITH_LIBBSD=OFF \
         -DWITH_NORM=OFF \
         -DCMAKE_INSTALL_PREFIX="$ZMQ_INSTALL_DIR"
-    "$CMAKE" --build "$ZMQ_BUILD_DIR/build" --parallel
+    "$CMAKE" --build "$ZMQ_BUILD_DIR/build" --parallel 2
     "$CMAKE" --install "$ZMQ_BUILD_DIR/build" --prefix "$ZMQ_INSTALL_DIR"
     rm -rf "$ZMQ_BUILD_DIR"
 else
@@ -95,7 +95,7 @@ echo "==> Configuring CMake for $ABI (API $ANDROID_PLATFORM)..."
 
 # ── Build ──────────────────────────────────────────────────────
 echo "==> Building..."
-"$CMAKE" --build "$BUILD_DIR" --target llama --parallel
+"$CMAKE" --build "$BUILD_DIR" --target llama --parallel 2
 
 # ── Install ────────────────────────────────────────────────────
 echo "==> Installing..."
