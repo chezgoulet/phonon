@@ -149,7 +149,7 @@ class InferenceServer(
             val prompt = buildPrompt(request)
 
             // Run inference via LiteRT-LM
-            val text = modelManager.generate(prompt, request.maxTokens)
+            val text = modelManager.generate(prompt)
 
             val elapsed = (System.currentTimeMillis() - startTime).toInt()
             val estimatedTokens = text.length / 4 // rough estimate

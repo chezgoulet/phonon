@@ -112,12 +112,11 @@ class ModelManager(private val context: Context) {
      * @return The generated text response
      * @throws IllegalStateException if no model is loaded
      */
-    suspend fun generate(prompt: String, maxTokens: Int = 2048): String {
+    suspend fun generate(prompt: String): String {
         val eng = engine ?: throw IllegalStateException("No model loaded")
 
         return withContext(Dispatchers.Default) {
             val config = ConversationConfig(
-                maxTokens = maxTokens,
                 samplerConfig = SamplerConfig(
                     temperature = 0.7,
                     topK = 40,
