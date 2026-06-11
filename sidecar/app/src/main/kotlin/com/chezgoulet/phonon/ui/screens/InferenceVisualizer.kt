@@ -113,13 +113,13 @@ private fun DrawScope.drawNeuralVisualizer(
         drawCircle(
             color = ringColor.copy(alpha = nodeAlpha),
             radius = 4f,
-            center = androidx.compose.ui.geometry.Offset(nx, ny)
+            center = androidx.compose.ui.geometry.Offset(nx.toFloat(), ny.toFloat())
         )
 
         // Connection line to center
         drawLine(
             color = ringColor.copy(alpha = nodeAlpha * 0.3f),
-            start = androidx.compose.ui.geometry.Offset(nx, ny),
+            start = androidx.compose.ui.geometry.Offset(nx.toFloat(), ny.toFloat()),
             end = androidx.compose.ui.geometry.Offset(cx, cy),
             strokeWidth = 1f
         )
@@ -143,7 +143,7 @@ private fun DrawScope.drawNeuralVisualizer(
                 drawCircle(
                     color = Color(0xFF22C55E).copy(alpha = 0.4f),
                     radius = 2f,
-                    center = androidx.compose.ui.geometry.Offset(gx, gy)
+                    center = androidx.compose.ui.geometry.Offset(gx.toFloat(), gy.toFloat())
                 )
             }
         }
