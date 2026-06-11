@@ -3,6 +3,7 @@ package com.chezgoulet.phonon
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.util.Log
 import android.app.Service
 import android.content.Context
 import android.content.Intent
@@ -256,7 +257,6 @@ class PhononService : Service() {
             .setContentText("Device: $deviceText · $statusText · $modelText")
             .setSmallIcon(android.R.drawable.ic_menu_compass)
             .setOngoing(true)
-            .setSilent(true)
             .build()
     }
 
