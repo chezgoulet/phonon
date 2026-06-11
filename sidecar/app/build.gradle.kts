@@ -26,9 +26,7 @@ tasks.register<Exec>("buildPrima") {
     workingDir = rootProject.projectDir.parentFile
     commandLine("bash", primaBuildScript.absolutePath)
 
-    // Environment — ANDROID_NDK must be set
-    environment("ANDROID_NDK", providers.environmentVariable("ANDROID_NDK")
-        .orElse(""))
+    // ANDROID_NDK inherited from shell environment (set in CI or local profile)
 }
 
 // Hook into the build pipeline — only when NDK is configured and .so is missing
