@@ -83,7 +83,7 @@ func (h *ModelDownloadHandler) handleDownload(w http.ResponseWriter, r *http.Req
 
 	// Set response headers
 	w.Header().Set("Content-Type", "application/octet-stream")
-	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, safeModelName(modelName)))
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename=%q`, safeModelName(modelName)))
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", fi.Size()))
 	w.Header().Set("X-Checksum-Sha256", checksum)
 	w.Header().Set("Accept-Ranges", "bytes")
