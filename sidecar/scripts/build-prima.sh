@@ -27,12 +27,10 @@ INSTALL_DIR="$BUILD_DIR/install"
 
 # Output locations in the sidecar project
 JNILIBS_DIR="$REPO_ROOT/sidecar/app/src/main/jniLibs/$ABI"
-ASSETS_DIR="$REPO_ROOT/sidecar/app/src/main/assets/prima"
-
 # ── Clean ──────────────────────────────────────────────────────
 echo "==> Cleaning previous build..."
 rm -rf "$BUILD_DIR"
-mkdir -p "$JNILIBS_DIR" "$ASSETS_DIR"
+mkdir -p "$JNILIBS_DIR"
 
 # ── Cross-compile libzmq for Android ───────────────────────────
 # prima.cpp links against libzmq, which isn't available in the NDK
