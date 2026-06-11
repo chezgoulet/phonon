@@ -55,7 +55,8 @@ tasks.register<Exec>("fetchOlliteRT") {
     group = "phonon-build"
 
     onlyIf {
-        olliteFetchScript.exists() && !haveOlliteOutput
+        val isCI = System.getenv("CI") == "true"
+        olliteFetchScript.exists() && !haveOlliteOutput && !isCI
     }
 
     workingDir = rootProject.projectDir.parentFile
