@@ -8,6 +8,16 @@ plugins {
 
 // ── Android application ──────────────────────────────────────────────
 
+// ── Kotlin compiler ───────────────────────────────────────────────
+
+kotlin {
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+    }
+}
+
+// ── Android application ──────────────────────────────────────────────
+
 fun keystoreProperties(): Properties? {
     val propsFile = rootProject.projectDir.parentFile?.resolve("keystore.properties")
     if (propsFile?.exists() == true) {
@@ -61,9 +71,8 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    kotlinOptions {
-        jvmTarget = "17"
-    }
+    // Note: jvmTarget migrated to top-level kotlin.compilerOptions below
+    // (kotlinOptions is removed in Kotlin 2.3)
 
     buildFeatures {
         compose = true
