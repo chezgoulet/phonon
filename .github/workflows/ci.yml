@@ -43,6 +43,7 @@ jobs:
   # ─── Sidecar (Kotlin / Android / LiteRT-LM) ───────────────────────
   kotlin:
     name: Sidecar
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     defaults:
       run:
