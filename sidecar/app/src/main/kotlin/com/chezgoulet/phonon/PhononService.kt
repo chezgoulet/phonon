@@ -170,12 +170,11 @@ class PhononService : Service() {
         mdnsAnnouncer = MDNSAnnouncer(this, app.deviceId, app.deviceModel)
         mdnsAnnouncer.start()
 
-        // Model manager — extracts native binaries, manages inference engines
+        // Model manager — loads .litertlm models via LiteRT-LM SDK
         modelManager = ModelManager(this)
-        modelManager.extractBinaries()
 
-        // Inference server — local HTTP proxy to OlliteRT / prima.cpp
-        inferenceServer = InferenceServer(this)
+        // Inference server — local HTTP server backed by LiteRT-LM
+        inferenceServer = InferenceServer(this, modelManager)
         inferenceServer.start()
 
         // Coordinator client — REST + WebSocket
@@ -192,7 +191,7 @@ class PhononService : Service() {
                 scope.launch {
                     loadedModel = modelName
                     updateNotification()
-                    modelManager.loadModel(modelName, modelUrl, engine)
+                    modelManager.loadModel(modelName, modelUrl)
                 }
             },
             onModelUnload = {
