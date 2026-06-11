@@ -7,7 +7,6 @@
 #
 # Outputs:
 #   app/src/main/jniLibs/arm64-v8a/libllama.so     — shared library
-#   app/src/main/assets/prima/llama-server          — inference binary
 #
 # Run from the repo root (phonon/):
 #   bash sidecar/scripts/build-prima.sh
@@ -80,7 +79,7 @@ echo "==> Configuring CMake for $ABI (API $ANDROID_PLATFORM)..."
     -DBUILD_SHARED_LIBS=ON \
     -DLLAMA_BUILD_TESTS=OFF \
     -DLLAMA_BUILD_EXAMPLES=OFF \
-    -DLLAMA_BUILD_SERVER=ON \
+    -DLLAMA_BUILD_SERVER=OFF \
     -DLLAMA_CURL=OFF \
     -DLLAMA_FATAL_WARNINGS=OFF \
     -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
@@ -96,7 +95,6 @@ echo "==> Configuring CMake for $ABI (API $ANDROID_PLATFORM)..."
 # ── Build ──────────────────────────────────────────────────────
 echo "==> Building..."
 "$CMAKE" --build "$BUILD_DIR" --target llama --parallel
-"$CMAKE" --build "$BUILD_DIR" --target llama-server --parallel
 
 # ── Install ────────────────────────────────────────────────────
 echo "==> Installing..."
@@ -105,8 +103,6 @@ echo "==> Installing..."
 # ── Copy to sidecar project ────────────────────────────────────
 echo "==> Copying outputs..."
 cp -v "$BUILD_DIR/src/libllama.so" "$JNILIBS_DIR/libllama.so"
-cp -v "$BUILD_DIR/bin/llama-server" "$ASSETS_DIR/llama-server"
 
 echo "==> Done. Outputs:"
 echo "    $JNILIBS_DIR/libllama.so"
-echo "    $ASSETS_DIR/llama-server"
