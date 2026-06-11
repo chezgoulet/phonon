@@ -10,7 +10,7 @@ RUN go mod download
 COPY . .
 
 # Build web UI first (if ui/src exists)
-RUN --mount=type=bind,target=/src \
+RUN \
     if [ -d ui/src ]; then \
       apk add --no-cache nodejs npm && \
       cd ui && npm ci && npm run build && \
