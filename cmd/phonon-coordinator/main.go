@@ -19,6 +19,7 @@ import (
 	"github.com/chezgoulet/phonon/internal/config"
 	"github.com/chezgoulet/phonon/internal/discovery"
 	"github.com/chezgoulet/phonon/internal/health"
+	phononlog "github.com/chezgoulet/phonon/internal/log"
 	"github.com/chezgoulet/phonon/internal/model"
 	"github.com/chezgoulet/phonon/internal/registry"
 	"gopkg.in/yaml.v3"
@@ -54,6 +55,31 @@ func main() {
 
 	// Create registry and API handlers
 	reg := registry.New()
+
+	// Initialize persistent event log
+	elPath := cfg.Cluster.EventLog.Path
+	if elPath == "" {
+		elPath = "phonon.db"
+	}
+	retentionDays := cfg.Cluster.EventLog.RetentionDays
+	if retentionDays <= 0 {
+		retentionDays = 90
+	}
+
+	eventLog, err := phononlog.New(phononlog.Opts{
+		Path:          elPath,
+		RetentionDays: retentionDays,
+		MaxEvents:     10000,
+		Logger:        logger,
+	})
+	if err != nil {
+		logger.Error("event log init failed", "error", err)
+		os.Exit(1)
+	}
+	defer eventLog.Close()
+
+	// Attach event log to registry
+	reg.SetEventLog(eventLog)
 
 	wsHandler := api.NewWSHandler(reg)
 
@@ -108,6 +134,9 @@ func main() {
 	}
 	healthMonitor := health.NewMonitor(reg, healthCfg)
 	healthMetrics := healthMonitor.RegisterMetrics()
+
+	// Wire event log to health monitor actions
+	healthMonitor.AddAction(health.WithEventLog(eventLog))
 
 	// 2. Discovery manager — mDNS (unless disabled) + manual registration
 	var mdnsDiscoverer discovery.Discoverer
@@ -169,6 +198,11 @@ func main() {
 	protectedMux := http.NewServeMux()
 	openaiHandler.RegisterRoutes(protectedMux)
 	clusterHandler.RegisterRoutes(protectedMux)
+
+	// Event log query endpoint (protected)
+	eventAPI := phononlog.NewAPIHandler(eventLog)
+	eventAPI.RegisterRoutes(protectedMux)
+
 	mux.Handle("/api/v1/", authMiddleware.Handler(protectedMux))
 
 	// Metrics — public, served from the health monitor's private Prometheus registry
@@ -194,6 +228,9 @@ func main() {
 			os.Exit(1)
 		}
 	}()
+
+	// Start event log retention loop
+	eventLog.StartRetentionLoop(ctx, retentionDays, 24*time.Hour)
 
 	// Start background subsystems now that the HTTP server is running
 	healthMonitor.Start()
