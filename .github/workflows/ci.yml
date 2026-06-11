@@ -87,6 +87,57 @@ jobs:
           GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx1536m -XX:MaxMetaspaceSize=512m"
         run: gradle assembleDebug assembleRelease --max-workers 2
 
+      - name: Sign Release APK
+        env:
+          KEYSTORE_BASE64: ${{ secrets.PHONON_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.PHONON_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.PHONON_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.PHONON_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "⚠️ PHONON_KEYSTORE_BASE64 not set — skipping APK signing"
+            echo "   (expected on PR builds from forks; secrets are available on push events)"
+            exit 0
+          fi
+
+          echo "🔐 Decoding keystore..."
+          KEYSTORE_FILE="/tmp/release.keystore"
+          echo "$KEYSTORE_BASE64" | base64 -d > "$KEYSTORE_FILE"
+
+          APK_DIR="$GITHUB_WORKSPACE/sidecar/app/build/outputs/apk/release"
+          UNSIGNED_APK="$APK_DIR/app-release-unsigned.apk"
+          SIGNED_APK="$APK_DIR/app-release.apk"
+
+          if [ ! -f "$UNSIGNED_APK" ]; then
+            echo "❌ Release APK not found at $UNSIGNED_APK"
+            exit 1
+          fi
+
+          echo "📝 Signing with jarsigner..."
+          jarsigner -verbose \
+            -keystore "$KEYSTORE_FILE" \
+            -storepass "$KEYSTORE_PASSWORD" \
+            -keypass "$KEY_PASSWORD" \
+            -sigalg SHA256withRSA \
+            -digestalg SHA-256 \
+            "$UNSIGNED_APK" "$KEY_ALIAS"
+
+          echo "✅ Verifying signature..."
+          jarsigner -verify -verbose "$UNSIGNED_APK"
+
+          echo "📦 Aligning with zipalign..."
+          ANDROID_HOME="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+          ANDROID_HOME="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          ZIPALIGN="$ANDROID_HOME/build-tools/35.0.0/zipalign"
+          "$ZIPALIGN" -f -v 4 "$UNSIGNED_APK" "$SIGNED_APK"
+
+          # Remove the unsigned APK (signed + aligned version replaces it)
+          rm "$UNSIGNED_APK"
+
+          echo "✅ Release APK signed and aligned: $SIGNED_APK"
+
       - name: Upload APKs
         uses: actions/upload-artifact@v4
         with:
