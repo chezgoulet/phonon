@@ -14,7 +14,7 @@ jobs:
   # ─── Web UI (React) ────────────────────────────────────────────────
   react:
     name: Web UI
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     defaults:
       run:
         working-directory: ui
@@ -44,7 +44,7 @@ jobs:
   kotlin:
     name: Sidecar
     if: github.event_name == 'push'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     defaults:
       run:
         working-directory: sidecar
@@ -151,7 +151,7 @@ jobs:
   # ─── Coordinator (Go) ─────────────────────────────────────────────
   go:
     name: Coordinator
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     needs: [react]
     steps:
       - uses: actions/checkout@v4
