@@ -87,12 +87,11 @@ func main() {
 	openaiHandler := api.NewOpenAIHandler(reg, api.WithMaxQueuePerNode(cfg.Cluster.Queue.MaxPerNode))
 	clusterHandler := api.NewClusterHandler(reg)
 
-	// The inference proxy defaults to a placeholder mock. Warn loudly so
-	// operators don't confuse simulated responses with real inference.
-	logger.Warn("inference proxy using placeholder mock — phone inference not yet implemented",
+	// The inference proxy now routes to phones via HTTP on the default
+	// sidecar port (9876). The phone must be running the Phonon sidecar
+	// with an active model load for inference to succeed.
+	logger.Info("inference proxy ready — routing to phones via HTTP",
 		"component", "openai")
-	logger.Warn("set PHONON_INFERENCE_URL or override via SetInferenceProxy for real phone inference",
-		"hint", "see internal/api/openai.go")
 
 
 	// Create auth middleware
@@ -222,10 +221,25 @@ func main() {
 	defer cancel()
 
 	go func() {
-		logger.Info("listening", "addr", addr, "auth_mode", authMiddleware.Status().Mode)
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			logger.Error("server error", "error", err)
-			os.Exit(1)
+		// Start with TLS if configured, otherwise plain HTTP
+		if cfg != nil && cfg.Cluster.TLS.Enabled {
+			cert := cfg.Cluster.TLS.CertFile
+			key := cfg.Cluster.TLS.KeyFile
+			if cert == "" || key == "" {
+				logger.Error("TLS enabled but cert_file or key_file not set")
+				os.Exit(1)
+			}
+			logger.Info("listening (TLS)", "addr", addr, "auth_mode", authMiddleware.Status().Mode, "cert", cert)
+			if err := server.ListenAndServeTLS(cert, key); err != nil && err != http.ErrServerClosed {
+				logger.Error("server error", "error", err)
+				os.Exit(1)
+			}
+		} else {
+			logger.Info("listening", "addr", addr, "auth_mode", authMiddleware.Status().Mode, "tls", false)
+			if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				logger.Error("server error", "error", err)
+				os.Exit(1)
+			}
 		}
 	}()
 

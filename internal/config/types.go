@@ -42,10 +42,21 @@ type QueueConfig struct {
 	MaxPerNode int `yaml:"max_per_node"` // max requests queued per phone before returning 429 (default 3)
 }
 
+// TLSConfig defines optional TLS/mTLS settings.
+type TLSConfig struct {
+	Enabled  bool   `yaml:"enabled"`   // enable HTTPS
+	CertFile string `yaml:"cert_file"` // path to TLS certificate (PEM)
+	KeyFile  string `yaml:"key_file"`  // path to TLS private key (PEM)
+	// Self-signed certs are acceptable for LAN deployments.
+	// Generate with: openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+	//   -keyout phonon.key -out phonon.crt -subj "/CN=phonon.local"
+}
+
 // ClusterConfig defines the top-level cluster settings.
 type ClusterConfig struct {
 	Name       string           `yaml:"name"`
 	Auth       AuthConfig       `yaml:"auth"`
+	TLS        TLSConfig        `yaml:"tls"`
 	Networking NetworkingConfig `yaml:"networking"`
 	Discovery  DiscoveryConfig  `yaml:"discovery"`
 	Health     HealthConfig     `yaml:"health"`
