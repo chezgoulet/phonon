@@ -217,7 +217,10 @@ func main() {
 	// Serve the Web UI from /ui/ and redirect / → /ui/
 	serveUI(mux, logger)
 
-	addr := ":" + coordinatorPort
+	addr := cfg.Cluster.Bind
+	if addr == "" {
+		addr = ":" + coordinatorPort
+	}
 
 	server := &http.Server{
 		Addr:    addr,
@@ -237,12 +240,26 @@ func main() {
 				os.Exit(1)
 			}
 			logger.Info("listening (TLS)", "addr", addr, "auth_mode", authMiddleware.Status().Mode, "cert", cert)
+			if authMiddleware.Status().Mode == "none" &&
+				(strings.HasPrefix(addr, ":") || strings.HasPrefix(addr, "0.0.0.0:") || strings.HasPrefix(addr, "::")) {
+				logger.Warn("INSECURE — TLS enabled but auth mode is 'none', anyone with a valid cert can reach the API",
+					"addr", addr,
+					"fix", "set auth.mode to 'psk' or 'oidc'",
+				)
+			}
 			if err := server.ListenAndServeTLS(cert, key); err != nil && err != http.ErrServerClosed {
 				logger.Error("server error", "error", err)
 				os.Exit(1)
 			}
 		} else {
 			logger.Info("listening", "addr", addr, "auth_mode", authMiddleware.Status().Mode, "tls", false)
+			if authMiddleware.Status().Mode == "none" &&
+				(strings.HasPrefix(addr, ":") || strings.HasPrefix(addr, "0.0.0.0:") || strings.HasPrefix(addr, "::")) {
+				logger.Warn("INSECURE — binding on all interfaces with no auth",
+					"addr", addr,
+					"fix", "set auth.mode to 'psk' or 'oidc' in phonon.yaml, or bind 127.0.0.1:8080 for local-only",
+				)
+			}
 			if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 				logger.Error("server error", "error", err)
 				os.Exit(1)

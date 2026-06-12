@@ -56,6 +56,7 @@ type TLSConfig struct {
 // ClusterConfig defines the top-level cluster settings.
 type ClusterConfig struct {
 	Name       string           `yaml:"name"`
+	Bind       string           `yaml:"bind"`       // listen address, e.g. ":8080" or "127.0.0.1:8080" (default ":8080")
 	Auth       AuthConfig       `yaml:"auth"`
 	TLS        TLSConfig        `yaml:"tls"`
 	Networking NetworkingConfig `yaml:"networking"`
