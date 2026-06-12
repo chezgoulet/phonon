@@ -7,6 +7,7 @@ require (
 	github.com/gorilla/websocket v1.5.3
 	github.com/hashicorp/mdns v1.0.6
 	github.com/prometheus/client_golang v1.23.2
+	github.com/redis/go-redis/v9 v9.7.3
 	gopkg.in/yaml.v3 v3.0.1
 )
 

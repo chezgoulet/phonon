@@ -47,6 +47,15 @@ func (c *Config) setDefaults() {
 		c.Cluster.Queue.MaxPerNode = 3
 	}
 
+	// Pairing / Redis defaults
+	p := &c.Cluster.Pairing
+	if p.Redis.Addr == "" {
+		p.Redis.Addr = "localhost:6379"
+	}
+	if p.Redis.Key == "" {
+		p.Redis.Key = "phonon:paired"
+	}
+
 	// Bind default — :8080
 	if c.Cluster.Bind == "" {
 		port := os.Getenv("PHONON_PORT")

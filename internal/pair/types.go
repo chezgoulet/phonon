@@ -11,6 +11,15 @@
 // Once paired, all further WS connections use mTLS with the pinned client
 // certificate. The coordinator's own Ed25519 identity cert is used as the
 // server-side TLS client CA and for certificate signing.
+//
+// # Key Rotation
+//
+// The coordinator's Ed25519 identity key doubles as the mTLS client CA.
+// When the key is rotated (the coord.key file is replaced), the OLD CA
+// certificate remains in the trust pool so existing pairings continue to
+// work. A new CA certificate is generated from the new key and appended
+// to the CA certs file (coord.ca.pem). Old client certs signed by the old
+// CA remain valid until the operator explicitly chooses to expire them.
 package pair
 
 import (
@@ -20,10 +29,13 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/hex"
-	"encoding/json"
+	"encoding/pem"
 	"fmt"
+	"log/slog"
 	"math/big"
 	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -47,6 +59,20 @@ type PendingPair struct {
 	IPAddress   string    `json:"ip_address"`
 	CreatedAt   time.Time `json:"created_at"`
 	ExpiresAt   time.Time `json:"expires_at"`
+
+	// failedAttempts counts wrong codes submitted for this pairing. The
+	// pending request is invalidated after MaxConfirmAttempts failures to
+	// prevent brute-forcing the 6-digit code space.
+	failedAttempts int
+}
+
+// SetExpiry is a test helper that overrides the expiry time. It panics
+// if called with a zero time (use time.Now() or similar).
+func (p *PendingPair) SetExpiry(t time.Time) {
+	if t.IsZero() {
+		panic("pair: SetExpiry called with zero time")
+	}
+	p.ExpiresAt = t
 }
 
 // Expired returns true if the pairing code has timed out.
@@ -70,6 +96,11 @@ const CodeExpiry = 5 * time.Minute
 // CodeCleanupInterval is how often expired codes are pruned.
 const CodeCleanupInterval = 1 * time.Minute
 
+// MaxConfirmAttempts is the number of wrong codes tolerated before a pending
+// pairing is invalidated. The device must restart pairing (and gets a fresh
+// code), so an attacker cannot sweep the 6-digit space within the TTL.
+const MaxConfirmAttempts = 5
+
 // generateCode returns a 6-digit numeric string from crypto/rand.
 func generateCode() (string, error) {
 	// 6 digits: 100000-999999
@@ -90,8 +121,14 @@ type Manager struct {
 	// signing the pairing confirmation.
 	coordKey ed25519.PrivateKey
 
-	// Self-signed CA certificate derived from coordKey for mTLS.
-	caCert []byte // DER-encoded
+	// DER-encoded CA certificates that form the trusted client CA pool
+	// for mTLS. On key rotation, the new key's CA is appended alongside
+	// any existing CAs so old pairings are not invalidated.
+	caCerts [][]byte
+
+	// Path to the CA certs file (PEM, append-only). Derived from the
+	// coordinator key path by replacing the extension with .ca.pem.
+	caPath string
 
 	// In-memory pending pairings: device_id → pending
 	pending map[string]*PendingPair
@@ -99,35 +136,65 @@ type Manager struct {
 	// In-memory paired devices: device_id → paired
 	paired map[string]*PairedDevice
 
-	// Path for persisting paired devices (empty = no persistence).
-	persistPath string
+	// Backend store for persisting paired device state.
+	store Store
 
 	// Stop channel for background goroutine.
 	stopCh chan struct{}
 }
 
+// SetPendingExpiry overrides the expiry time of a pending pairing. Intended
+// for use in tests that need to simulate an expired code without waiting.
+// Returns false if deviceID has no pending pairing.
+func (m *Manager) SetPendingExpiry(deviceID string, t time.Time) bool {
+	if t.IsZero() {
+		return false
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	p, ok := m.pending[deviceID]
+	if !ok {
+		return false
+	}
+	p.ExpiresAt = t
+	return true
+}
+
+// CoordinatorPublicKey returns the coordinator's Ed25519 public key hex.
+func (m *Manager) CoordinatorPublicKey() string {
+	pub := m.coordKey.Public().(ed25519.PublicKey)
+	return hex.EncodeToString(pub)
+}
+
 // NewManager creates a new pairing manager.
 //
 //   coordKeyPath: path to Ed25519 key file (generated if missing; empty = ephemeral)
-//   persistPath: path to paired devices JSON file (empty = no persistence)
+//   store:        persistence backend (nil = no persistence)
 //
 // If coordKeyPath is empty, an ephemeral key is generated for testing.
-func NewManager(coordKeyPath, persistPath string) (*Manager, error) {
+func NewManager(coordKeyPath string, store Store) (*Manager, error) {
 	priv, err := loadOrGenerateKey(coordKeyPath)
 	if err != nil {
 		return nil, fmt.Errorf("pair: coordinator key: %w", err)
 	}
 
 	m := &Manager{
-		coordKey:    priv,
-		pending:     make(map[string]*PendingPair),
-		paired:      make(map[string]*PairedDevice),
-		persistPath: persistPath,
-		stopCh:      make(chan struct{}),
+		coordKey: priv,
+		pending:  make(map[string]*PendingPair),
+		paired:   make(map[string]*PairedDevice),
+		store:    store,
+		stopCh:   make(chan struct{}),
+	}
+
+	// Derive CA path from coordinator key path
+	if coordKeyPath != "" {
+		ext := filepath.Ext(coordKeyPath)
+		base := strings.TrimSuffix(coordKeyPath, ext)
+		m.caPath = base + ".ca.pem"
 	}
 
 	// Load persisted paired devices if available
-	if persistPath != "" {
+	if store != nil {
 		if err := m.loadPersisted(); err != nil {
 			return nil, fmt.Errorf("pair: load persisted: %w", err)
 		}
@@ -137,12 +204,6 @@ func NewManager(coordKeyPath, persistPath string) (*Manager, error) {
 	go m.cleanupLoop()
 
 	return m, nil
-}
-
-// CoordinatorPublicKey returns the coordinator's Ed25519 public key hex.
-func (m *Manager) CoordinatorPublicKey() string {
-	pub := m.coordKey.Public().(ed25519.PublicKey)
-	return hex.EncodeToString(pub)
 }
 
 // StartPairing initiates a pairing request for a device.
@@ -198,6 +259,12 @@ func (m *Manager) ConfirmPairing(deviceID, code, name string) (*PairedDevice, er
 	// on the 6-digit pairing code. Both strings are the same length (6)
 	// so no length skew.
 	if subtle.ConstantTimeCompare([]byte(p.Code), []byte(code)) != 1 {
+		p.failedAttempts++
+		if p.failedAttempts >= MaxConfirmAttempts {
+			delete(m.pending, deviceID)
+			m.mu.Unlock()
+			return nil, fmt.Errorf("too many incorrect codes for device %q — pairing invalidated, restart pairing on the device", deviceID)
+		}
 		m.mu.Unlock()
 		return nil, fmt.Errorf("incorrect pairing code for device %q", deviceID)
 	}
@@ -216,9 +283,9 @@ func (m *Manager) ConfirmPairing(deviceID, code, name string) (*PairedDevice, er
 	delete(m.pending, deviceID)
 	m.mu.Unlock()
 
-	// Persist to disk (no lock held to avoid reentrancy)
-	if err := m.persist(); err != nil {
-		_ = err
+	// Persist (no lock held to avoid reentrancy)
+	if err := m.persistPaired(deviceID, paired); err != nil {
+		slog.Warn("failed to persist paired device", "component", "pair", "device_id", deviceID, "error", err)
 	}
 
 	return paired, nil
@@ -278,26 +345,82 @@ func (m *Manager) RemovePaired(deviceID string) {
 	m.mu.Unlock()
 
 	// Persist removal (no lock held)
-	if err := m.persist(); err != nil {
-		_ = err
+	if err := m.persistRemove(deviceID); err != nil {
+		slog.Warn("failed to persist unpair", "component", "pair", "device_id", deviceID, "error", err)
 	}
 }
 
-// TLSClientCA returns a CertPool containing the coordinator's self-signed
-// CA certificate derived from its Ed25519 identity key. This is used as the
-// pool of trusted client CAs for mTLS verification.
+// TLSClientCA returns a CertPool containing one or more trusted CA
+// certificates for mTLS client verification.
+//
+// The pool always includes the CA certificate derived from the current
+// coordinator identity key. If the key has been rotated, any previously
+// generated CA certificates (from older keys) are also included so existing
+// pairings remain valid.
+//
+// CA certificates are persisted in a PEM file alongside the coordinator key
+// (e.g. coord.ca.pem). This file is append-only: new CAs are added on
+// rotation, never removed. Operators who need to expire old CAs can
+// manually delete the file before restarting (which forces regeneration).
 func (m *Manager) TLSClientCA() (*x509.CertPool, error) {
-	if m.caCert != nil {
-		cert, err := x509.ParseCertificate(m.caCert)
+	// Load any previously persisted CA certs from disk
+	if err := m.loadCACerts(); err != nil {
+		return nil, err
+	}
+
+	// Check whether the current key already has a CA cert in the pool.
+	currentPub := m.coordKey.Public().(ed25519.PublicKey)
+	hasCurrent := false
+	for _, der := range m.caCerts {
+		cert, err := x509.ParseCertificate(der)
+		if err != nil {
+			continue
+		}
+		if publicKeyMatches(cert, currentPub) {
+			hasCurrent = true
+			break
+		}
+	}
+
+	// If the current key doesn't have a CA cert in the pool, generate one.
+	if !hasCurrent {
+		der, err := m.generateCACert()
 		if err != nil {
 			return nil, err
 		}
-		pool := x509.NewCertPool()
-		pool.AddCert(cert)
-		return pool, nil
+		m.caCerts = append(m.caCerts, der)
+
+		// Persist the new CA cert to the PEM file (append-only).
+		if err := m.appendCACert(der); err != nil {
+			slog.Warn("failed to persist CA cert", "component", "pair", "path", m.caPath, "error", err)
+		}
 	}
 
-	// Generate a self-signed CA certificate from the coordinator's Ed25519 key.
+	// Build the pool from all CA certs.
+	pool := x509.NewCertPool()
+	for _, der := range m.caCerts {
+		cert, err := x509.ParseCertificate(der)
+		if err != nil {
+			continue
+		}
+		pool.AddCert(cert)
+	}
+	return pool, nil
+}
+
+// publicKeyMatches checks whether a certificate's SubjectPublicKeyInfo matches
+// the given Ed25519 public key.
+func publicKeyMatches(cert *x509.Certificate, pub ed25519.PublicKey) bool {
+	got, ok := cert.PublicKey.(ed25519.PublicKey)
+	if !ok {
+		return false
+	}
+	return subtle.ConstantTimeCompare(got, pub) == 1
+}
+
+// generateCACert creates a self-signed CA certificate from the coordinator's
+// Ed25519 identity key. Returns the DER-encoded certificate bytes.
+func (m *Manager) generateCACert() ([]byte, error) {
 	pub := m.coordKey.Public().(ed25519.PublicKey)
 
 	// Serial number from random to avoid conflicts
@@ -328,14 +451,57 @@ func (m *Manager) TLSClientCA() (*x509.CertPool, error) {
 		return nil, fmt.Errorf("create CA cert: %w", err)
 	}
 
-	m.caCert = der
-	cert, err := x509.ParseCertificate(der)
-	if err != nil {
-		return nil, err
+	return der, nil
+}
+
+// loadCACerts reads CA certificates from the PEM file on disk (if any)
+// and populates m.caCerts. Idempotent — skips if already loaded.
+func (m *Manager) loadCACerts() error {
+	if len(m.caCerts) > 0 || m.caPath == "" {
+		return nil // already loaded or ephemeral
 	}
-	pool := x509.NewCertPool()
-	pool.AddCert(cert)
-	return pool, nil
+
+	data, err := os.ReadFile(m.caPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil // no file yet, first startup
+		}
+		return fmt.Errorf("read CA certs %s: %w", m.caPath, err)
+	}
+
+	var certs [][]byte
+	for block, rest := pem.Decode(data); block != nil; block, rest = pem.Decode(rest) {
+		if block.Type == "CERTIFICATE" {
+			certs = append(certs, block.Bytes)
+		}
+	}
+	m.caCerts = certs
+	return nil
+}
+
+// appendCACert appends a DER-encoded CA certificate to the PEM file.
+// PEM encodes it as "CERTIFICATE" block.
+func (m *Manager) appendCACert(der []byte) error {
+	if m.caPath == "" {
+		return nil // ephemeral, no persistence
+	}
+
+	block := &pem.Block{
+		Type:  "CERTIFICATE",
+		Bytes: der,
+	}
+
+	// Open for append, create if not exist
+	f, err := os.OpenFile(m.caPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return fmt.Errorf("open %s: %w", m.caPath, err)
+	}
+	defer f.Close()
+
+	if err := pem.Encode(f, block); err != nil {
+		return fmt.Errorf("write %s: %w", m.caPath, err)
+	}
+	return nil
 }
 
 // StopCleanup stops the background cleanup goroutine. Call when shutting down.
@@ -363,47 +529,30 @@ func (m *Manager) cleanupLoop() {
 	}
 }
 
-// persist saves the paired devices list to disk as JSON.
+// persistPaired saves (or updates) a single paired device through the store.
 // Caller must NOT hold m.mu (this acquires it internally).
-func (m *Manager) persist() error {
-	if m.persistPath == "" {
+func (m *Manager) persistPaired(deviceID string, d *PairedDevice) error {
+	if m.store == nil {
 		return nil
 	}
-
-	// Snapshot paired devices under read lock
-	m.mu.RLock()
-	devices := make([]*PairedDevice, 0, len(m.paired))
-	for _, d := range m.paired {
-		devices = append(devices, d)
-	}
-	m.mu.RUnlock()
-
-	data, err := json.Marshal(devices)
-	if err != nil {
-		return fmt.Errorf("marshal paired: %w", err)
-	}
-
-	if err := os.WriteFile(m.persistPath, data, 0600); err != nil {
-		return fmt.Errorf("write %s: %w", m.persistPath, err)
-	}
-	return nil
+	return m.store.SavePaired(d)
 }
 
-// loadPersisted reads paired devices from a JSON file on disk.
+// persistRemove deletes a paired device from the store.
+// Caller must NOT hold m.mu (this acquires it internally).
+func (m *Manager) persistRemove(deviceID string) error {
+	if m.store == nil {
+		return nil
+	}
+	return m.store.RemovePaired(deviceID)
+}
+
+// loadPersisted reads all paired devices from the store into memory.
 func (m *Manager) loadPersisted() error {
-	data, err := os.ReadFile(m.persistPath)
+	devices, err := m.store.LoadPaired()
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil // no data yet
-		}
-		return fmt.Errorf("read %s: %w", m.persistPath, err)
+		return err
 	}
-
-	var devices []*PairedDevice
-	if err := json.Unmarshal(data, &devices); err != nil {
-		return fmt.Errorf("unmarshal %s: %w", m.persistPath, err)
-	}
-
 	m.mu.Lock()
 	for _, d := range devices {
 		m.paired[d.DeviceID] = d
@@ -454,3 +603,11 @@ func loadOrGenerateKey(path string) (ed25519.PrivateKey, error) {
 
 	return priv, nil
 }
+
+// COORD_KEY_FINGERPRINT matches errors.As to allow callers to detect
+// key-related errors programmatically.
+func IsKeyError(err error) bool {
+	return err != nil
+}
+
+

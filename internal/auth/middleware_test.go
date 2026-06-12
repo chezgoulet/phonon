@@ -285,3 +285,123 @@ func TestConfigurationModes(t *testing.T) {
 		t.Errorf("expected none, got %s", ModeNone)
 	}
 }
+
+// ─── PSK edge case tests ─────────────────────────────────────────
+
+func TestHandlerPSK_doubleSpace(t *testing.T) {
+	// Authorization: "Bearer  double-space-key" — extractPSK should
+	// TrimSpace the result to recover the key.
+	m := New(Config{Mode: "psk", PSK: "double-space-key"})
+	m.started = true
+
+	handler := m.Handler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
+	req.Header.Set("Authorization", "Bearer  double-space-key")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200 for Bearer with double space, got %d", w.Code)
+	}
+}
+
+func TestHandlerPSK_trailingWhitespace(t *testing.T) {
+	m := New(Config{Mode: "psk", PSK: "trailing-key"})
+	m.started = true
+
+	handler := m.Handler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
+	req.Header.Set("Authorization", "Bearer trailing-key \t")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200 for Bearer with trailing whitespace, got %d", w.Code)
+	}
+}
+
+func TestHandlerPSK_lowercaseBearer(t *testing.T) {
+	m := New(Config{Mode: "psk", PSK: "lowercase-key"})
+	m.started = true
+
+	handler := m.Handler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
+	req.Header.Set("Authorization", "bearer lowercase-key")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200 for lowercase 'bearer', got %d", w.Code)
+	}
+}
+
+func TestHandlerPSK_emptyPSK(t *testing.T) {
+	// An empty PSK means the key was not configured. All requests should
+	// be rejected with 401.
+	m := New(Config{Mode: "psk", PSK: ""})
+	m.started = true
+
+	handler := m.Handler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
+	req.Header.Set("Authorization", "Bearer any-key")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401 for empty PSK, got %d", w.Code)
+	}
+
+	// Also verify via X-Phonon-Token header
+	req2 := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
+	req2.Header.Set("X-Phonon-Token", "any-key")
+	w2 := httptest.NewRecorder()
+	handler.ServeHTTP(w2, req2)
+	if w2.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401 for empty PSK with X-Phonon-Token, got %d", w2.Code)
+	}
+}
+
+func TestHandlerPSK_xPhononTokenWithWhitespace(t *testing.T) {
+	m := New(Config{Mode: "psk", PSK: "token-with-ws"})
+	m.started = true
+
+	handler := m.Handler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	// X-Phonon-Token with leading/trailing whitespace
+	req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
+	req.Header.Set("X-Phonon-Token", "  token-with-ws ")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200 for X-Phonon-Token with whitespace, got %d", w.Code)
+	}
+}
+
+func TestHandlerPSK_rejectsTabAfterBearer(t *testing.T) {
+	// RFC 7235 requires a single space between auth-scheme and token-68.
+	// Tab is not valid, so this is a deliberate rejection.
+	m := New(Config{Mode: "psk", PSK: "tab-key"})
+	m.started = true
+
+	handler := m.Handler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
+	req.Header.Set("Authorization", "Bearer\ttab-key")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401 for Bearer with tab separator, got %d (not RFC 7235 compliant)", w.Code)
+	}
+}
