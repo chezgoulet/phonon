@@ -270,6 +270,10 @@ func main() {
 	// Pairing operator endpoints (protected)
 	pairingHandler.RegisterOperatorRoutes(protectedMux)
 
+	// Visualization pack control (protected)
+	vizHandler := api.NewVizHandler(wsHandler)
+	vizHandler.RegisterRoutes(protectedMux)
+
 	mux.Handle("/api/v1/", authMiddleware.Handler(protectedMux))
 
 	// Metrics — public, served from the health monitor's private Prometheus registry
