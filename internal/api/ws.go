@@ -3,7 +3,9 @@ package api
 import (
 	"encoding/json"
 	"log/slog"
+	"net"
 	"net/http"
+	"net/url"
 	"sync"
 	"time"
 
@@ -79,6 +81,71 @@ type WSHandler struct {
 	upgrader websocket.Upgrader
 }
 
+// checkOrigin validates WebSocket upgrade requests against CSRF/DNS rebinding.
+// Allows empty origin (app clients) and same-origin requests. Rejects
+// cross-origin requests which would only come from attacker-controlled pages.
+func checkOrigin(r *http.Request) bool {
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return true // app client, not a browser
+	}
+
+	// Parse origin URL properly — handles scheme, userinfo, IPv6, ports
+	u, err := url.Parse(origin)
+	if err != nil || u.Host == "" {
+		return false
+	}
+
+	rHost := r.Host
+
+	// Normalize: strip default ports so https://example.com:443 matches
+	// ws://example.com and vice versa.
+	oHost, oPort, _ := net.SplitHostPort(u.Host)
+	if oHost == "" {
+		oHost = u.Host // no port in origin
+		oPort = ""
+	}
+	rHostName, rPort, _ := net.SplitHostPort(rHost)
+	if rHostName == "" {
+		rHostName = rHost
+		rPort = ""
+	}
+
+	// If ports differ, check if one is the default for a scheme
+	if oPort != rPort {
+		oDefault := portForScheme(u.Scheme)
+		rDefault := portForScheme(schemeForRequest(r))
+		if oPort == oDefault || oPort == "" && oDefault == rPort ||
+			rPort == rDefault || rPort == "" && rDefault == oPort {
+			// Ports differ by default only — treat as match
+		} else {
+			return false
+		}
+	}
+
+	return oHost == rHostName
+}
+
+// portForScheme returns the default port for common schemes.
+func portForScheme(scheme string) string {
+	switch scheme {
+	case "https", "wss":
+		return "443"
+	case "http", "ws":
+		return "80"
+	default:
+		return ""
+	}
+}
+
+// schemeForRequest infers a scheme from the request.
+func schemeForRequest(r *http.Request) string {
+	if r.TLS != nil {
+		return "https"
+	}
+	return "http"
+}
+
 // NewWSHandler creates a new WebSocket handler.
 func NewWSHandler(reg *registry.Registry) *WSHandler {
 	return &WSHandler{
@@ -89,7 +156,7 @@ func NewWSHandler(reg *registry.Registry) *WSHandler {
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  1024,
 			WriteBufferSize: 1024,
-			CheckOrigin:     func(_ *http.Request) bool { return true },
+			CheckOrigin:     checkOrigin,
 		},
 	}
 }
