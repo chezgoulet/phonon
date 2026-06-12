@@ -79,11 +79,12 @@ type NetworkingConfig struct {
 }
 
 // GroupMode represents the inference mode: pool or shard.
+// Shard mode is experimental and deferred until the upstream runtime ships.
 type GroupMode string
 
 const (
 	ModePool  GroupMode = "pool"
-	ModeShard GroupMode = "shard"
+	ModeShard GroupMode = "shard" // experimental — upstream runtime not yet shipped
 )
 
 // Runtime represents the inference runtime engine.

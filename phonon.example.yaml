@@ -62,7 +62,7 @@ cluster:
 # Each group defines a model and the phones that serve it.
 groups:
   # - name: "llama-3.2-1b"
-  #   mode: "shard"             # "pool" or "shard"
+  #   mode: "shard"             # "pool" or "shard" (experimental — upstream runtime not yet shipped)
   #   model: "llama-3.2-1b-instruct-q4_k_m.gguf"
   #   runtime: "prima"          # "prima" (CPU) or "litert" (NPU)
   #   phones: ["phone-kitchen", "phone-livingroom"]
