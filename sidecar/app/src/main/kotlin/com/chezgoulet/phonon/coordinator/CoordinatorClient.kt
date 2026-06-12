@@ -292,9 +292,15 @@ class CoordinatorClient(
         cacheDir.mkdirs()
         val modelFile = File(cacheDir, modelName.replace("/", "_").replace(":", "_"))
 
+        // Remove any previous partial download — we always write to a fresh temp
+        // and verify against the full checksum. Requesting a suffix Range and then
+        // writing to a new temp guarantees checksum mismatch on retry.
+        if (modelFile.exists()) {
+            modelFile.delete()
+        }
+
         val request = Request.Builder()
             .url(url)
-            .header("Range", "bytes=${modelFile.length()}-")
             .build()
 
         return try {
@@ -302,7 +308,7 @@ class CoordinatorClient(
                 client.newCall(request).execute()
             }
 
-            if (!response.isSuccessful && response.code != 206) {
+            if (!response.isSuccessful) {
                 Log.w(tag, "Model download failed: HTTP ${response.code}")
                 return false
             }
