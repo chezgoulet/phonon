@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"io/fs"
 	"log/slog"
@@ -21,6 +23,7 @@ import (
 	"github.com/chezgoulet/phonon/internal/health"
 	phononlog "github.com/chezgoulet/phonon/internal/log"
 	"github.com/chezgoulet/phonon/internal/model"
+	"github.com/chezgoulet/phonon/internal/pair"
 	"github.com/chezgoulet/phonon/internal/registry"
 	"gopkg.in/yaml.v3"
 )
@@ -83,7 +86,24 @@ func main() {
 
 	wsHandler := api.NewWSHandler(reg)
 
+	// 5. Pairing manager — device identity, key exchange, code-based pairing
+	coordKeyPath := os.Getenv("PHONON_COORD_KEY")
+	if coordKeyPath == "" {
+		coordKeyPath = "./coord.key"
+	}
+	pairingMgr, err := pair.NewManager(coordKeyPath)
+	if err != nil {
+		logger.Error("pairing manager init failed", "error", err)
+		return
+	}
+	logger.Info("pairing manager initialized",
+		"coord_key", coordKeyPath,
+		"pubkey", pairingMgr.CoordinatorPublicKey()[:16]+"...",
+	)
+
 	sidecarHandler := api.NewSidecarHandler(reg)
+	sidecarHandler.SetCoordinatorKey(pairingMgr.CoordinatorPublicKey())
+	pairingHandler := api.NewPairingHandler(pairingMgr, reg)
 	openaiHandler := api.NewOpenAIHandler(reg, api.WithMaxQueuePerNode(cfg.Cluster.Queue.MaxPerNode))
 	clusterHandler := api.NewClusterHandler(reg)
 
@@ -195,6 +215,7 @@ func main() {
 	sidecarMux := http.NewServeMux()
 	wsHandler.RegisterRoutes(sidecarMux)
 	sidecarHandler.RegisterRoutes(sidecarMux)
+	pairingHandler.RegisterSidecarRoutes(sidecarMux)
 	mux.Handle("/api/v1/sidecar/", sidecarMux)
 
 	// Protected routes — wrapped with auth middleware
@@ -210,6 +231,9 @@ func main() {
 	// Model download endpoint (protected) — serves cached GGUF files
 	modelAPI := api.NewModelDownloadHandler(modelCache, cacheDir)
 	modelAPI.RegisterRoutes(protectedMux)
+
+	// Pairing operator endpoints (protected)
+	pairingHandler.RegisterOperatorRoutes(protectedMux)
 
 	mux.Handle("/api/v1/", authMiddleware.Handler(protectedMux))
 
@@ -241,7 +265,36 @@ func main() {
 				logger.Error("TLS enabled but cert_file or key_file not set")
 				os.Exit(1)
 			}
-			logger.Info("listening (TLS)", "addr", addr, "auth_mode", authMiddleware.Status().Mode, "cert", cert)
+
+			tlsCfg := &tls.Config{
+				MinVersion: tls.VersionTLS12,
+			}
+
+			// Configure mTLS if a client CA file is provided
+			if caFile := cfg.Cluster.TLS.ClientCAFile; caFile != "" {
+				caCert, err := os.ReadFile(caFile)
+				if err != nil {
+					logger.Error("failed to read client CA file", "error", err, "path", caFile)
+					os.Exit(1)
+				}
+				caPool := x509.NewCertPool()
+				if !caPool.AppendCertsFromPEM(caCert) {
+					logger.Error("failed to parse client CA cert (no valid PEM data)", "path", caFile)
+					os.Exit(1)
+				}
+				tlsCfg.ClientCAs = caPool
+				tlsCfg.ClientAuth = tls.RequireAndVerifyClientCert
+				logger.Info("mTLS enabled", "client_ca", caFile)
+			}
+
+			server.TLSConfig = tlsCfg
+
+			logger.Info("listening (TLS)",
+				"addr", addr,
+				"auth_mode", authMiddleware.Status().Mode,
+				"cert", cert,
+				"mtls", tlsCfg.ClientAuth == tls.RequireAndVerifyClientCert,
+			)
 			if authMiddleware.Status().Mode == "none" &&
 				(strings.HasPrefix(addr, ":") || strings.HasPrefix(addr, "0.0.0.0:") || strings.HasPrefix(addr, "::")) {
 				logger.Warn("INSECURE — TLS enabled but auth mode is 'none', anyone with a valid cert can reach the API",

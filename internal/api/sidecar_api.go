@@ -13,8 +13,9 @@ import (
 
 // SidecarHandler handles REST API endpoints for sidecar communication.
 type SidecarHandler struct {
-	reg *registry.Registry
-	log *slog.Logger
+	reg  *registry.Registry
+	log  *slog.Logger
+	coordPubKey string // hex-encoded coordinator Ed25519 public key (for pairing info)
 }
 
 // NewSidecarHandler creates a new handler with the given node registry.
@@ -23,6 +24,11 @@ func NewSidecarHandler(reg *registry.Registry) *SidecarHandler {
 		reg: reg,
 		log: slog.With("component", "sidecar-api"),
 	}
+}
+
+// SetCoordinatorKey sets the coordinator's public key for pairing handshake responses.
+func (h *SidecarHandler) SetCoordinatorKey(pubKeyHex string) {
+	h.coordPubKey = pubKeyHex
 }
 
 // RegisterRoutes registers all sidecar REST endpoints on the given mux.
@@ -38,15 +44,19 @@ func (h *SidecarHandler) RegisterRoutes(mux *http.ServeMux) {
 type registerRequest struct {
 	DeviceID        string `json:"device_id"`
 	DeviceModel     string `json:"device_model"`
+	DevicePubKey    string `json:"device_pubkey,omitempty"` // hex-encoded Ed25519 public key (pairing)
 	AndroidVersion  string `json:"android_version"`
 	IPAddress       string `json:"ip_address"`
 	NetworkInterface string `json:"network_interface"`
 }
 
 type registerResponse struct {
-	Status     string `json:"status"`
-	NodeName   string `json:"node_name"`
-	AssignedTo string `json:"assigned_to,omitempty"`
+	Status          string `json:"status"`
+	NodeName        string `json:"node_name"`
+	AssignedTo      string `json:"assigned_to,omitempty"`
+	PairingRequired bool   `json:"pairing_required,omitempty"` // true if pubkey was sent but device isn't paired
+	PairingEndpoint string `json:"pairing_endpoint,omitempty"` // URL for pair request
+	CoordinatorKey  string `json:"coordinator_key,omitempty"` // coordinator's public key hex
 }
 
 func (h *SidecarHandler) handleRegister(w http.ResponseWriter, r *http.Request) {
@@ -72,22 +82,40 @@ func (h *SidecarHandler) handleRegister(w http.ResponseWriter, r *http.Request) 
 	if err != nil {
 		// Already registered — return the existing node name
 		if node, ok := h.reg.Get(req.DeviceID); ok {
-			h.log.Info("sidecar re-registered", "device_id", req.DeviceID, "name", node.Name)
-			writeJSON(w, http.StatusOK, registerResponse{
+			resp := registerResponse{
 				Status:   "existing",
 				NodeName: node.Name,
-			})
+			}
+			// If device sent a pubkey and is still unpaired, tell them to pair
+			if req.DevicePubKey != "" && node.State == registry.NodeStateUnpaired {
+				resp.PairingRequired = true
+				resp.PairingEndpoint = "/api/v1/sidecar/pair/request"
+				resp.CoordinatorKey = h.coordPubKey
+			}
+			h.log.Info("sidecar re-registered", "device_id", req.DeviceID, "name", node.Name,
+				"pairing_required", resp.PairingRequired)
+			writeJSON(w, http.StatusOK, resp)
 			return
 		}
 		writeError(w, http.StatusConflict, err.Error())
 		return
 	}
 
-	h.log.Info("sidecar registered", "device_id", req.DeviceID, "name", autoName)
-	writeJSON(w, http.StatusCreated, registerResponse{
+	resp := registerResponse{
 		Status:   "registered",
 		NodeName: autoName,
-	})
+	}
+
+	// If device provided a pubkey, include pairing info
+	if req.DevicePubKey != "" && h.coordPubKey != "" {
+		resp.PairingRequired = true
+		resp.PairingEndpoint = "/api/v1/sidecar/pair/request"
+		resp.CoordinatorKey = h.coordPubKey
+	}
+
+	h.log.Info("sidecar registered", "device_id", req.DeviceID, "name", autoName,
+		"pairing_required", resp.PairingRequired)
+	writeJSON(w, http.StatusCreated, resp)
 }
 
 // --- Heartbeat ---
