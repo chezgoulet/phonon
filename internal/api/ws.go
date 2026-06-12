@@ -3,8 +3,9 @@ package api
 import (
 	"encoding/json"
 	"log/slog"
+	"net"
 	"net/http"
-	"strings"
+	"net/url"
 	"sync"
 	"time"
 
@@ -89,18 +90,60 @@ func checkOrigin(r *http.Request) bool {
 		return true // app client, not a browser
 	}
 
-	host := r.Host
-	// Parse origin URL to extract hostname:port
-	// We accept any scheme (http/ws/https/wss/unknown) on the same host
-	o := strings.TrimPrefix(origin, "https://")
-	o = strings.TrimPrefix(o, "http://")
-	o = strings.TrimPrefix(o, "wss://")
-	o = strings.TrimPrefix(o, "ws://")
-	// Strip trailing path/query from origin
-	if idx := strings.IndexAny(o, "/?"); idx >= 0 {
-		o = o[:idx]
+	// Parse origin URL properly — handles scheme, userinfo, IPv6, ports
+	u, err := url.Parse(origin)
+	if err != nil || u.Host == "" {
+		return false
 	}
-	return o == host
+
+	rHost := r.Host
+
+	// Normalize: strip default ports so https://example.com:443 matches
+	// ws://example.com and vice versa.
+	oHost, oPort, _ := net.SplitHostPort(u.Host)
+	if oHost == "" {
+		oHost = u.Host // no port in origin
+		oPort = ""
+	}
+	rHostName, rPort, _ := net.SplitHostPort(rHost)
+	if rHostName == "" {
+		rHostName = rHost
+		rPort = ""
+	}
+
+	// If ports differ, check if one is the default for a scheme
+	if oPort != rPort {
+		oDefault := portForScheme(u.Scheme)
+		rDefault := portForScheme(schemeForRequest(r))
+		if oPort == oDefault || oPort == "" && oDefault == rPort ||
+			rPort == rDefault || rPort == "" && rDefault == oPort {
+			// Ports differ by default only — treat as match
+		} else {
+			return false
+		}
+	}
+
+	return oHost == rHostName
+}
+
+// portForScheme returns the default port for common schemes.
+func portForScheme(scheme string) string {
+	switch scheme {
+	case "https", "wss":
+		return "443"
+	case "http", "ws":
+		return "80"
+	default:
+		return ""
+	}
+}
+
+// schemeForRequest infers a scheme from the request.
+func schemeForRequest(r *http.Request) string {
+	if r.TLS != nil {
+		return "https"
+	}
+	return "http"
 }
 
 // NewWSHandler creates a new WebSocket handler.
