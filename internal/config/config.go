@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"strings"
 	"time"
@@ -44,6 +45,15 @@ func (c *Config) setDefaults() {
 	// Queue defaults
 	if c.Cluster.Queue.MaxPerNode == 0 {
 		c.Cluster.Queue.MaxPerNode = 3
+	}
+
+	// Bind default — :8080
+	if c.Cluster.Bind == "" {
+		port := os.Getenv("PHONON_PORT")
+		if port == "" {
+			port = "8080"
+		}
+		c.Cluster.Bind = ":" + port
 	}
 }
 
@@ -166,13 +176,40 @@ func (c *Config) Validate(result *ValidationResult) error {
 		}
 	}
 
-	// OIDC auth validation.
-	if c.Cluster.Auth.Mode == "oidc" {
+	// Auth mode validation and warnings.
+	switch c.Cluster.Auth.Mode {
+	case "":
+		result.Warnings = append(result.Warnings,
+			"no auth mode set — defaulting to 'none'. API is open to anyone who can reach the bind address")
+		c.Cluster.Auth.Mode = "none"
+	case "none":
+		result.Warnings = append(result.Warnings,
+			"auth mode is 'none' — API is open to anyone who can reach the bind address")
+	case "psk":
+		// PSK validation added when implemented (#170)
+	case "oidc":
 		if c.Cluster.Auth.Issuer == "" {
 			return fmt.Errorf("auth mode is 'oidc' but 'issuer' is not set")
 		}
 		if c.Cluster.Auth.ClientID == "" {
 			return fmt.Errorf("auth mode is 'oidc' but 'client_id' is not set")
+		}
+	default:
+		return fmt.Errorf("unknown auth mode %q (must be 'none', 'psk', or 'oidc')", c.Cluster.Auth.Mode)
+	}
+
+	// Warn about non-loopback bind without auth.
+	bind := c.Cluster.Bind
+	if bind == "" {
+		bind = ":8080"
+	}
+	if c.Cluster.Auth.Mode == "none" || c.Cluster.Auth.Mode == "" {
+		host, _, _ := net.SplitHostPort(bind)
+		if host == "" || host == "0.0.0.0" || host == "::" {
+			result.Warnings = append(result.Warnings,
+				"binding on all interfaces ("+bind+") with no auth — anyone on the LAN can reach the API. "+
+					"Set auth.mode to 'psk' or 'oidc' for secured access, or bind '127.0.0.1' for local-only",
+			)
 		}
 	}
 
