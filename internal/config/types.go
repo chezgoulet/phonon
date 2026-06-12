@@ -45,9 +45,10 @@ type QueueConfig struct {
 
 // TLSConfig defines optional TLS/mTLS settings.
 type TLSConfig struct {
-	Enabled  bool   `yaml:"enabled"`   // enable HTTPS
-	CertFile string `yaml:"cert_file"` // path to TLS certificate (PEM)
-	KeyFile  string `yaml:"key_file"`  // path to TLS private key (PEM)
+	Enabled       bool   `yaml:"enabled"`        // enable HTTPS
+	CertFile      string `yaml:"cert_file"`      // path to TLS certificate (PEM)
+	KeyFile       string `yaml:"key_file"`       // path to TLS private key (PEM)
+	ClientCAFile  string `yaml:"client_ca_file"` // path to CA cert for mTLS client verification (PEM)
 	// Self-signed certs are acceptable for LAN deployments.
 	// Generate with: openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
 	//   -keyout phonon.key -out phonon.crt -subj "/CN=phonon.local"
