@@ -185,14 +185,16 @@ func (c *Config) Validate(result *ValidationResult) error {
 	case "none":
 		result.Warnings = append(result.Warnings,
 			"auth mode is 'none' — API is open to anyone who can reach the bind address")
-	case "psk":
-		// PSK validation added when implemented (#170)
 	case "oidc":
 		if c.Cluster.Auth.Issuer == "" {
 			return fmt.Errorf("auth mode is 'oidc' but 'issuer' is not set")
 		}
 		if c.Cluster.Auth.ClientID == "" {
 			return fmt.Errorf("auth mode is 'oidc' but 'client_id' is not set")
+		}
+	case "psk":
+		if c.Cluster.Auth.PSK == "" && os.Getenv("PHONON_PSK") == "" {
+			return fmt.Errorf("auth mode is 'psk' but 'psk' is not set in config or PHONON_PSK env var")
 		}
 	default:
 		return fmt.Errorf("unknown auth mode %q (must be 'none', 'psk', or 'oidc')", c.Cluster.Auth.Mode)
@@ -233,6 +235,8 @@ func validateGroup(gi int, g *GroupConfig, result *ValidationResult) error {
 		if g.Runtime != RuntimePrima {
 			return fmt.Errorf("group %q: mode=shard requires runtime=prima, got %q", g.Name, g.Runtime)
 		}
+		result.Warnings = append(result.Warnings,
+			fmt.Sprintf("group %q: mode=shard is experimental — upstream runtime not yet shipped", g.Name))
 	default:
 		return fmt.Errorf("group %q: unknown mode %q (must be 'pool' or 'shard')", g.Name, g.Mode)
 	}

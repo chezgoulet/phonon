@@ -68,9 +68,10 @@ type ClusterConfig struct {
 
 // AuthConfig defines authentication for the coordinator API.
 type AuthConfig struct {
-	Mode     string `yaml:"mode"`      // "oidc" or "none"
+	Mode     string `yaml:"mode"`      // "oidc", "psk", or "none"
 	Issuer   string `yaml:"issuer"`    // OIDC issuer URL
 	ClientID string `yaml:"client_id"` // OIDC client ID
+	PSK      string `yaml:"psk"`       // pre-shared key for "psk" mode (or set PHONON_PSK env var)
 }
 
 // NetworkingConfig controls how phones connect to the coordinator.

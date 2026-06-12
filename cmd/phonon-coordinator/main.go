@@ -95,10 +95,18 @@ func main() {
 
 
 	// Create auth middleware
+	// Resolve PSK: env var overrides config file for security (avoids
+	// storing secrets in plaintext YAML checked into version control).
+	psk := cfg.Cluster.Auth.PSK
+	if envPSK := os.Getenv("PHONON_PSK"); envPSK != "" {
+		psk = envPSK
+	}
+
 	authMiddleware := auth.New(auth.Config{
 		Mode:     cfg.Cluster.Auth.Mode,
 		Issuer:   cfg.Cluster.Auth.Issuer,
 		ClientID: cfg.Cluster.Auth.ClientID,
+		PSK:      psk,
 	})
 
 	if err := authMiddleware.Start(); err != nil {
