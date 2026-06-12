@@ -302,8 +302,8 @@ func (h *WSHandler) SendModelPush(deviceID, model, url, checksum string, sizeByt
 }
 
 // SendModelLoad sends a model_load command.
-func (h *WSHandler) SendModelLoad(deviceID, model string) (string, error) {
-	return h.SendCommand(deviceID, CmdModelLoad, map[string]string{"model": model})
+func (h *WSHandler) SendModelLoad(deviceID, model, backend string) (string, error) {
+	return h.SendCommand(deviceID, CmdModelLoad, map[string]string{"model": model, "backend": backend})
 }
 
 // SendModelUnload sends a model_unload command.

@@ -15,7 +15,7 @@ import (
 // The WSHandler in internal/api implements this.
 type CommandIssuer interface {
 	SendModelPush(deviceID, model, url, checksum string, sizeBytes int64) (string, error)
-	SendModelLoad(deviceID, model string) (string, error)
+	SendModelLoad(deviceID, model, backend string) (string, error)
 	SendModelUnload(deviceID string) (string, error)
 	HasConnection(deviceID string) bool
 }
@@ -123,8 +123,13 @@ func (r *Reconciler) ReconcileGroup(g *config.GroupConfig) []ReconcilerStep {
 	modelURL := r.cachedDownloadURL(g.Model)
 	needDownload := modelURL == "" && !r.cache.Has(g.Model)
 
+	backend := string(g.Backend)
+	if backend == "" {
+		backend = string(config.BackendAuto)
+	}
+
 	for _, phoneID := range g.Phones {
-		steps = append(steps, r.reconcilePhone(phoneID, g.Model, g.Checksum, modelURL, needDownload)...)
+		steps = append(steps, r.reconcilePhone(phoneID, g.Model, g.Checksum, modelURL, backend, needDownload)...)
 	}
 
 	// Handle standby phones: just ensure they have the model cached
@@ -154,7 +159,7 @@ func (r *Reconciler) cachedDownloadURL(modelName string) string {
 }
 
 // reconcilePhone computes steps needed for one phone.
-func (r *Reconciler) reconcilePhone(deviceID, desiredModel, checksum, modelURL string, needDownload bool) []ReconcilerStep {
+func (r *Reconciler) reconcilePhone(deviceID, desiredModel, checksum, modelURL, backend string, needDownload bool) []ReconcilerStep {
 	node, ok := r.reg.Get(deviceID)
 	if !ok {
 		r.log.Debug("phone not registered", "device_id", deviceID)
@@ -197,6 +202,7 @@ func (r *Reconciler) reconcilePhone(deviceID, desiredModel, checksum, modelURL s
 		ModelName: desiredModel,
 		URL:       URL(r.baseURL, desiredModel),
 		SHA256:    checksum,
+		Backend:   backend,
 	}
 
 	if entry != nil {
@@ -245,8 +251,8 @@ func (r *Reconciler) executeStep(step *ReconcilerStep) {
 		}
 
 	case ActionLoad:
-		r.log.Info("loading model", "device_id", step.DeviceID, "model", step.ModelName)
-		if _, err := r.issuer.SendModelLoad(step.DeviceID, step.ModelName); err != nil {
+		r.log.Info("loading model", "device_id", step.DeviceID, "model", step.ModelName, "backend", step.Backend)
+		if _, err := r.issuer.SendModelLoad(step.DeviceID, step.ModelName, step.Backend); err != nil {
 			r.log.Error("load command failed", "device_id", step.DeviceID, "error", err)
 		}
 

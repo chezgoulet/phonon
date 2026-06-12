@@ -56,9 +56,12 @@ export default function PhoneCard({ node, onClick }: Props) {
 
       {/* Model loaded */}
       {node.model_loaded && (
-        <div className="mb-3 text-xs text-phonon-text">
-          <span className="text-phonon-muted">Model: </span>
-          <span className="font-mono">{node.model_loaded}</span>
+        <div className="mb-3 flex items-center gap-2 text-xs text-phonon-text">
+          <span>
+            <span className="text-phonon-muted">Model: </span>
+            <span className="font-mono">{node.model_loaded}</span>
+          </span>
+          {node.backend && <BackendBadge backend={node.backend} />}
         </div>
       )}
 
@@ -89,5 +92,27 @@ export default function PhoneCard({ node, onClick }: Props) {
         <p className="mt-2 text-[10px] text-phonon-muted">{node.uptime}</p>
       )}
     </button>
+  );
+}
+
+/**
+ * Small chip showing which accelerator the phone's engine is running on.
+ * NPU is the headline feature, so it gets the accent treatment; CPU is
+ * rendered muted as a visual hint that the node is in fallback mode.
+ */
+function BackendBadge({ backend }: { backend: string }) {
+  const styles: Record<string, string> = {
+    npu: "bg-emerald-500/15 text-emerald-400",
+    gpu: "bg-sky-500/15 text-sky-400",
+    cpu: "bg-phonon-border/40 text-phonon-muted",
+  };
+  const label = backend.toUpperCase();
+  return (
+    <span
+      className={`inline-block rounded px-1.5 py-0.5 font-mono text-[10px] font-semibold ${styles[backend] ?? styles.cpu}`}
+      title={`Inference accelerator: ${label}`}
+    >
+      {label}
+    </span>
   );
 }

@@ -1,7 +1,10 @@
 package com.chezgoulet.phonon.model
 
 import android.content.Context
+import android.os.Build
 import android.util.Log
+import com.chezgoulet.phonon.accel.BackendFactory
+import com.chezgoulet.phonon.accel.BackendPlanner
 import com.google.ai.edge.litertlm.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -24,11 +27,22 @@ class ModelManager(private val context: Context) {
     private var currentModel: String? = null
     private var modelFile: File? = null
 
+    /** The accelerator the engine actually initialized with: "npu", "gpu", or "cpu". */
+    @Volatile
+    private var activeBackend: String? = null
+
     // ─── Public API ───
 
     fun currentModelName(): String? = currentModel
     fun isRunning(): Boolean = engine != null
     fun currentEngine(): String? = "litert-lm"
+
+    /**
+     * Returns the accelerator the engine is actually running on, or null if
+     * no model is loaded. Reported to the coordinator in heartbeats so the
+     * dashboard can show requested-vs-active backend per phone.
+     */
+    fun currentBackend(): String? = if (isRunning()) activeBackend else null
 
     /**
      * Loads a .litertlm model and initializes the LiteRT-LM engine.
@@ -39,9 +53,12 @@ class ModelManager(private val context: Context) {
      *
      * @param modelName Logical model name
      * @param modelUrl  URL to download from coordinator (blank if cached)
+     * @param requestedBackend Accelerator requested by the coordinator:
+     *   "auto" (default), "npu", "gpu", or "cpu". The actual backend used
+     *   may differ — see [currentBackend] and [BackendPlanner].
      */
-    suspend fun loadModel(modelName: String, modelUrl: String) {
-        Log.i(tag, "Loading model: $modelName (LiteRT-LM)")
+    suspend fun loadModel(modelName: String, modelUrl: String, requestedBackend: String? = null) {
+        Log.i(tag, "Loading model: $modelName (LiteRT-LM, backend=${requestedBackend ?: "auto"})")
 
         if (isRunning()) {
             unloadModel()
@@ -70,20 +87,43 @@ class ModelManager(private val context: Context) {
             return
         }
 
-        try {
-            withContext(Dispatchers.Default) {
-                val engineConfig = EngineConfig(
-                    modelPath = modelPath,
-                    backend = Backend.CPU(),  // TODO: switch to NPU(…) for Pixel Tensor chips
-                    cacheDir = context.cacheDir.absolutePath
-                )
-                engine = Engine(engineConfig).also { it.initialize() }
+        // Resolve the accelerator chain for this device and try each in order.
+        // NPU initialization can fail for many reasons (unsupported op in the
+        // model, driver issues, SDK without that backend) — every failure
+        // falls through to the next candidate so the node stays serviceable.
+        val deviceInfo = BackendPlanner.DeviceInfo(
+            socModel = if (Build.VERSION.SDK_INT >= 31) Build.SOC_MODEL ?: "" else "",
+            hardware = Build.HARDWARE ?: "",
+            apiLevel = Build.VERSION.SDK_INT,
+        )
+        val chain = BackendPlanner.candidates(requestedBackend, deviceInfo)
+        Log.i(tag, "Backend chain for ${deviceInfo.socModel.ifEmpty { deviceInfo.hardware }}: $chain")
+
+        withContext(Dispatchers.Default) {
+            for (backendName in chain) {
+                val backend = BackendFactory.create(backendName)
+                if (backend == null) {
+                    Log.i(tag, "Backend $backendName unavailable, trying next")
+                    continue
+                }
+                try {
+                    val engineConfig = EngineConfig(
+                        modelPath = modelPath,
+                        backend = backend,
+                        cacheDir = context.cacheDir.absolutePath
+                    )
+                    engine = Engine(engineConfig).also { it.initialize() }
+                    activeBackend = backendName
+                    Log.i(tag, "LiteRT-LM engine initialized: model=$modelName backend=$backendName")
+                    return@withContext
+                } catch (e: Exception) {
+                    Log.w(tag, "Backend $backendName init failed (${e.message}), trying next")
+                    engine?.close()
+                    engine = null
+                }
             }
-            Log.i(tag, "LiteRT-LM engine initialized with model: $modelName")
-        } catch (e: Exception) {
-            Log.e(tag, "Failed to initialize LiteRT-LM engine: ${e.message}")
-            engine?.close()
-            engine = null
+            activeBackend = null
+            Log.e(tag, "All backends in chain $chain failed for model $modelName")
         }
     }
 
@@ -98,6 +138,7 @@ class ModelManager(private val context: Context) {
         engine = null
         currentModel = null
         modelFile = null
+        activeBackend = null
         Log.i(tag, "Model unloaded")
     }
 

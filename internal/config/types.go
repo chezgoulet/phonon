@@ -43,6 +43,20 @@ type QueueConfig struct {
 	MaxPerNode int `yaml:"max_per_node"` // max requests queued per phone before returning 429 (default 3)
 }
 
+// RedisConfig controls connection to a Redis server for HA state sharing.
+type RedisConfig struct {
+	Enabled  bool   `yaml:"enabled"`   // enable Redis-backed pairing store (HA mode)
+	Addr     string `yaml:"addr"`      // host:port (default "localhost:6379")
+	Password string `yaml:"password"`  // optional AUTH password
+	DB       int    `yaml:"db"`        // Redis DB number (default 0)
+	Key      string `yaml:"key"`       // Redis key for paired devices (default "phonon:paired")
+}
+
+// PairingConfig controls device pairing state persistence.
+type PairingConfig struct {
+	Redis RedisConfig `yaml:"redis"` // HA mode: Redis-backed store
+}
+
 // TLSConfig defines optional TLS/mTLS settings.
 type TLSConfig struct {
 	Enabled       bool   `yaml:"enabled"`        // enable HTTPS
@@ -65,6 +79,7 @@ type ClusterConfig struct {
 	Health     HealthConfig     `yaml:"health"`
 	EventLog   EventLogConfig   `yaml:"event_log"`
 	Queue      QueueConfig      `yaml:"queue"`
+	Pairing    PairingConfig    `yaml:"pairing"`
 }
 
 // AuthConfig defines authentication for the coordinator API.
@@ -97,12 +112,29 @@ const (
 	RuntimePrima  Runtime = "prima"
 )
 
+// Backend selects the hardware accelerator for inference on the phone.
+//
+// "auto" (the default) lets the sidecar pick the best available backend
+// for its hardware, falling back NPU → GPU → CPU. Explicit values pin the
+// backend; if initialization fails the sidecar still falls back to CPU and
+// reports the active backend in heartbeats, so a misconfigured group
+// degrades to working-but-slow rather than dead.
+type Backend string
+
+const (
+	BackendAuto Backend = "auto"
+	BackendNPU  Backend = "npu"
+	BackendGPU  Backend = "gpu"
+	BackendCPU  Backend = "cpu"
+)
+
 // GroupConfig defines a single inference group.
 type GroupConfig struct {
 	Name        string    `yaml:"name"`
 	Mode        GroupMode `yaml:"mode"`
 	Model       string    `yaml:"model"`
 	Runtime     Runtime   `yaml:"runtime"`
+	Backend     Backend   `yaml:"backend,omitempty"` // accelerator: auto (default), npu, gpu, cpu
 	Phones      []string  `yaml:"phones"`
 	Standby     []string  `yaml:"standby,omitempty"`
 	DownloadURL string    `yaml:"download_url,omitempty"`

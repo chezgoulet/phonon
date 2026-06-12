@@ -47,6 +47,15 @@ func (c *Config) setDefaults() {
 		c.Cluster.Queue.MaxPerNode = 3
 	}
 
+	// Pairing / Redis defaults
+	p := &c.Cluster.Pairing
+	if p.Redis.Addr == "" {
+		p.Redis.Addr = "localhost:6379"
+	}
+	if p.Redis.Key == "" {
+		p.Redis.Key = "phonon:paired"
+	}
+
 	// Bind default — :8080
 	if c.Cluster.Bind == "" {
 		port := os.Getenv("PHONON_PORT")
@@ -245,6 +254,20 @@ func validateGroup(gi int, g *GroupConfig, result *ValidationResult) error {
 	case RuntimeLitert, RuntimePrima:
 	default:
 		return fmt.Errorf("group %q: unknown runtime %q (must be 'litert' or 'prima')", g.Name, g.Runtime)
+	}
+
+	// Backend defaults to "auto" (sidecar picks NPU → GPU → CPU).
+	if g.Backend == "" {
+		g.Backend = BackendAuto
+	}
+	switch g.Backend {
+	case BackendAuto, BackendNPU, BackendGPU, BackendCPU:
+	default:
+		return fmt.Errorf("group %q: unknown backend %q (must be 'auto', 'npu', 'gpu', or 'cpu')", g.Name, g.Backend)
+	}
+	if g.Backend != BackendAuto && g.Backend != BackendCPU && g.Runtime == RuntimePrima {
+		result.Warnings = append(result.Warnings,
+			fmt.Sprintf("group %q: backend %q has no effect with runtime=prima (CPU-only)", g.Name, g.Backend))
 	}
 
 	if g.Model == "" {

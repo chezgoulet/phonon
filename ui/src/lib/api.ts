@@ -16,6 +16,7 @@ export interface ClusterNode {
   ip_address: string;
   telemetry: NodeTelemetry;
   model_loaded: string;
+  backend: string;
   uptime: string;
   registered_at: string;
 }

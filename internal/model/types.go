@@ -49,4 +49,5 @@ type ReconcilerStep struct {
 	URL       string // Download URL for push
 	SHA256    string // Checksum for push
 	SizeBytes int64  // File size for push
+	Backend   string // Requested accelerator for load: auto/npu/gpu/cpu
 }

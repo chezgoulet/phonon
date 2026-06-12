@@ -91,11 +91,32 @@ func main() {
 	if coordKeyPath == "" {
 		coordKeyPath = "./coord.key"
 	}
-	persistPath := os.Getenv("PHONON_PAIRED_PATH")
-	if persistPath == "" {
-		persistPath = "./paired_devices.json"
+
+	// Select pairing store backend: Redis for HA mode, otherwise JSON file.
+	var pairingStore pair.Store
+	if cfg.Cluster.Pairing.Redis.Enabled {
+		redisAdapter, err := pair.NewRedisAdapter(
+			cfg.Cluster.Pairing.Redis.Addr,
+			cfg.Cluster.Pairing.Redis.Password,
+			cfg.Cluster.Pairing.Redis.DB,
+		)
+		if err != nil {
+			logger.Error("redis connection failed", "error", err)
+			return
+		}
+		pairingStore = pair.NewRedisStore(redisAdapter, cfg.Cluster.Pairing.Redis.Key)
+		logger.Info("pairing store: redis", "addr", cfg.Cluster.Pairing.Redis.Addr)
+	} else {
+		persistPath := os.Getenv("PHONON_PAIRED_PATH")
+		if persistPath == "" {
+			persistPath = "./paired_devices.json"
+		}
+		pairingStore = pair.NewFileStore(persistPath)
+		logger.Info("pairing store: file", "path", persistPath)
 	}
-	pairingMgr, err := pair.NewManager(coordKeyPath, persistPath)
+	defer pairingStore.Close()
+
+	pairingMgr, err := pair.NewManager(coordKeyPath, pairingStore)
 	if err != nil {
 		logger.Error("pairing manager init failed", "error", err)
 		return

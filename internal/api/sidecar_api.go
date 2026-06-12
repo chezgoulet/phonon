@@ -135,8 +135,9 @@ type storageTelemetry struct {
 }
 
 type modelInfo struct {
-	Loaded string   `json:"loaded,omitempty"`
-	Cached []string `json:"cached,omitempty"`
+	Loaded  string   `json:"loaded,omitempty"`
+	Cached  []string `json:"cached,omitempty"`
+	Backend string   `json:"backend,omitempty"` // active accelerator: npu/gpu/cpu
 }
 
 type heartbeatRequest struct {
@@ -181,6 +182,7 @@ func (h *SidecarHandler) handleHeartbeat(w http.ResponseWriter, r *http.Request)
 			Name:     req.Model.Loaded,
 			Loaded:   true,
 			LoadedAt: time.Now(),
+			Backend:  req.Model.Backend,
 		})
 	}
 
