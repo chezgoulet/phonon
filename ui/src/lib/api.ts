@@ -62,3 +62,67 @@ export async function getClusterNodes(
 export async function getAuthStatus(): Promise<AuthStatus> {
   return fetchJSON<AuthStatus>("/api/v1/auth/status");
 }
+
+// ── Visualization types ──
+
+export interface VizPack {
+  id: string;
+  name: string;
+  description: string;
+  author: string;
+  version: string;
+  default_config: Record<string, string>;
+}
+
+export interface VizArrangementEntry {
+  device_id: string;
+  display_number: number;
+  position_x: number;
+  position_y: number;
+}
+
+export async function getVizPacks(): Promise<{ object: string; data: VizPack[] }> {
+  return fetchJSON(`${API}/viz/packs`);
+}
+
+export async function getVizArrangement(): Promise<{ object: string; data: VizArrangementEntry[] }> {
+  return fetchJSON(`${API}/viz/arrangement`);
+}
+
+export async function setVizArrangement(
+  entries: VizArrangementEntry[]
+): Promise<{ status: string; count: number }> {
+  const res = await fetch(`${API}/viz/arrangement`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ entries }),
+  });
+  if (!res.ok) throw new Error(`API ${res.status}: ${res.statusText}`);
+  return res.json();
+}
+
+export async function setVizShowNumbers(visible: boolean): Promise<{ status: string }> {
+  const res = await fetch(`${API}/viz/show-numbers`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ visible }),
+  });
+  if (!res.ok) throw new Error(`API ${res.status}: ${res.statusText}`);
+  return res.json();
+}
+
+export async function setActivePack(
+  packId: string,
+  deviceId?: string
+): Promise<{ status: string }> {
+  const url = deviceId
+    ? `${API}/viz/device/${encodeURIComponent(deviceId)}/switch`
+    : `${API}/viz/switch`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ pack_id: packId }),
+  });
+  if (!res.ok) throw new Error(`API ${res.status}: ${res.statusText}`);
+  return res.json();
+}

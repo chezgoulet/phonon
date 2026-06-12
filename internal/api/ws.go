@@ -22,6 +22,12 @@ const (
 	CmdModeChange     = "mode_change"
 	CmdStandbyPromote = "standby_promote"
 	CmdShutdown       = "shutdown"
+
+	// Visualization pack commands
+	CmdVizSwitch      = "viz_switch"
+	CmdVizConfig      = "viz_config"
+	CmdVizArrangement = "viz_arrangement"
+	CmdVizShowNumbers = "viz_show_numbers"
 )
 
 // Ack status values returned by the sidecar.
@@ -326,6 +332,74 @@ func (h *WSHandler) SendStandbyPromote(deviceID, model, url, checksum string) (s
 // SendShutdown sends a shutdown command.
 func (h *WSHandler) SendShutdown(deviceID, reason string) (string, error) {
 	return h.SendCommand(deviceID, CmdShutdown, map[string]string{"reason": reason})
+}
+
+// ── Visualization commands ──
+
+// ArrangementEntry represents one device's position in the spatial layout.
+type ArrangementEntry struct {
+	DeviceID      string  `json:"device_id"`
+	DisplayNumber int     `json:"display_number"`
+	PositionX     float64 `json:"position_x"`
+	PositionY     float64 `json:"position_y"`
+}
+
+// SendVizSwitch sends a viz_switch command to a single device.
+func (h *WSHandler) SendVizSwitch(deviceID, packID string) (string, error) {
+	return h.SendCommand(deviceID, CmdVizSwitch, map[string]string{
+		"pack_id": packID,
+	})
+}
+
+// SendVizConfig sends a viz_config command to a single device.
+func (h *WSHandler) SendVizConfig(deviceID string, config map[string]string) (string, error) {
+	return h.SendCommand(deviceID, CmdVizConfig, map[string]any{
+		"config": config,
+	})
+}
+
+// SendVizArrangement sends a viz_arrangement command to a single device.
+func (h *WSHandler) SendVizArrangement(deviceID string, entries []ArrangementEntry) (string, error) {
+	return h.SendCommand(deviceID, CmdVizArrangement, map[string]any{
+		"entries": entries,
+	})
+}
+
+// SendVizShowNumbers sends a viz_show_numbers command to a single device.
+func (h *WSHandler) SendVizShowNumbers(deviceID string, visible bool) (string, error) {
+	return h.SendCommand(deviceID, CmdVizShowNumbers, map[string]bool{
+		"visible": visible,
+	})
+}
+
+// BroadcastVizSwitch sends a viz_switch command to all connected devices.
+func (h *WSHandler) BroadcastVizSwitch(packID string) {
+	devices := h.ConnectedDevices()
+	for _, deviceID := range devices {
+		if _, err := h.SendVizSwitch(deviceID, packID); err != nil {
+			h.log.Error("broadcast viz_switch failed", "device_id", deviceID, "error", err)
+		}
+	}
+}
+
+// BroadcastVizArrangement sends the arrangement to all connected devices.
+func (h *WSHandler) BroadcastVizArrangement(entries []ArrangementEntry) {
+	devices := h.ConnectedDevices()
+	for _, deviceID := range devices {
+		if _, err := h.SendVizArrangement(deviceID, entries); err != nil {
+			h.log.Error("broadcast viz_arrangement failed", "device_id", deviceID, "error", err)
+		}
+	}
+}
+
+// BroadcastVizShowNumbers sends show-numbers toggle to all connected devices.
+func (h *WSHandler) BroadcastVizShowNumbers(visible bool) {
+	devices := h.ConnectedDevices()
+	for _, deviceID := range devices {
+		if _, err := h.SendVizShowNumbers(deviceID, visible); err != nil {
+			h.log.Error("broadcast viz_show_numbers failed", "device_id", deviceID, "error", err)
+		}
+	}
 }
 
 // resendPending re-sends all unacknowledged commands for a device that
