@@ -3,6 +3,7 @@ package com.chezgoulet.phonon
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.util.Log
 
 /**
  * Auto-starts the Phonon worker service after device boot.
@@ -16,7 +17,11 @@ class BootReceiver : BroadcastReceiver() {
 
         val serviceIntent = Intent(context, PhononService::class.java)
         if (BuildCheck.atLeastO) {
-            context.startForegroundService(serviceIntent)
+            try {
+                context.startForegroundService(serviceIntent)
+            } catch (e: Exception) {
+                Log.w("BootReceiver", "startForegroundService on boot: ${e::class.simpleName}: ${e.message}")
+            }
         } else {
             context.startService(serviceIntent)
         }
