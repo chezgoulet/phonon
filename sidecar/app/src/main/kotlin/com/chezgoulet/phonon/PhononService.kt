@@ -187,11 +187,11 @@ class PhononService : Service() {
                 connectionStatus = status
                 updateNotification()
             },
-            onModelLoad = { modelName, modelUrl, engine ->
+            onModelLoad = { modelName, modelUrl, engine, backend ->
                 scope.launch {
                     loadedModel = modelName
                     updateNotification()
-                    modelManager.loadModel(modelName, modelUrl)
+                    modelManager.loadModel(modelName, modelUrl, backend)
                 }
             },
             onModelUnload = {
@@ -212,6 +212,7 @@ class PhononService : Service() {
             context = this,
             coordinatorClient = coordinatorClient,
             isModelRunning = { modelManager.isRunning() },
+            activeBackend = { modelManager.currentBackend() },
             onTelemetry = { level, temp, charging ->
                 batteryLevel = level
                 batteryTempC = temp

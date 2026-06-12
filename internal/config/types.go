@@ -97,12 +97,29 @@ const (
 	RuntimePrima  Runtime = "prima"
 )
 
+// Backend selects the hardware accelerator for inference on the phone.
+//
+// "auto" (the default) lets the sidecar pick the best available backend
+// for its hardware, falling back NPU → GPU → CPU. Explicit values pin the
+// backend; if initialization fails the sidecar still falls back to CPU and
+// reports the active backend in heartbeats, so a misconfigured group
+// degrades to working-but-slow rather than dead.
+type Backend string
+
+const (
+	BackendAuto Backend = "auto"
+	BackendNPU  Backend = "npu"
+	BackendGPU  Backend = "gpu"
+	BackendCPU  Backend = "cpu"
+)
+
 // GroupConfig defines a single inference group.
 type GroupConfig struct {
 	Name        string    `yaml:"name"`
 	Mode        GroupMode `yaml:"mode"`
 	Model       string    `yaml:"model"`
 	Runtime     Runtime   `yaml:"runtime"`
+	Backend     Backend   `yaml:"backend,omitempty"` // accelerator: auto (default), npu, gpu, cpu
 	Phones      []string  `yaml:"phones"`
 	Standby     []string  `yaml:"standby,omitempty"`
 	DownloadURL string    `yaml:"download_url,omitempty"`

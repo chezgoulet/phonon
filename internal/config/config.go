@@ -247,6 +247,20 @@ func validateGroup(gi int, g *GroupConfig, result *ValidationResult) error {
 		return fmt.Errorf("group %q: unknown runtime %q (must be 'litert' or 'prima')", g.Name, g.Runtime)
 	}
 
+	// Backend defaults to "auto" (sidecar picks NPU → GPU → CPU).
+	if g.Backend == "" {
+		g.Backend = BackendAuto
+	}
+	switch g.Backend {
+	case BackendAuto, BackendNPU, BackendGPU, BackendCPU:
+	default:
+		return fmt.Errorf("group %q: unknown backend %q (must be 'auto', 'npu', 'gpu', or 'cpu')", g.Name, g.Backend)
+	}
+	if g.Backend != BackendAuto && g.Backend != BackendCPU && g.Runtime == RuntimePrima {
+		result.Warnings = append(result.Warnings,
+			fmt.Sprintf("group %q: backend %q has no effect with runtime=prima (CPU-only)", g.Name, g.Backend))
+	}
+
 	if g.Model == "" {
 		return fmt.Errorf("group %q: model must be specified", g.Name)
 	}

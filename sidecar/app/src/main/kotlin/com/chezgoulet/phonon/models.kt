@@ -34,7 +34,6 @@ data class RegisterResponse(
         )
     }
 }
-
 data class HeartbeatRequest(
     val deviceId: String,
     val batteryLevel: Double,
@@ -44,6 +43,7 @@ data class HeartbeatRequest(
     val storageTotalGb: Double,
     val storageFreeGb: Double,
     val modelLoaded: String?,
+    val modelBackend: String?,
     val queueDepth: Int,
     val network: String,
     val timestamp: String
@@ -65,6 +65,9 @@ data class HeartbeatRequest(
         if (modelLoaded != null) {
             put("model", JSONObject().apply {
                 put("loaded", modelLoaded)
+                // Active accelerator ("npu"/"gpu"/"cpu") — mirrors the
+                // coordinator's modelInfo.backend in sidecar_api.go.
+                if (modelBackend != null) put("backend", modelBackend)
             })
         }
         put("queue_depth", queueDepth)

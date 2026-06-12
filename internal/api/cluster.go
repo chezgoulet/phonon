@@ -96,16 +96,17 @@ func (h *ClusterHandler) handleClusterHealth(w http.ResponseWriter, _ *http.Requ
 
 // ListNodeResponse contains a node's summary for the cluster list.
 type ListNodeResponse struct {
-	DeviceID   string      `json:"device_id"`
-	Name       string      `json:"name"`
-	DeviceModel string     `json:"device_model"`
-	Group      string      `json:"group"`
-	State      string      `json:"state"`
-	IPAddress  string      `json:"ip_address"`
-	Telemetry  registry.HealthTelemetry `json:"telemetry"`
-	ModelLoaded string     `json:"model_loaded,omitempty"`
-	Uptime     string      `json:"uptime,omitempty"`
-	RegisteredAt time.Time `json:"registered_at"`
+	DeviceID     string                   `json:"device_id"`
+	Name         string                   `json:"name"`
+	DeviceModel  string                   `json:"device_model"`
+	Group        string                   `json:"group"`
+	State        string                   `json:"state"`
+	IPAddress    string                   `json:"ip_address"`
+	Telemetry    registry.HealthTelemetry `json:"telemetry"`
+	ModelLoaded  string                   `json:"model_loaded,omitempty"`
+	Backend      string                   `json:"backend,omitempty"` // active accelerator: npu/gpu/cpu
+	Uptime       string                   `json:"uptime,omitempty"`
+	RegisteredAt time.Time                `json:"registered_at"`
 }
 
 func (h *ClusterHandler) handleListNodes(w http.ResponseWriter, r *http.Request) {
@@ -144,15 +145,16 @@ func (h *ClusterHandler) handleListNodes(w http.ResponseWriter, r *http.Request)
 		}
 
 		items = append(items, ListNodeResponse{
-			DeviceID:    node.DeviceID,
-			Name:        node.Name,
-			DeviceModel: node.DeviceModel,
-			Group:       node.Group,
-			State:       string(node.State),
-			IPAddress:   node.IPAddress,
-			Telemetry:   node.Telemetry,
-			ModelLoaded: modelLoaded,
-			Uptime:      uptime,
+			DeviceID:     node.DeviceID,
+			Name:         node.Name,
+			DeviceModel:  node.DeviceModel,
+			Group:        node.Group,
+			State:        string(node.State),
+			IPAddress:    node.IPAddress,
+			Telemetry:    node.Telemetry,
+			ModelLoaded:  modelLoaded,
+			Backend:      node.ModelStatus.Backend,
+			Uptime:       uptime,
 			RegisteredAt: node.RegisteredAt,
 		})
 	}

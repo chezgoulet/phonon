@@ -24,10 +24,15 @@ type HealthTelemetry struct {
 
 // ModelStatus describes what model is loaded and its state.
 type ModelStatus struct {
-	Name       string `json:"name"`
-	Loaded     bool   `json:"loaded"`
-	LoadError  string `json:"load_error,omitempty"`
-	LoadedAt   time.Time `json:"loaded_at,omitempty"`
+	Name      string    `json:"name"`
+	Loaded    bool      `json:"loaded"`
+	LoadError string    `json:"load_error,omitempty"`
+	LoadedAt  time.Time `json:"loaded_at,omitempty"`
+
+	// Backend is the accelerator the sidecar actually initialized the
+	// engine with ("npu", "gpu", "cpu") — as opposed to what was requested.
+	// Reported in heartbeats; empty for sidecars that predate the field.
+	Backend string `json:"backend,omitempty"`
 }
 
 // Node represents a single phone in the cluster.

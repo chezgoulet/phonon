@@ -386,6 +386,7 @@ automatically.
 | [PHONON.md](PHONON.md) | Full product spec, performance estimates, roadmap |
 | [SPEC.md](SPEC.md) | Technical implementation specification |
 | [HARDWARE_SETUP.md](docs/HARDWARE_SETUP.md) | Phone selection guide |
+| [NPU_ACCELERATION.md](docs/NPU_ACCELERATION.md) | NPU/GPU/CPU acceleration configuration |
 | [GRAPHEMEOS_SETUP.md](docs/GRAPHEMEOS_SETUP.md) | GrapheneOS-specific setup |
 | [CI_AND_RELEASE.md](docs/CI_AND_RELEASE.md) | Build and release workflow |
 | `phonon.example.yaml` | Annotated configuration reference |

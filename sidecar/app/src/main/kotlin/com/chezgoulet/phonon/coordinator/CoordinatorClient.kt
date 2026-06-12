@@ -35,7 +35,7 @@ class CoordinatorClient(
     private var port: Int,
     private val app: PhononApplication,
     private val onStatusChange: (String) -> Unit,
-    private val onModelLoad: (modelName: String, modelUrl: String, engine: String) -> Unit,
+    private val onModelLoad: (modelName: String, modelUrl: String, engine: String, backend: String) -> Unit,
     private val onModelUnload: () -> Unit,
     private val onShutdown: () -> Unit
 ) {
@@ -241,11 +241,14 @@ class CoordinatorClient(
                     val modelName = msg.payload?.optString("model", "")
                     val modelUrl = msg.payload?.optString("url", "")
                     val engine = msg.payload?.optString("engine", "prima")
+                    // Accelerator requested by the coordinator (group config
+                    // `backend:`). Absent on older coordinators → "auto".
+                    val backend = msg.payload?.optString("backend", "auto")
                     if (modelName.isNullOrEmpty()) {
                         sendCommandAck(msg, AckStatus.Failed, "missing model in load command")
                         return
                     }
-                    onModelLoad(modelName, modelUrl ?: "", engine ?: "prima")
+                    onModelLoad(modelName, modelUrl ?: "", engine ?: "prima", backend ?: "auto")
                 }
                 CommandType.ModelUnload -> {
                     sendCommandAck(msg, AckStatus.Accepted)

@@ -61,10 +61,11 @@ cluster:
 # ── Inference Groups ─────────────────────────────────────────
 # Each group defines a model and the phones that serve it.
 groups:
-  # - name: "llama-3.2-1b"
-  #   mode: "shard"             # "pool" or "shard" (experimental — upstream runtime not yet shipped)
-  #   model: "llama-3.2-1b-instruct-q4_k_m.gguf"
-  #   runtime: "prima"          # "prima" (CPU) or "litert" (NPU)
+  # - name: "gemma-2b"
+  #   mode: "pool"              # "pool" or "shard" (experimental — upstream runtime not yet shipped)
+  #   model: "gemma-2b-it"
+  #   runtime: "litert"         # "litert" (NPU/GPU) or "prima" (CPU-only)
+  #   backend: "auto"           # auto (default) | npu | gpu | cpu
   #   phones: ["phone-kitchen", "phone-livingroom"]
   #   standby: ["phone-bedroom"]
   #   download_url: "http://coordinator:8080/api/v1/models/llama-3.2-1b-instruct-q4_k_m.gguf"
