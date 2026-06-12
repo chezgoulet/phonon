@@ -1,7 +1,6 @@
 package com.chezgoulet.phonon.ui
 
 import androidx.compose.animation.core.*
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -10,13 +9,14 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.chezgoulet.phonon.ui.packs.CyberHudPack
+import com.chezgoulet.phonon.ui.packs.MatrixRainPack
+import com.chezgoulet.phonon.ui.packs.NeonRingPack
 
 /**
  * Singleton engine that manages the active visualization pack, arrangement
@@ -108,7 +108,9 @@ object ThemeEngine {
 
     /** Initialize with the default set of built-in packs. */
     fun initializeWithDefaults() {
-        registerPack(NeonRingPlaceholderPack)
+        registerPack(NeonRingPack)
+        registerPack(MatrixRainPack)
+        registerPack(CyberHudPack)
     }
 
     /**
@@ -241,75 +243,7 @@ object ThemeEngine {
     }
 }
 
-// ── Placeholder / fallback packs for initial compilation ──
-
-/**
- * Placeholder pack shown when the actual Neon Ring pack hasn't been
- * implemented yet. Shows the device state as floating text overlay.
- * Replaced by [com.chezgoulet.phonon.ui.packs.NeonRingPack] in #190.
- */
-private object NeonRingPlaceholderPack : VisualizationPack {
-    override val id = "neon-ring"
-    override val name = "Neon Ring"
-    override val description = "Placeholder — install pack for full visuals"
-    override val author = "chezgoulet"
-    override val version = "0.1.0"
-    override val defaultConfig = mapOf(
-        "ring_color_primary" to "#38BDF8",
-        "ring_color_secondary" to "#D946EF",
-        "ring_color_processing" to "#22C55E",
-        "rotation_speed" to "0.8",
-        "glow_intensity" to "1.0"
-    )
-
-    @Composable
-    override fun Render(state: VizState, modifier: Modifier) {
-        // Minimal placeholder: dark bg with pulsing center dot and pack name
-        val infiniteTransition = rememberInfiniteTransition(label = "placeholder")
-        val pulse by infiniteTransition.animateFloat(
-            initialValue = 0.3f,
-            targetValue = 1.0f,
-            animationSpec = infiniteRepeatable(
-                animation = tween(1200, easing = EaseInOutCubic),
-                repeatMode = RepeatMode.Reverse
-            ),
-            label = "pulse"
-        )
-
-        Box(
-            modifier = modifier,
-            contentAlignment = Alignment.Center
-        ) {
-            Canvas(modifier = Modifier.fillMaxSize()) {
-                val cx = size.width / 2
-                val cy = size.height / 2
-                val r = minOf(cx, cy) * 0.2f
-
-                // Outer ring
-                drawCircle(
-                    color = Color(0xFF38BDF8).copy(alpha = 0.3f * pulse),
-                    radius = r * 1.5f,
-                    center = Offset(cx, cy),
-                    style = Stroke(width = 2f)
-                )
-                // Inner dot
-                drawCircle(
-                    color = if (state.isProcessing) Color(0xFF22C55E)
-                            else Color(0xFF38BDF8).copy(alpha = 0.6f),
-                    radius = 6f,
-                    center = Offset(cx, cy)
-                )
-            }
-
-            Text(
-                text = "Visualization Pack",
-                color = Color.White.copy(alpha = 0.5f),
-                style = MaterialTheme.typography.titleMedium,
-                modifier = Modifier.align(Alignment.TopCenter).padding(top = 24.dp)
-            )
-        }
-    }
-}
+// ── Fallback when no pack matches the active id ──
 
 /**
  * Fallback composable shown when the active pack id has no registered
