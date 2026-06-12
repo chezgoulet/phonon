@@ -3,9 +3,10 @@ import Dashboard from "./components/Dashboard";
 import GroupPanel from "./components/GroupPanel";
 import PairingFlow from "./components/PairingFlow";
 import HealthDetail from "./components/HealthDetail";
+import ArrangementWidget from "./components/ArrangementWidget";
 import type { ClusterNode } from "./lib/api";
 
-type View = "dashboard" | "groups" | "pairing";
+type View = "dashboard" | "groups" | "pairing" | "visualizations";
 
 function App() {
   const [view, setView] = useState<View>("dashboard");
@@ -28,6 +29,7 @@ function App() {
               ["dashboard", "Dashboard"],
               ["groups", "Groups"],
               ["pairing", "Pairing"],
+              ["visualizations", "Visualizations"],
             ] as [View, string][]
           ).map(([id, label]) => (
             <button
@@ -70,7 +72,9 @@ function App() {
           <GroupPanel onSelectNode={setSelectedNode} />
         ) : (
           <PairingFlow />
-        )}
+        ) : view === "visualizations" ? (
+          <ArrangementWidget />
+        ) : null}
       </main>
     </div>
   );
