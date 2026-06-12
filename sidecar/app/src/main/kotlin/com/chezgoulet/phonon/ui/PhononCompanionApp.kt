@@ -5,7 +5,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import com.chezgoulet.phonon.ui.screens.InferenceVisualizer
 import com.chezgoulet.phonon.ui.screens.LogViewer
 import com.chezgoulet.phonon.ui.screens.StatusScreen
 import com.chezgoulet.phonon.ui.theme.PhononTheme
@@ -16,7 +15,7 @@ import com.chezgoulet.phonon.ui.theme.PhononTheme
  * Provides tab-based navigation:
  * - Status: main status dashboard with telemetry
  * - Log: scrollable log viewer
- * - Visualizer: inference animation (sci-fi theme)
+ * - Visualizer: pack-based visualization driven by ThemeEngine
  */
 @Composable
 fun PhononCompanionApp(
@@ -60,11 +59,8 @@ fun PhononCompanionApp(
                         onForceHeartbeat = onForceHeartbeat
                     )
                     1 -> LogViewer(state = state)
-                    2 -> InferenceVisualizer(
-                        isProcessing = state.isProcessing,
-                        batteryLevel = state.batteryLevel,
-                        isCharging = state.isCharging,
-                        modifier = Modifier.padding(16.dp)
+                    2 -> ThemeEngine.PackSurface(
+                        state = state.toVizState()
                     )
                 }
             }

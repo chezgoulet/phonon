@@ -4,6 +4,9 @@ import android.content.Context
 import android.util.Log
 import com.chezgoulet.phonon.PhononApplication
 import com.chezgoulet.phonon.models.*
+import com.chezgoulet.phonon.ui.ThemeEngine
+import com.chezgoulet.phonon.ui.DeviceArrangementEntry
+import com.chezgoulet.phonon.ui.DevicePosition
 import kotlinx.coroutines.*
 import okhttp3.MediaType
 import okhttp3.MediaType.Companion.toMediaType
@@ -269,6 +272,60 @@ class CoordinatorClient(
                 CommandType.Shutdown -> {
                     sendCommandAck(msg, AckStatus.Accepted)
                     onShutdown()
+                }
+
+                // ── Visualization pack commands ──
+
+                CommandType.VizSwitch -> {
+                    sendCommandAck(msg, AckStatus.Accepted)
+                    val packId = msg.payload?.optString("pack_id", "")
+                    if (!packId.isNullOrEmpty()) {
+                        ThemeEngine.activatePack(packId)
+                        Log.i(tag, "Switched to viz pack: $packId")
+                    }
+                    sendCommandAck(msg, AckStatus.Completed)
+                }
+
+                CommandType.VizConfig -> {
+                    sendCommandAck(msg, AckStatus.Accepted)
+                    // Config is consumed by the pack via VizState.themeConfig
+                    // Parsed from msg.payload if needed by future pack logic
+                    sendCommandAck(msg, AckStatus.Completed)
+                }
+
+                CommandType.VizArrangement -> {
+                    sendCommandAck(msg, AckStatus.Accepted)
+                    val arr = msg.payload?.optJSONArray("entries")
+                    if (arr != null) {
+                        val entries = mutableListOf<DeviceArrangementEntry>()
+                        for (i in 0 until arr.length()) {
+                            val e = arr.getJSONObject(i)
+                            val posObj = e.optJSONObject("position")
+                            if (posObj != null) {
+                                entries.add(
+                                    DeviceArrangementEntry(
+                                        deviceId = e.optString("device_id", ""),
+                                        displayNumber = e.optInt("number", 0),
+                                        position = DevicePosition(
+                                            x = posObj.optDouble("x", 0.0).toFloat(),
+                                            y = posObj.optDouble("y", 0.0).toFloat()
+                                        )
+                                    )
+                                )
+                            }
+                        }
+                        ThemeEngine.applyArrangement(entries)
+                        Log.i(tag, "Applied arrangement: ${entries.size} devices")
+                    }
+                    sendCommandAck(msg, AckStatus.Completed)
+                }
+
+                CommandType.VizShowNumbers -> {
+                    sendCommandAck(msg, AckStatus.Accepted)
+                    val visible = msg.payload?.optBoolean("visible", false)
+                    ThemeEngine.setShowNumbers(visible)
+                    Log.i(tag, "Show numbers: $visible")
+                    sendCommandAck(msg, AckStatus.Completed)
                 }
             }
         } catch (e: Exception) {

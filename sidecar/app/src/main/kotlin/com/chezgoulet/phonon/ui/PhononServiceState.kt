@@ -55,6 +55,10 @@ class PhononServiceState {
     var lastTokens by mutableStateOf(0)
         private set
 
+    /** Tokens per second computed from the last inference. */
+    var lastTokensPerSecond by mutableStateOf(0f)
+        private set
+
     /** True when paired with a coordinator. */
     var isPaired by mutableStateOf(false)
         private set
@@ -63,12 +67,35 @@ class PhononServiceState {
     var uptimeSeconds by mutableStateOf(0L)
         private set
 
+    /** Heartbeat queue depth (from last heartbeat cycle). */
+    var queueDepth by mutableStateOf(0)
+        private set
+
     /** Recent log entries (newest first). */
     var logs by mutableStateOf(listOf<LogEntry>())
         private set
 
     /** Pairing code or QR data. */
     var pairingCode by mutableStateOf("")
+        private set
+
+    // ── Visualization pack state (set by coordinator commands → ThemeEngine) ──
+
+    /** Display number resolved from ThemeEngine arrangement (null = hidden). */
+    val displayNumber: Int? get() = ThemeEngine.resolveDisplayNumber()
+
+    /** Active pack id mirrored from ThemeEngine. */
+    val activePackId: String get() = ThemeEngine.activePackId
+
+    /** Peer states built from current arrangement (other devices). */
+    var peerStates: List<PeerState> by mutableStateOf(emptyList())
+        private set
+
+    /** This device's position resolved from ThemeEngine arrangement. */
+    val position: DevicePosition? get() = ThemeEngine.resolvePosition()
+
+    /** Coordinator-assigned mode label. */
+    var coordinatorMode: String by mutableStateOf("pool")
         private set
 
     /** Synchronize all state from a service instance. */
@@ -83,6 +110,52 @@ class PhononServiceState {
         isProcessing = service.isProcessing
         coordinatorHost = service.coordinatorHost
         coordinatorPort = service.coordinatorPort
+        lastTokensPerSecond = service.lastTokensPerSecond
+        queueDepth = service.queueDepth
+
+        // VizState fields synced from ThemeEngine singleton
+        peerStates = ThemeEngine.buildPeerStates()
+        coordinatorMode = service.coordinatorMode
+    }
+
+    /**
+     * Build a [VizState] snapshot from current state fields.
+     * Called by PhononCompanionApp every frame.
+     */
+    fun toVizState(): VizState = VizState(
+        deviceId = deviceId,
+        displayNumber = ThemeEngine.resolveDisplayNumber(),
+        displayNumberFlash = false,
+        activeThemePack = activePackId,
+        isProcessing = isProcessing,
+        tokensPerSecond = lastTokensPerSecond,
+        inferenceLoad = if (lastTokensPerSecond > 0f)
+            (lastTokensPerSecond / 100f).coerceIn(0f, 1f) else 0f,
+        batteryLevel = batteryLevel.coerceIn(0, 100),
+        batteryTemperature = batteryTemp,
+        isCharging = isCharging,
+        isHealthy = batteryLevel > 15 && batteryTemp < 45f,
+        workload = computeWorkload(),
+        queueDepth = queueDepth,
+        position = position,
+        peerStates = peerStates,
+        peerCount = peerStates.size,
+        coordinatorMode = coordinatorMode,
+        lastHeartbeatAgo = 0L,
+        themeConfig = emptyMap(),
+        lowPowerMode = batteryLevel <= 20 && !isCharging
+    )
+
+    /**
+     * Composite workload: 50% inference load, 30% queue depth, 20% battery.
+     * Returns 0.0–1.0.
+     */
+    fun computeWorkload(): Float {
+        val infLoad = if (lastTokensPerSecond > 0f)
+            (lastTokensPerSecond / 100f).coerceIn(0f, 1f) else 0f
+        val qLoad = (queueDepth.toFloat() / 50f).coerceIn(0f, 1f)
+        val bLoad = 1f - (batteryLevel.toFloat() / 100f)
+        return 0.5f * infLoad + 0.3f * qLoad + 0.2f * bLoad
     }
 
     /** Add a log entry (newest first, capped at 100). */

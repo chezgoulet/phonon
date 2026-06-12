@@ -130,6 +130,12 @@ sealed class CommandType(val value: String) {
     object StandbyPromote : CommandType("standby_promote")
     object Shutdown : CommandType("shutdown")
 
+    // ── Visualization pack commands ──
+    object VizSwitch : CommandType("viz_switch")
+    object VizConfig : CommandType("viz_config")
+    object VizArrangement : CommandType("viz_arrangement")
+    object VizShowNumbers : CommandType("viz_show_numbers")
+
     override fun toString(): String = value
 
     companion object {
@@ -139,7 +145,8 @@ sealed class CommandType(val value: String) {
 
         fun entries(): List<CommandType> = listOf(
             ModelPush, ModelLoad, ModelUnload,
-            ModeChange, StandbyPromote, Shutdown
+            ModeChange, StandbyPromote, Shutdown,
+            VizSwitch, VizConfig, VizArrangement, VizShowNumbers
         )
     }
 }
