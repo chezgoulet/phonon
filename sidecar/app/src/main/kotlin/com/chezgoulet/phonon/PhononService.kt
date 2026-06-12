@@ -11,6 +11,7 @@ import android.os.Binder
 import android.os.IBinder
 import android.os.PowerManager
 import com.chezgoulet.phonon.coordinator.CoordinatorClient
+import com.chezgoulet.phonon.ui.ThemeEngine
 import java.io.File
 import com.chezgoulet.phonon.health.HealthReporter
 import com.chezgoulet.phonon.inference.InferenceServer
@@ -43,6 +44,9 @@ class PhononService : Service() {
     private lateinit var inferenceServer: InferenceServer
 
     private var wakeLock: PowerManager.WakeLock? = null
+    private var vizStateJob: Job? = null
+    private var lastInferenceTokens: Int = 0
+    private var lastInferenceTimeMs: Long = 0L
 
     // Coordinator configuration — loaded from phonon.conf, fallback to mDNS, then 255.255.255.255
     internal var coordinatorHost: String = "255.255.255.255"
@@ -73,6 +77,20 @@ class PhononService : Service() {
     var isProcessing: Boolean = false
         private set
 
+    // ── VizState fields ──
+
+    @Volatile
+    var lastTokensPerSecond: Float = 0f
+        private set
+
+    @Volatile
+    var queueDepth: Int = 0
+        private set
+
+    @Volatile
+    var coordinatorMode: String = "pool"
+        private set
+
     override fun onCreate() {
         super.onCreate()
         notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
@@ -91,8 +109,15 @@ class PhononService : Service() {
             acquire(4 * 60 * 60 * 1000L) // 4 hours, renewable
         }
 
+        // Initialize ThemeEngine with built-in packs
+        ThemeEngine.initializeWithDefaults()
+        ThemeEngine.setLocalDeviceId(app.deviceId)
+
         // Start components
         startComponents()
+
+        // Start VizState update loop (~10fps)
+        startVizStateLoop()
 
         // If killed, restart
         return START_STICKY
@@ -113,6 +138,7 @@ class PhononService : Service() {
     }
 
     override fun onDestroy() {
+        vizStateJob?.cancel()
         scope.cancel()
         inferenceServer.stop()
         healthReporter.stop()
@@ -220,6 +246,36 @@ class PhononService : Service() {
             }
         )
         healthReporter.start()
+    }
+
+    /**
+     * Coroutine loop that updates VizState fields at ~10fps.
+     * Reads service telemetry and arr refinement into observable state.
+     * PhononServiceState.toVizState() consumes these values when rendering.
+     */
+    private fun startVizStateLoop() {
+        vizStateJob = scope.launch {
+            while (isActive) {
+                // Update tokens-per-second from inference throughput
+                if (isProcessing && lastInferenceTimeMs > 0) {
+                    val elapsed = System.currentTimeMillis() - lastInferenceTimeMs
+                    if (elapsed > 0) {
+                        lastTokensPerSecond = (lastInferenceTokens.toFloat() / elapsed * 1000f)
+                            .coerceAtMost(200f) // sanity cap
+                    }
+                } else if (!isProcessing) {
+                    lastTokensPerSecond = 0f
+                }
+
+                delay(100L) // ~10fps
+            }
+        }
+    }
+
+    /** Called by InferenceServer or ModelManager after each inference completes. */
+    fun reportInference(tokens: Int, durationMs: Long) {
+        lastInferenceTokens = tokens
+        lastInferenceTimeMs = System.currentTimeMillis() - durationMs
     }
 
     private fun createNotificationChannel() {
