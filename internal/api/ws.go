@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -79,6 +80,29 @@ type WSHandler struct {
 	upgrader websocket.Upgrader
 }
 
+// checkOrigin validates WebSocket upgrade requests against CSRF/DNS rebinding.
+// Allows empty origin (app clients) and same-origin requests. Rejects
+// cross-origin requests which would only come from attacker-controlled pages.
+func checkOrigin(r *http.Request) bool {
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return true // app client, not a browser
+	}
+
+	host := r.Host
+	// Parse origin URL to extract hostname:port
+	// We accept any scheme (http/ws/https/wss/unknown) on the same host
+	o := strings.TrimPrefix(origin, "https://")
+	o = strings.TrimPrefix(o, "http://")
+	o = strings.TrimPrefix(o, "wss://")
+	o = strings.TrimPrefix(o, "ws://")
+	// Strip trailing path/query from origin
+	if idx := strings.IndexAny(o, "/?"); idx >= 0 {
+		o = o[:idx]
+	}
+	return o == host
+}
+
 // NewWSHandler creates a new WebSocket handler.
 func NewWSHandler(reg *registry.Registry) *WSHandler {
 	return &WSHandler{
@@ -89,7 +113,7 @@ func NewWSHandler(reg *registry.Registry) *WSHandler {
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  1024,
 			WriteBufferSize: 1024,
-			CheckOrigin:     func(_ *http.Request) bool { return true },
+			CheckOrigin:     checkOrigin,
 		},
 	}
 }
