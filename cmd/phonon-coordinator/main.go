@@ -170,6 +170,7 @@ func main() {
 		coordinatorURL = fmt.Sprintf("http://localhost:%s", coordinatorPort)
 	}
 	reconciler := model.NewReconciler(modelCache, reg, wsHandler, coordinatorURL)
+	preflightHandler := api.NewPreflightHandler(reg, modelCache, cfg)
 
 	// Set up routes
 	mux := http.NewServeMux()
@@ -200,6 +201,7 @@ func main() {
 	protectedMux := http.NewServeMux()
 	openaiHandler.RegisterRoutes(protectedMux)
 	clusterHandler.RegisterRoutes(protectedMux)
+	preflightHandler.RegisterRoutes(protectedMux)
 
 	// Event log query endpoint (protected)
 	eventAPI := phononlog.NewAPIHandler(eventLog)
