@@ -25,6 +25,7 @@ import (
 // Mode constants.
 const (
 	ModeOIDC = "oidc"
+	ModePSK  = "psk"
 	ModeNone = "none"
 )
 
@@ -97,7 +98,7 @@ func (m *Middleware) Start() error {
 		if err := m.startOIDC(); err != nil {
 			return err
 		}
-	case "psk":
+	case ModePSK:
 		m.log.Info("auth middleware started in PSK mode")
 	case ModeNone, "":
 		m.log.Info("auth middleware started in insecure mode")
@@ -154,7 +155,7 @@ func (m *Middleware) Status() Status {
 	switch m.config.Mode {
 	case ModeOIDC:
 		return Status{Mode: "secure", Issuer: m.config.Issuer}
-	case "psk":
+	case ModePSK:
 		return Status{Mode: "psk"}
 	default:
 		return Status{Mode: "insecure"}
@@ -168,7 +169,7 @@ func (m *Middleware) Handler(next http.Handler) http.Handler {
 		switch m.config.Mode {
 		case ModeOIDC:
 			m.handleOIDC(w, r, next)
-		case "psk":
+		case ModePSK:
 			m.handlePSK(w, r, next)
 		default:
 			next.ServeHTTP(w, r)
@@ -223,6 +224,10 @@ func (m *Middleware) handleOIDC(w http.ResponseWriter, r *http.Request, next htt
 }
 
 func (m *Middleware) handlePSK(w http.ResponseWriter, r *http.Request, next http.Handler) {
+	// Strip any injected X-Auth-Claims header before validation
+	// (prevents upstream proxy injection attacks)
+	r.Header.Del("X-Auth-Claims")
+
 	if !validatePSK(r, []byte(m.config.PSK), len(m.config.PSK)) {
 		http.Error(w, `{"error":"unauthorized","message":"invalid or missing PSK"}`, http.StatusUnauthorized)
 		return
