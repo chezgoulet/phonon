@@ -97,7 +97,7 @@ func (h *PairingHandler) handlePairRequest(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	h.log.Info("pairing started",
+	h.log.Debug("pairing started",
 		"device_id", req.DeviceID,
 		"device_model", req.DeviceModel,
 		"code", code,
@@ -217,7 +217,7 @@ func (h *PairingHandler) handleConfirmPairing(w http.ResponseWriter, r *http.Req
 			"device_id", paired.DeviceID, "error", err)
 	}
 
-	h.log.Info("device paired",
+	h.log.Debug("device paired",
 		"device_id", paired.DeviceID,
 		"name", paired.Name,
 		"device_key", hex.EncodeToString(paired.DeviceKey)[:16]+"...",

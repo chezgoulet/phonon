@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/chezgoulet/phonon/internal/registry"
-	"github.com/google/uuid"
 )
 
 // SidecarHandler handles REST API endpoints for sidecar communication.
@@ -36,7 +35,6 @@ func (h *SidecarHandler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/sidecar/register", h.handleRegister)
 	mux.HandleFunc("POST /api/v1/sidecar/heartbeat", h.handleHeartbeat)
 	mux.HandleFunc("POST /api/v1/sidecar/model-status", h.handleModelStatus)
-	mux.HandleFunc("POST /api/v1/sidecar/pair", h.handlePair)
 }
 
 // --- Registration ---
@@ -241,54 +239,7 @@ type auditInfo struct {
 	AndroidVersion    string `json:"android_version"`
 }
 
-type pairRequest struct {
-	DeviceID string    `json:"device_id"`
-	Token    string    `json:"token"`
-	Audit    auditInfo `json:"audit"`
-}
 
-type pairResponse struct {
-	Status   string `json:"status"`
-	NodeName string `json:"node_name"`
-	PairID   string `json:"pair_id"`
-}
-
-func (h *SidecarHandler) handlePair(w http.ResponseWriter, r *http.Request) {
-	var req pairRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
-		return
-	}
-	if req.DeviceID == "" {
-		writeError(w, http.StatusBadRequest, "device_id is required")
-		return
-	}
-
-	node, ok := h.reg.Get(req.DeviceID)
-	if !ok {
-		writeError(w, http.StatusNotFound, "device not found — register first")
-		return
-	}
-
-	if err := h.reg.Pair(req.DeviceID); err != nil {
-		writeError(w, http.StatusConflict, err.Error())
-		return
-	}
-
-	pairID := uuid.New().String()
-	h.log.Info("sidecar paired",
-		"device_id", req.DeviceID,
-		"name", node.Name,
-		"pair_id", pairID,
-		"root", req.Audit.RootDetected,
-	)
-
-	writeJSON(w, http.StatusOK, pairResponse{
-		Status:   "paired",
-		NodeName: node.Name,
-		PairID:   pairID,
-	})
-}
 
 // --- Helpers ---
 

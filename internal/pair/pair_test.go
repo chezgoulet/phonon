@@ -18,7 +18,7 @@ func testKey(t *testing.T) (ed25519.PublicKey, ed25519.PrivateKey) {
 }
 
 func TestNewManager_generatesKey(t *testing.T) {
-	m, err := NewManager("")
+	m, err := NewManager("", "")
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
@@ -31,7 +31,7 @@ func TestNewManager_generatesKey(t *testing.T) {
 }
 
 func TestStartPairing_rejectsShortKey(t *testing.T) {
-	m, err := NewManager("")
+	m, err := NewManager("", "")
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
@@ -43,7 +43,7 @@ func TestStartPairing_rejectsShortKey(t *testing.T) {
 }
 
 func TestStartPairing_createsPending(t *testing.T) {
-	m, err := NewManager("")
+	m, err := NewManager("", "")
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
@@ -67,7 +67,7 @@ func TestStartPairing_createsPending(t *testing.T) {
 }
 
 func TestConfirmPairing_requiresMatch(t *testing.T) {
-	m, err := NewManager("")
+	m, err := NewManager("", "")
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
@@ -98,7 +98,7 @@ func TestConfirmPairing_requiresMatch(t *testing.T) {
 }
 
 func TestConfirmPairing_rejectsExpired(t *testing.T) {
-	m, err := NewManager("")
+	m, err := NewManager("", "")
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
@@ -123,7 +123,7 @@ func TestConfirmPairing_rejectsExpired(t *testing.T) {
 }
 
 func TestIsPaired_afterConfirm(t *testing.T) {
-	m, err := NewManager("")
+	m, err := NewManager("", "")
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
@@ -149,7 +149,7 @@ func TestIsPaired_afterConfirm(t *testing.T) {
 }
 
 func TestListPaired(t *testing.T) {
-	m, err := NewManager("")
+	m, err := NewManager("", "")
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
@@ -170,7 +170,7 @@ func TestListPaired(t *testing.T) {
 }
 
 func TestRemovePaired(t *testing.T) {
-	m, err := NewManager("")
+	m, err := NewManager("", "")
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
@@ -190,7 +190,7 @@ func TestRemovePaired(t *testing.T) {
 }
 
 func TestCleanup_expiresPending(t *testing.T) {
-	m, err := NewManager("")
+	m, err := NewManager("", "")
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
@@ -208,10 +208,8 @@ func TestCleanup_expiresPending(t *testing.T) {
 	}
 	m.mu.Unlock()
 
-	// Run cleanup
-	m.mu.Lock()
+	// Run cleanup (cleanup acquires its own lock)
 	m.cleanup()
-	m.mu.Unlock()
 
 	if len(m.ListPending()) != 0 {
 		t.Fatal("expected all pending to be cleaned up")
