@@ -6,6 +6,8 @@ import com.chezgoulet.phonon.model.ModelManager
 import com.chezgoulet.phonon.models.InferenceRequest
 import com.chezgoulet.phonon.models.InferenceResponse
 import kotlinx.coroutines.*
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import org.json.JSONObject
 import java.io.BufferedReader
 import java.io.InputStreamReader
@@ -30,6 +32,12 @@ class InferenceServer(
     private val tag = "InferenceServer"
     private var serverSocket: ServerSocket? = null
     private var scope: CoroutineScope? = null
+
+    // Max request body in bytes — 1 MB is generous for any chat prompt
+    private val maxBodyBytes = 1_048_576
+
+    // Serialize access to the shared LiteRT-LM Engine
+    private val engineMutex = Mutex()
 
     // Secondary constructor for backward compatibility
     constructor(context: Context) : this(context, ModelManager(context))
@@ -85,6 +93,8 @@ class InferenceServer(
     private suspend fun handleConnection(clientSocket: Socket) {
         try {
             clientSocket.use { socket ->
+                socket.soTimeout = 15_000 // read timeout — prevents slowloris
+
                 val reader = BufferedReader(InputStreamReader(socket.getInputStream()))
                 val writer = socket.getOutputStream()
 
@@ -112,16 +122,23 @@ class InferenceServer(
                     }
                 }
 
-                // Read body
+                // Reject oversized bodies
+                if (contentLength > maxBodyBytes) {
+                    sendResponse(writer, 413, "application/json",
+                        """{"error":"Request too large"}""")
+                    return
+                }
+
+                // Read body (Content-Length is bytes — read as bytes, not chars)
                 val body = if (contentLength > 0) {
-                    val buf = CharArray(contentLength)
+                    val buf = ByteArray(contentLength)
                     var total = 0
                     while (total < contentLength) {
-                        val n = reader.read(buf, total, contentLength - total)
+                        val n = socket.getInputStream().read(buf, total, contentLength - total)
                         if (n < 0) break
                         total += n
                     }
-                    String(buf, 0, total)
+                    String(buf, 0, total, Charsets.UTF_8)
                 } else ""
 
                 when {
@@ -135,6 +152,8 @@ class InferenceServer(
                         sendResponse(writer, 404, "application/json", """{"error":"Not found"}""")
                 }
             }
+        } catch (e: java.net.SocketTimeoutException) {
+            Log.w(tag, "Connection timed out")
         } catch (e: Exception) {
             Log.w(tag, "Connection error: ${e.message}")
         }
@@ -148,8 +167,10 @@ class InferenceServer(
             // Build the prompt from the message history
             val prompt = buildPrompt(request)
 
-            // Run inference via LiteRT-LM
-            val text = modelManager.generate(prompt)
+            // Serialize access to the shared LiteRT-LM Engine
+            val text = engineMutex.withLock {
+                modelManager.generate(prompt)
+            }
 
             val elapsed = (System.currentTimeMillis() - startTime).toInt()
             val estimatedTokens = text.length / 4 // rough estimate
@@ -189,10 +210,15 @@ class InferenceServer(
             Log.w(tag, "No model loaded: ${e.message}")
             sendResponse(writer, 502, "application/json",
                 """{"error":"No model loaded","code":"no_model"}""")
+        } catch (e: java.util.concurrent.TimeoutException) {
+            Log.w(tag, "Inference timed out")
+            sendResponse(writer, 504, "application/json",
+                """{"error":"Inference timed out"}""")
         } catch (e: Exception) {
             Log.w(tag, "Inference error: ${e.message}")
+            // Strip error details to avoid information disclosure
             sendResponse(writer, 502, "application/json",
-                """{"error":"Inference failed: ${e.message}"}""")
+                """{"error":"Inference failed"}""")
         }
     }
 
