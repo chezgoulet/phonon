@@ -516,11 +516,7 @@ All upstream dependencies are license-clean for open-source distribution and com
 
 cake is explicitly excluded due to its FAIR license (requires commercial agreement for business use).
 
-License for Phonon itself is undecided. Options:
-
-- **Apache 2.0:** Maximizes adoption. Anyone can use, embed, or build on the project.
-- **AGPL 3.0:** Prevents cloud providers or competitors from taking the project and selling it as a service without contributing back. More protective but potentially limits adoption.
-- **Hybrid:** AGPL for the coordinator, Apache 2.0 for the phone app and client libraries.
+**Phonon is licensed under AGPL-3.0** (see [LICENSE](LICENSE)). This was chosen to prevent cloud providers or competitors from taking the project and selling it as a service without contributing back. The alternatives considered were Apache 2.0 (maximizes adoption) and a hybrid (AGPL coordinator, Apache 2.0 phone app); AGPL across the whole project keeps the licensing story simple.
 
 ### Google Play Services Dependency Audit
 

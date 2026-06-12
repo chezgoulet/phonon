@@ -83,6 +83,12 @@ type PhoneInferenceRequest struct {
 	Temperature float64   `json:"temperature"`
 	MaxTokens   int       `json:"max_tokens"`
 	Stream      bool      `json:"stream,omitempty"`
+
+	// AuthToken is the per-device secret established at pairing. It is
+	// sent to the phone as an Authorization header (never in the JSON
+	// body) so the phone can verify the request came from its paired
+	// coordinator. Populated via the WithDeviceTokenLookup option.
+	AuthToken string `json:"-"`
 }
 
 // PhoneInferenceResponse is returned by the phone after inference.
@@ -109,6 +115,11 @@ type OpenAIHandler struct {
 
 	// maxQueuePerNode is the max queue depth before returning 429. 0 = unlimited.
 	maxQueuePerNode int
+
+	// deviceTokenLookup returns the pairing auth token for a device so
+	// inference requests to the phone can be authenticated. Nil or ""
+	// results omit the Authorization header (the phone will refuse).
+	deviceTokenLookup func(deviceID string) string
 }
 
 // NewOpenAIHandler creates an OpenAI-compatible handler.
@@ -121,8 +132,15 @@ func NewOpenAIHandler(reg *registry.Registry, opts ...OpenAIOption) *OpenAIHandl
 	for _, opt := range opts {
 		opt(h)
 	}
-	h.inferenceProxy = h.defaultInferenceProxy
-	h.streamInferenceProxy = h.defaultStreamInferenceProxy
+	// Defaults only when no option supplied a proxy — previously the
+	// defaults unconditionally overwrote WithInferenceProxy /
+	// WithStreamInferenceProxy options.
+	if h.inferenceProxy == nil {
+		h.inferenceProxy = h.defaultInferenceProxy
+	}
+	if h.streamInferenceProxy == nil {
+		h.streamInferenceProxy = h.defaultStreamInferenceProxy
+	}
 	return h
 }
 
@@ -133,6 +151,15 @@ type OpenAIOption func(*OpenAIHandler)
 func WithMaxQueuePerNode(n int) OpenAIOption {
 	return func(h *OpenAIHandler) {
 		h.maxQueuePerNode = n
+	}
+}
+
+// WithDeviceTokenLookup wires the pairing manager's token lookup so the
+// coordinator can authenticate itself to phones on inference requests.
+// fn returns the per-device auth token, or "" for unpaired devices.
+func WithDeviceTokenLookup(fn func(deviceID string) string) OpenAIOption {
+	return func(h *OpenAIHandler) {
+		h.deviceTokenLookup = fn
 	}
 }
 
@@ -277,12 +304,18 @@ func (h *OpenAIHandler) handleChatCompletion(w http.ResponseWriter, r *http.Requ
 	// Build inference URL from phone's address
 	phoneURL := fmt.Sprintf("http://%s:%d/v1/chat/completions", phone, defaultInferencePort)
 
-	// Send inference request to phone
+	// Send inference request to phone, authenticating as the paired
+	// coordinator via the device's pairing token.
+	authToken := ""
+	if h.deviceTokenLookup != nil {
+		authToken = h.deviceTokenLookup(phoneNode.DeviceID)
+	}
 	inferResp, err := h.inferenceProxy(phoneURL, PhoneInferenceRequest{
 		Model:       req.Model,
 		Messages:    req.Messages,
 		Temperature: req.Temperature,
 		MaxTokens:   req.MaxTokens,
+		AuthToken:   authToken,
 	})
 	if err != nil {
 		h.log.Error("phone inference failed", "phone", phoneURL, "error", err)
@@ -397,9 +430,10 @@ func (h *OpenAIHandler) selectPhone(modelName string) (string, registry.Node, er
 // Default port for the sidecar's InferenceServer. Must match sidecar/app/.../InferenceServer.kt.
 const defaultInferencePort = 9876
 
-// openaiCompatibleEndpoint is the path on the sidecar's HTTP server that accepts
-// OpenAI-compatible chat completion requests.
-const openaiCompatibleEndpoint = "/v1/chat/completions"
+// Note: the inference URL passed to the proxies already includes the
+// sidecar's OpenAI-compatible path ("/v1/chat/completions"), built at the
+// call sites in handleChatCompletion / handleStreamingChatCompletion.
+// Must match sidecar/app/.../InferenceServer.kt.
 
 // InferenceHTTPClient is the shared HTTP client for outbound inference requests.
 // Exposed as a variable so tests can override it with a short-lived client.
@@ -415,12 +449,15 @@ func (h *OpenAIHandler) defaultInferenceProxy(phoneURL string, req PhoneInferenc
 		return nil, fmt.Errorf("marshal inference request: %w", err)
 	}
 
-	httpReq, err := http.NewRequestWithContext(context.Background(), http.MethodPost, phoneURL+openaiCompatibleEndpoint, strings.NewReader(string(payload)))
+	httpReq, err := http.NewRequestWithContext(context.Background(), http.MethodPost, phoneURL, strings.NewReader(string(payload)))
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("X-Phonon-Proxy", "coordinator")
+	if req.AuthToken != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+req.AuthToken)
+	}
 
 	resp, err := InferenceHTTPClient.Do(httpReq)
 	if err != nil {
@@ -502,13 +539,18 @@ func (h *OpenAIHandler) handleStreamingChatCompletion(w http.ResponseWriter, _ *
 	fmt.Fprintf(w, "%s\n\n", roleChunk)
 	flusher.Flush()
 
-	// Stream content from phone
+	// Stream content from phone, authenticating as the paired coordinator.
+	authToken := ""
+	if h.deviceTokenLookup != nil {
+		authToken = h.deviceTokenLookup(phoneNode.DeviceID)
+	}
 	fullText, err := h.streamInferenceProxy(phoneURL, PhoneInferenceRequest{
 		Model:       req.Model,
 		Messages:    req.Messages,
 		Temperature: req.Temperature,
 		MaxTokens:   req.MaxTokens,
 		Stream:      true,
+		AuthToken:   authToken,
 	}, func(content string) {
 		chunk := fmt.Sprintf(`data: {"id":%q,"object":"chat.completion.chunk","created":%d,"model":%q,"choices":[{"index":0,"delta":{"content":%s},"finish_reason":null}]}`,
 			completionID, time.Now().Unix(), req.Model, jsonString(content))
@@ -551,12 +593,15 @@ func (h *OpenAIHandler) defaultStreamInferenceProxy(phoneURL string, req PhoneIn
 		return "", fmt.Errorf("marshal inference request: %w", err)
 	}
 
-	httpReq, err := http.NewRequestWithContext(context.Background(), http.MethodPost, phoneURL+openaiCompatibleEndpoint, strings.NewReader(string(payload)))
+	httpReq, err := http.NewRequestWithContext(context.Background(), http.MethodPost, phoneURL, strings.NewReader(string(payload)))
 	if err != nil {
 		return "", fmt.Errorf("create request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("X-Phonon-Proxy", "coordinator")
+	if req.AuthToken != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+req.AuthToken)
+	}
 	httpReq.Header.Set("Accept", "text/event-stream")
 
 	resp, err := InferenceHTTPClient.Do(httpReq)

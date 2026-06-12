@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"fmt"
 	"io/fs"
 	"log/slog"
@@ -48,7 +49,15 @@ func main() {
 
 	cfg, cfgErr := loadConfig(cfgPath)
 	if cfgErr != nil {
-		logger.Warn("config load failed, using defaults", "error", cfgErr, "path", cfgPath)
+		// Only fall back to defaults when the file simply doesn't exist.
+		// A present-but-broken config must not silently fail open to
+		// auth mode "none".
+		if !errors.Is(cfgErr, os.ErrNotExist) {
+			logger.Error("config file exists but failed to load — refusing to start with insecure defaults",
+				"error", cfgErr, "path", cfgPath)
+			os.Exit(1)
+		}
+		logger.Warn("config file not found, using defaults", "error", cfgErr, "path", cfgPath)
 		cfg = &config.Config{
 			Cluster: config.ClusterConfig{
 				Auth: config.AuthConfig{Mode: "none"},
@@ -94,6 +103,7 @@ func main() {
 
 	// Select pairing store backend: Redis for HA mode, otherwise JSON file.
 	var pairingStore pair.Store
+	persistPath := "" // set only when the file-backed store is used
 	if cfg.Cluster.Pairing.Redis.Enabled {
 		redisAdapter, err := pair.NewRedisAdapter(
 			cfg.Cluster.Pairing.Redis.Addr,
@@ -107,7 +117,7 @@ func main() {
 		pairingStore = pair.NewRedisStore(redisAdapter, cfg.Cluster.Pairing.Redis.Key)
 		logger.Info("pairing store: redis", "addr", cfg.Cluster.Pairing.Redis.Addr)
 	} else {
-		persistPath := os.Getenv("PHONON_PAIRED_PATH")
+		persistPath = os.Getenv("PHONON_PAIRED_PATH")
 		if persistPath == "" {
 			persistPath = "./paired_devices.json"
 		}
@@ -130,8 +140,13 @@ func main() {
 
 	sidecarHandler := api.NewSidecarHandler(reg)
 	sidecarHandler.SetCoordinatorKey(pairingMgr.CoordinatorPublicKey())
+	sidecarHandler.SetDeviceAuthorizer(pairingMgr)
+	wsHandler.SetDeviceAuthorizer(pairingMgr)
 	pairingHandler := api.NewPairingHandler(pairingMgr, reg)
-	openaiHandler := api.NewOpenAIHandler(reg, api.WithMaxQueuePerNode(cfg.Cluster.Queue.MaxPerNode))
+	openaiHandler := api.NewOpenAIHandler(reg,
+		api.WithMaxQueuePerNode(cfg.Cluster.Queue.MaxPerNode),
+		api.WithDeviceTokenLookup(pairingMgr.AuthTokenFor),
+	)
 	clusterHandler := api.NewClusterHandler(reg)
 
 	// The inference proxy now routes to phones via HTTP on the default
@@ -230,12 +245,10 @@ func main() {
 	// Set up routes
 	mux := http.NewServeMux()
 
-	// CORS middleware wraps all routes
-	{
-		base := mux
-		mux = http.NewServeMux()
-		mux.Handle("/", corsMiddleware(base))
-	}
+	// NOTE: CORS is applied by wrapping the fully-populated mux as the
+	// server handler (see server construction below). Re-wrapping an empty
+	// mux here would leave every route un-CORSed and conflict with the
+	// SPA's "/" handler.
 
 	// Public routes (no auth required)
 	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
@@ -289,7 +302,7 @@ func main() {
 
 	server := &http.Server{
 		Addr:    addr,
-		Handler: mux,
+		Handler: corsMiddleware(mux),
 	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

@@ -85,6 +85,17 @@ type WSHandler struct {
 	pending map[string]map[string]*pendingCommand // device_id → command_id → state
 
 	upgrader websocket.Upgrader
+
+	// deviceAuth gates the command channel: only paired devices that
+	// present their auth token may connect. Nil disables enforcement
+	// (tests only).
+	deviceAuth DeviceAuthorizer
+}
+
+// SetDeviceAuthorizer enables pairing enforcement on the WebSocket
+// command channel.
+func (h *WSHandler) SetDeviceAuthorizer(a DeviceAuthorizer) {
+	h.deviceAuth = a
 }
 
 // checkOrigin validates WebSocket upgrade requests against CSRF/DNS rebinding.
@@ -178,6 +189,22 @@ func (h *WSHandler) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	if deviceID == "" {
 		http.Error(w, "device_id query parameter required", http.StatusBadRequest)
 		return
+	}
+
+	// The command channel is for paired devices only. An unauthenticated
+	// connect would let anyone on the LAN claim a device_id and hijack
+	// that device's command stream (model loads, shutdown, etc.).
+	if h.deviceAuth != nil {
+		if !h.deviceAuth.IsPaired(deviceID) {
+			http.Error(w, "device is not paired", http.StatusForbidden)
+			return
+		}
+		if !h.deviceAuth.Authorize(deviceID, r.Header.Get(DeviceTokenHeader)) {
+			h.log.Warn("ws connection rejected: invalid device token",
+				"device_id", deviceID, "remote", r.RemoteAddr)
+			http.Error(w, "missing or invalid "+DeviceTokenHeader+" header", http.StatusUnauthorized)
+			return
+		}
 	}
 
 	conn, err := h.upgrader.Upgrade(w, r, nil)

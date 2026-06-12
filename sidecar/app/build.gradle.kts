@@ -103,6 +103,10 @@ dependencies {
     // OkHttp for coordinator communication
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
 
+    // Tink for Ed25519 device identity (pairing). Chosen over
+    // BouncyCastle to avoid classpath conflicts with the OS-bundled BC.
+    implementation("com.google.crypto.tink:tink-android:1.13.0")
+
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
 }

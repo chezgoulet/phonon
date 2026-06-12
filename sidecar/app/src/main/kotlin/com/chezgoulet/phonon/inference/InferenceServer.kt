@@ -27,7 +27,15 @@ import java.net.Socket
  */
 class InferenceServer(
     private val context: Context,
-    private val modelManager: ModelManager
+    private val modelManager: ModelManager,
+    /**
+     * Returns the pairing auth token, or null if the device is not yet
+     * paired. Inference requests must carry this token as
+     * "Authorization: Bearer <token>"; while unpaired (null), ALL
+     * inference is refused — the phone only takes inference orders from
+     * its paired coordinator.
+     */
+    private val tokenProvider: () -> String? = { null }
 ) {
     private val tag = "InferenceServer"
     private var serverSocket: ServerSocket? = null
@@ -142,10 +150,14 @@ class InferenceServer(
                 } else ""
 
                 when {
-                    path == "/v1/chat/completions" && method == "POST" ->
+                    path == "/v1/chat/completions" && method == "POST" -> {
+                        if (!authorize(headers, writer)) return
                         handleInference(socket, writer, body)
-                    path == "/infer" && method == "POST" ->
+                    }
+                    path == "/infer" && method == "POST" -> {
+                        if (!authorize(headers, writer)) return
                         handleInference(socket, writer, body)
+                    }
                     path == "/health" && method == "GET" ->
                         sendResponse(writer, 200, "application/json", """{"status":"ok"}""")
                     else ->
@@ -157,6 +169,44 @@ class InferenceServer(
         } catch (e: Exception) {
             Log.w(tag, "Connection error: ${e.message}")
         }
+    }
+
+    /**
+     * Authenticates an inference request against the pairing token.
+     *
+     * Fail-closed rules:
+     *  - Not paired yet (no token) → 403. The phone never serves
+     *    inference until pairing completes.
+     *  - Paired but missing/wrong "Authorization: Bearer <token>" → 401.
+     *    Only the paired coordinator knows the token, so only it can
+     *    submit inference.
+     *
+     * Comparison is constant-time (MessageDigest.isEqual).
+     */
+    private fun authorize(headers: Map<String, String>, writer: java.io.OutputStream): Boolean {
+        val token = tokenProvider()
+        if (token.isNullOrEmpty()) {
+            sendResponse(writer, 403, "application/json",
+                """{"error":"not_paired","message":"this phone only accepts inference from its paired coordinator — complete pairing first"}""")
+            return false
+        }
+
+        val auth = headers["authorization"] ?: ""
+        val presented = if (auth.startsWith("Bearer ", ignoreCase = true)) {
+            auth.substring(7).trim()
+        } else ""
+
+        val ok = presented.isNotEmpty() && java.security.MessageDigest.isEqual(
+            presented.toByteArray(Charsets.UTF_8),
+            token.toByteArray(Charsets.UTF_8)
+        )
+        if (!ok) {
+            Log.w(tag, "Rejected inference request with missing/invalid coordinator token")
+            sendResponse(writer, 401, "application/json",
+                """{"error":"unauthorized","message":"missing or invalid coordinator token"}""")
+            return false
+        }
+        return true
     }
 
     private suspend fun handleInference(socket: Socket, writer: java.io.OutputStream, body: String) {

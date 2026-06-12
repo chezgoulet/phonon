@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/chezgoulet/phonon/internal/pair"
@@ -116,9 +117,19 @@ func (h *PairingHandler) handlePairRequest(w http.ResponseWriter, r *http.Reques
 type pairStatusResponse struct {
 	Status string `json:"status"` // "paired", "pending", "expired"
 	Name   string `json:"name,omitempty"`
+
+	// Token is the per-device auth secret. Included only when the
+	// request carries a valid Ed25519 signature from the paired
+	// device's pinned key (ts + sig query parameters).
+	Token string `json:"token,omitempty"`
 }
 
 // handlePairStatus lets the sidecar poll whether pairing has been confirmed.
+//
+// To receive the device auth token, the request must prove possession of
+// the device's private key: ?device_id=X&ts=<unix-seconds>&sig=<hex>
+// where sig = Ed25519-sign(privKey, "phonon-pair-status|device_id|ts").
+// Unsigned requests still receive the pairing status, just no token.
 func (h *PairingHandler) handlePairStatus(w http.ResponseWriter, r *http.Request) {
 	deviceID := r.URL.Query().Get("device_id")
 	if deviceID == "" {
@@ -127,10 +138,24 @@ func (h *PairingHandler) handlePairStatus(w http.ResponseWriter, r *http.Request
 	}
 
 	if d := h.pm.PairedDevice(deviceID); d != nil {
-		writeJSON(w, http.StatusOK, pairStatusResponse{
+		resp := pairStatusResponse{
 			Status: "paired",
 			Name:   d.Name,
-		})
+		}
+
+		tsStr := r.URL.Query().Get("ts")
+		sig := r.URL.Query().Get("sig")
+		if tsStr != "" && sig != "" {
+			ts, err := strconv.ParseInt(tsStr, 10, 64)
+			if err == nil && h.pm.VerifyPairStatusSignature(deviceID, ts, sig) {
+				resp.Token = d.AuthToken
+			} else {
+				h.log.Warn("pair/status signature verification failed",
+					"device_id", deviceID, "remote", r.RemoteAddr)
+			}
+		}
+
+		writeJSON(w, http.StatusOK, resp)
 		return
 	}
 

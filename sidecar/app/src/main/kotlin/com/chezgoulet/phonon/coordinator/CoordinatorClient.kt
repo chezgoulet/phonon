@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import com.chezgoulet.phonon.PhononApplication
 import com.chezgoulet.phonon.models.*
+import com.chezgoulet.phonon.pairing.PairingClient
 import com.chezgoulet.phonon.ui.ThemeEngine
 import com.chezgoulet.phonon.ui.DeviceArrangementEntry
 import com.chezgoulet.phonon.ui.DevicePosition
@@ -37,6 +38,8 @@ class CoordinatorClient(
     private var host: String,
     private var port: Int,
     private val app: PhononApplication,
+    private val pairing: PairingClient? = null,
+    private val onPairingCode: (String) -> Unit = {},
     private val onStatusChange: (String) -> Unit,
     private val onModelLoad: (modelName: String, modelUrl: String, engine: String, backend: String) -> Unit,
     private val onModelUnload: () -> Unit,
@@ -58,9 +61,8 @@ class CoordinatorClient(
     var nodeName: String? = null
         private set
 
-    @Volatile
-    var pairId: String? = null
-        private set
+    /** True once pairing has completed and the auth token is held. */
+    val isPaired: Boolean get() = pairing?.isPaired == true
 
     private var webSocket: WebSocket? = null
     private var reconnectAttempt = 0
@@ -93,7 +95,8 @@ class CoordinatorClient(
             deviceModel = app.deviceModel,
             androidVersion = app.androidVersion,
             ipAddress = app.ipAddress,
-            networkInterface = app.networkInterface
+            networkInterface = app.networkInterface,
+            devicePubKey = devicePubKeyHex
         ).toJson().toString()
 
         val request = Request.Builder()
@@ -114,10 +117,11 @@ class CoordinatorClient(
                 registered = true
                 Log.i(tag, "Registered as ${regResp.nodeName} (status=${regResp.status})")
 
-                // If coordinator assigns us to a group, pair
-                if (regResp.assignedTo != null) {
-                    pairWithCoordinator()
-                }
+                // Establish pairing + auth token before anything else.
+                // Without the token, a paired device's heartbeats and WS
+                // connection are rejected by the coordinator, and this
+                // phone's InferenceServer refuses all inference.
+                ensurePaired()
                 onStatusChange("connected")
             } else {
                 Log.w(tag, "Registration failed: HTTP ${response.code} — $responseBody")
@@ -129,39 +133,24 @@ class CoordinatorClient(
         }
     }
 
-    private suspend fun pairWithCoordinator() {
-        val pairBody = PairRequest(
+    /** Hex public key for registration; set by PhononService wiring. */
+    @Volatile
+    var devicePubKeyHex: String? = null
+
+    private suspend fun ensurePaired() {
+        val p = pairing ?: return
+        if (p.isPaired) {
+            return
+        }
+        onStatusChange("pairing")
+        val token = p.ensurePaired(
+            baseUrl = baseUrl,
             deviceId = app.deviceId,
-            token = "", // TODO: get pairing token from config or notification
-            audit = AuditInfo(
-                packagesInstalled = 0,
-                rootDetected = false,
-                bootloaderLocked = true,
-                androidVersion = app.androidVersion
-            )
-        ).toJson().toString()
-
-        val request = Request.Builder()
-            .url("$baseUrl/api/v1/sidecar/pair")
-            .post(pairBody.toRequestBody(JSON_MEDIA_TYPE))
-            .build()
-
-        try {
-            val response = withContext(Dispatchers.IO) {
-                client.newCall(request).execute()
-            }
-            val responseBody = response.body?.string() ?: "{}"
-            val json = JSONObject(responseBody)
-
-            if (response.isSuccessful) {
-                val pairResp = PairResponse.fromJson(json)
-                pairId = pairResp.pairId
-                Log.i(tag, "Paired with coordinator, pairId=${pairResp.pairId}")
-            } else {
-                Log.w(tag, "Pairing failed: HTTP ${response.code}")
-            }
-        } catch (e: Exception) {
-            Log.w(tag, "Pairing error: ${e.message}")
+            deviceModel = app.deviceModel,
+            onPairingCode = onPairingCode,
+        )
+        if (token == null) {
+            Log.w(tag, "Pairing incomplete — coordinator commands and inference remain disabled")
         }
     }
 
@@ -170,9 +159,12 @@ class CoordinatorClient(
     private fun connectWebSocket() {
         if (stopped) return
 
-        val request = Request.Builder()
+        val builder = Request.Builder()
             .url("$wsUrl?device_id=${app.deviceId}")
-            .build()
+        // The coordinator rejects WS connections from paired devices that
+        // don't present the pairing auth token.
+        pairing?.authToken?.let { builder.header(DEVICE_TOKEN_HEADER, it) }
+        val request = builder.build()
 
         webSocket = client.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(ws: WebSocket, response: Response) {
@@ -204,6 +196,13 @@ class CoordinatorClient(
 
             override fun onFailure(ws: WebSocket, t: Throwable, response: Response?) {
                 Log.w(tag, "WebSocket failure: ${t.message}")
+                // 401/403 means our pairing token is stale (e.g. the
+                // operator unpaired this device). Drop it so the next
+                // connect cycle re-enters the pairing flow.
+                if (response?.code == 401 || response?.code == 403) {
+                    Log.w(tag, "Coordinator rejected pairing token (HTTP ${response.code}) — clearing and re-pairing")
+                    pairing?.clearToken()
+                }
                 onStatusChange("disconnected")
                 scheduleReconnect()
             }
@@ -435,10 +434,11 @@ class CoordinatorClient(
         if (!registered) return
         scope.launch {
             val body = heartbeat.toJson().toString()
-            val request = Request.Builder()
+            val builder = Request.Builder()
                 .url("$baseUrl/api/v1/sidecar/heartbeat")
                 .post(body.toRequestBody(JSON_MEDIA_TYPE))
-                .build()
+            pairing?.authToken?.let { builder.header(DEVICE_TOKEN_HEADER, it) }
+            val request = builder.build()
             try {
                 withContext(Dispatchers.IO) {
                     client.newCall(request).execute().close()
@@ -451,5 +451,8 @@ class CoordinatorClient(
 
     companion object {
         private val JSON_MEDIA_TYPE = "application/json".toMediaType()
+
+        /** Must match internal/api/deviceauth.go on the coordinator. */
+        private const val DEVICE_TOKEN_HEADER = "X-Phonon-Device-Token"
     }
 }

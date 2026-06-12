@@ -184,15 +184,29 @@ Copy `phonon.example.yaml` to `phonon.yaml` and adjust:
 
 ## Pairing Phones
 
-Phones must be paired when authentication is enabled (`cluster.auth.mode` is
-not `"none"`).
+Pairing is **enforced**, and it gates both directions of trust:
+
+- A paired phone refuses **all inference requests** that don't carry its
+  pairing token — the phone only takes inference orders from its paired
+  coordinator, never from arbitrary devices on the LAN. Unpaired phones
+  refuse inference entirely.
+- The coordinator rejects heartbeats, model-status updates, and WebSocket
+  command connections from a paired device unless they carry that device's
+  token, so nobody on the LAN can impersonate or hijack a paired phone.
+
+The token is a per-device secret created when the operator confirms the
+pairing. The phone retrieves it by polling the pairing-status endpoint with
+an Ed25519 signature from its pinned device key, so only the phone that
+initiated the pairing can ever receive it. Unpairing a device (UI or API)
+invalidates its token immediately.
 
 ### Flow (phone with screen)
 
 1. Phone generates an Ed25519 keypair and sends its public key on register
-2. Phone displays a 6-digit code
+2. Phone displays a 6-digit code (also shown in its notification)
 3. Enter the code in the coordinator web UI or API
-4. Coordinator issues a signed certificate, phone connects via mTLS
+4. Coordinator creates the device auth token; the phone fetches it with a
+   signed status poll and starts serving inference for the coordinator
 
 ### Flow (headless phone)
 
