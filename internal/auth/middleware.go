@@ -265,6 +265,10 @@ func (m *Middleware) Handler(next http.Handler) http.Handler {
 			return
 		}
 
+		// Strip any injected X-Auth-Claims header before validation
+		// (prevents upstream proxy injection attacks)
+		r.Header.Del("X-Auth-Claims")
+
 		token, err := extractBearerToken(r)
 		if err != nil {
 			http.Error(w, `{"error":"unauthorized","message":"missing or invalid authorization header"}`, http.StatusUnauthorized)
@@ -278,7 +282,9 @@ func (m *Middleware) Handler(next http.Handler) http.Handler {
 			return
 		}
 
-		// Inject claims into request context for downstream handlers
+		// Inject claims into request context for downstream handlers.
+		// TODO(#168): replace hand-rolled JWT with go-oidc + golang-jwt.
+		// Instead of headers, pass claims through context.Context.
 		r.Header.Set("X-Auth-Claims", claims)
 
 		next.ServeHTTP(w, r)
