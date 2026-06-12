@@ -31,14 +31,13 @@ const (
 
 // Config holds the authentication configuration for the middleware.
 type Config struct {
-	Mode     string // "oidc" or "none"
+	Mode     string // "oidc", "psk", or "none"
 	Issuer   string // OIDC issuer URL
 	ClientID string // expected audience (client_id)
 
 	// PSK is the pre-shared key for LAN deployments (mode="psk").
 	// If empty and mode is "psk", auth will reject all requests.
 	PSK string
-
 	JWKSRefresh      time.Duration
 	DiscoveryTimeout time.Duration
 }
@@ -162,8 +161,8 @@ func (m *Middleware) Status() Status {
 	}
 }
 
-// Handler returns an HTTP middleware that validates tokens.
-// In insecure mode (mode="none"), it calls next directly.
+// Handler returns an HTTP middleware that validates authentication.
+// Supports OIDC, PSK, and insecure (none) modes.
 func (m *Middleware) Handler(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch m.config.Mode {
@@ -171,6 +170,8 @@ func (m *Middleware) Handler(next http.Handler) http.Handler {
 			m.handleOIDC(w, r, next)
 		case ModePSK:
 			m.handlePSK(w, r, next)
+		case ModeNone, "":
+			next.ServeHTTP(w, r)
 		default:
 			next.ServeHTTP(w, r)
 		}
