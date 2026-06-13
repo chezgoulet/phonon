@@ -10,7 +10,8 @@ data class RegisterRequest(
     val deviceModel: String,
     val androidVersion: String,
     val ipAddress: String,
-    val networkInterface: String
+    val networkInterface: String,
+    val devicePubKey: String? = null
 ) {
     fun toJson(): JSONObject = JSONObject().apply {
         put("device_id", deviceId)
@@ -18,19 +19,24 @@ data class RegisterRequest(
         put("android_version", androidVersion)
         put("ip_address", ipAddress)
         put("network_interface", networkInterface)
+        if (devicePubKey != null) put("device_pubkey", devicePubKey)
     }
 }
 
 data class RegisterResponse(
     val status: String,
     val nodeName: String,
-    val assignedTo: String?
+    val assignedTo: String?,
+    val pairingRequired: Boolean = false,
+    val coordinatorKey: String? = null
 ) {
     companion object {
         fun fromJson(json: JSONObject) = RegisterResponse(
             status = json.optString("status", ""),
             nodeName = json.optString("node_name", ""),
-            assignedTo = json.optString("assigned_to", null)
+            assignedTo = json.optString("assigned_to", null),
+            pairingRequired = json.optBoolean("pairing_required", false),
+            coordinatorKey = json.optString("coordinator_key", null)
         )
     }
 }

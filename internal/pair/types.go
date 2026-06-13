@@ -88,6 +88,14 @@ type PairedDevice struct {
 	DeviceKey   []byte    `json:"device_key"` // Ed25519 public key (raw)
 	IPAddress   string    `json:"ip_address"`
 	PairedAt    time.Time `json:"paired_at"`
+
+	// AuthToken is a per-device shared secret established at pairing.
+	// The sidecar presents it on heartbeats/WS connections so the
+	// coordinator can authenticate the device, and the coordinator
+	// presents it on inference requests so the phone can authenticate
+	// the coordinator. Delivered to the device only via a pair/status
+	// request signed with the device's pinned Ed25519 key.
+	AuthToken string `json:"auth_token,omitempty"`
 }
 
 // CodeExpiry is how long a pairing code stays valid.
@@ -269,6 +277,12 @@ func (m *Manager) ConfirmPairing(deviceID, code, name string) (*PairedDevice, er
 		return nil, fmt.Errorf("incorrect pairing code for device %q", deviceID)
 	}
 
+	token, err := generateAuthToken()
+	if err != nil {
+		m.mu.Unlock()
+		return nil, fmt.Errorf("generate device auth token: %w", err)
+	}
+
 	paired := &PairedDevice{
 		DeviceID:    deviceID,
 		DeviceModel: p.DeviceModel,
@@ -276,6 +290,7 @@ func (m *Manager) ConfirmPairing(deviceID, code, name string) (*PairedDevice, er
 		DeviceKey:   p.DeviceKey,
 		IPAddress:   p.IPAddress,
 		PairedAt:    time.Now(),
+		AuthToken:   token,
 	}
 
 	// Store and clean up pending
@@ -553,11 +568,30 @@ func (m *Manager) loadPersisted() error {
 	if err != nil {
 		return err
 	}
+	var backfilled []*PairedDevice
 	m.mu.Lock()
 	for _, d := range devices {
+		// Devices paired before auth tokens existed get one generated
+		// now. The device recovers it via a signed pair/status request,
+		// so no re-pairing is needed.
+		if d.AuthToken == "" {
+			token, err := generateAuthToken()
+			if err != nil {
+				m.mu.Unlock()
+				return fmt.Errorf("backfill auth token for %s: %w", d.DeviceID, err)
+			}
+			d.AuthToken = token
+			backfilled = append(backfilled, d)
+		}
 		m.paired[d.DeviceID] = d
 	}
 	m.mu.Unlock()
+	for _, d := range backfilled {
+		if err := m.store.SavePaired(d); err != nil {
+			slog.Warn("failed to persist backfilled auth token",
+				"component", "pair", "device_id", d.DeviceID, "error", err)
+		}
+	}
 	return nil
 }
 

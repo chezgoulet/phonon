@@ -42,6 +42,12 @@ class PhononService : Service() {
     private lateinit var mdnsAnnouncer: MDNSAnnouncer
     private lateinit var modelManager: ModelManager
     private lateinit var inferenceServer: InferenceServer
+    private var pairingClient: com.chezgoulet.phonon.pairing.PairingClient? = null
+
+    /** 6-digit pairing code currently shown to the operator, if any. */
+    @Volatile
+    var pairingCode: String? = null
+        private set
 
     private var wakeLock: PowerManager.WakeLock? = null
     private var vizStateJob: Job? = null
@@ -199,8 +205,20 @@ class PhononService : Service() {
         // Model manager — loads .litertlm models via LiteRT-LM SDK
         modelManager = ModelManager(this)
 
-        // Inference server — local HTTP server backed by LiteRT-LM
-        inferenceServer = InferenceServer(this, modelManager)
+        // Device identity + pairing — establishes the auth token that
+        // gates both directions: coordinator→phone inference and
+        // phone→coordinator heartbeats/commands.
+        val httpClient = okhttp3.OkHttpClient.Builder()
+            .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+            .readTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+            .build()
+        val deviceIdentity = com.chezgoulet.phonon.pairing.DeviceIdentity(this)
+        pairingClient = com.chezgoulet.phonon.pairing.PairingClient(this, deviceIdentity, httpClient)
+
+        // Inference server — local HTTP server backed by LiteRT-LM.
+        // Refuses all inference until paired; afterwards only requests
+        // carrying the coordinator's token are served.
+        inferenceServer = InferenceServer(this, modelManager) { pairingClient?.authToken }
         inferenceServer.start()
 
         // Coordinator client — REST + WebSocket
@@ -209,8 +227,15 @@ class PhononService : Service() {
             host = coordinatorHost,
             port = coordinatorPort,
             app = app,
+            pairing = pairingClient,
+            onPairingCode = { code ->
+                pairingCode = code
+                connectionStatus = "pairing: $code"
+                updateNotification()
+            },
             onStatusChange = { status ->
                 connectionStatus = status
+                if (status != "pairing") pairingCode = null
                 updateNotification()
             },
             onModelLoad = { modelName, modelUrl, engine, backend ->
@@ -231,6 +256,7 @@ class PhononService : Service() {
                 stopSelf()
             }
         )
+        coordinatorClient.devicePubKeyHex = deviceIdentity.publicKeyHex
         coordinatorClient.connect()
 
         // Health reporter — reports telemetry every 60s
@@ -293,9 +319,10 @@ class PhononService : Service() {
     }
 
     private fun buildNotification(): Notification {
-        val statusText = when (connectionStatus) {
-            "connected" -> getString(R.string.notification_title_connected)
-            "disconnected" -> getString(R.string.notification_title_disconnected)
+        val statusText = when {
+            pairingCode != null -> "Pairing — code: $pairingCode"
+            connectionStatus == "connected" -> getString(R.string.notification_title_connected)
+            connectionStatus == "disconnected" -> getString(R.string.notification_title_disconnected)
             else -> getString(R.string.notification_title_connecting)
         }
 

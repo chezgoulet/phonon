@@ -15,6 +15,10 @@ type SidecarHandler struct {
 	reg  *registry.Registry
 	log  *slog.Logger
 	coordPubKey string // hex-encoded coordinator Ed25519 public key (for pairing info)
+
+	// deviceAuth enforces per-device token auth for paired devices.
+	// Nil disables enforcement (tests only).
+	deviceAuth DeviceAuthorizer
 }
 
 // NewSidecarHandler creates a new handler with the given node registry.
@@ -28,6 +32,12 @@ func NewSidecarHandler(reg *registry.Registry) *SidecarHandler {
 // SetCoordinatorKey sets the coordinator's public key for pairing handshake responses.
 func (h *SidecarHandler) SetCoordinatorKey(pubKeyHex string) {
 	h.coordPubKey = pubKeyHex
+}
+
+// SetDeviceAuthorizer enables per-device token enforcement for paired
+// devices on heartbeat and model-status endpoints.
+func (h *SidecarHandler) SetDeviceAuthorizer(a DeviceAuthorizer) {
+	h.deviceAuth = a
 }
 
 // RegisterRoutes registers all sidecar REST endpoints on the given mux.
@@ -161,6 +171,9 @@ func (h *SidecarHandler) handleHeartbeat(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusBadRequest, "device_id is required")
 		return
 	}
+	if !authorizeDevice(w, r, h.deviceAuth, req.DeviceID) {
+		return
+	}
 
 	telemetry := registry.HealthTelemetry{
 		BatteryLevel:       req.Battery.Level,
@@ -206,6 +219,9 @@ func (h *SidecarHandler) handleModelStatus(w http.ResponseWriter, r *http.Reques
 	}
 	if req.DeviceID == "" {
 		writeError(w, http.StatusBadRequest, "device_id is required")
+		return
+	}
+	if !authorizeDevice(w, r, h.deviceAuth, req.DeviceID) {
 		return
 	}
 
