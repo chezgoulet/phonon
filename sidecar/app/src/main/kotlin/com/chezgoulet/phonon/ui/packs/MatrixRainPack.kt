@@ -1,290 +1,202 @@
 package com.chezgoulet.phonon.ui.packs
 
-import androidx.compose.animation.core.*
+import androidx.compose.animation.core.withFrameNanos
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.material3.LocalTextStyle
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.*
-import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.text.*
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.sp
 import com.chezgoulet.phonon.ui.VisualizationPack
 import com.chezgoulet.phonon.ui.VizState
-import kotlin.math.*
+import kotlin.math.floor
 import kotlin.random.Random
 
 /**
  * Matrix Rain — CRT green phosphor visualization pack.
  *
- * Columns of falling green characters (hex digits, katakana, symbols)
- * create the classic rain effect. Rain density, speed, and brightness
- * respond to inference activity. A subtle CRT scanline overlay completes
- * the retro terminal aesthetic. Peer devices appear as brighter column
- * clusters at their arranged positions.
+ * Columns of falling glyphs that mutate as they fall, leaders blooming with a
+ * soft phosphor halo. Rain speed tracks workload, brightness tracks battery
+ * level, and the phosphor hue bends toward amber (>35°C) then red (>42°C) as
+ * the phone heats up. A bright beam sweeps down on each inference, leaving a
+ * widening afterglow, and a small HUD reports live telemetry. Persistent CRT
+ * scanlines complete the retro terminal look.
  *
- * Low power mode: fewer columns (6 vs 16), slower rain, no scanlines,
- * no peer highlights.
+ * Low power mode: 7 dim columns, no bloom, no beam, no HUD, no scan sweep.
  */
 object MatrixRainPack : VisualizationPack {
 
     override val id = "matrix-rain"
     override val name = "Matrix Rain"
-    override val description = "CRT green phosphor rain driven by inference activity"
+    override val description = "CRT phosphor rain: speed tracks workload, brightness tracks battery, hue bends red with heat"
     override val author = "chezgoulet"
-    override val version = "1.0.0"
+    override val version = "1.1.0"
 
     override val defaultConfig = mapOf(
-        "rain_density" to "1.0",
-        "rain_speed" to "1.0",
+        "base_color" to "#00FF41",
+        "bg_color" to "#040806",
+        "column_density" to "1.0",
+        "fall_speed" to "1.0",
         "char_brightness" to "1.0",
-        "glow_color" to "#00FF41"
     )
 
-    // Reusable character pool — hex + katakana vibes
-    private val charPool = listOf(
-        '0','1','2','3','4','5','6','7','8','9','A','B','C','D','E','F',
-        'ア','イ','ウ','エ','オ','カ','キ','ク','ケ','コ',
-        'サ','シ','ス','セ','ソ','タ','チ','ツ','テ','ト',
-        'ナ','ニ','ヌ','ネ','ノ','ハ','ヒ','フ','ヘ','ホ',
-        'マ','ミ','ム','メ','モ','ヤ','ユ','ヨ','ラ','リ',
-        'ル','レ','ロ','ワ','ヲ','ン',
-        ':',';','<','>','?','@','[',']','^','_','`','{','|','}','~'
-    ).map { it.toString() }
+    private val GLYPHS = ("0123456789ABCDEF" +
+        "アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホ" +
+        ":;<>?@[]^_{|}~").map { it.toString() }
 
-    private const val DEFAULT_COLUMNS = 16
-    private const val LOW_POWER_COLUMNS = 6
-    private const val CHARS_PER_COLUMN = 20
+    private const val ROWS = 22
+
+    private data class RainColumn(val leader: Float, val speed: Float, val offset: Int, val mutate: Float)
 
     @Composable
     override fun Render(state: VizState, modifier: Modifier) {
-        val density = (state.themeConfig["rain_density"] ?: "1.0").toFloatOrNull() ?: 1.0f
-        val speedMul = (state.themeConfig["rain_speed"] ?: "1.0").toFloatOrNull() ?: 1.0f
-        val brightness = (state.themeConfig["char_brightness"] ?: "1.0").toFloatOrNull() ?: 1.0f
-        val glowColor = parseHexColor(state.themeConfig["glow_color"] ?: "#00FF41")
-
+        val baseColor = parseHexColor(state.themeConfig["base_color"] ?: "#00FF41")
+        val density = (state.themeConfig["column_density"] ?: "1.0").toFloatOrNull() ?: 1.0f
         val lowPower = state.lowPowerMode
-        val columnCount = if (lowPower) LOW_POWER_COLUMNS
-                          else (DEFAULT_COLUMNS * density).toInt().coerceIn(4, 30)
+        val colCount = if (lowPower) 7 else (20 * density).toInt().coerceIn(6, 30)
+        val measurer = rememberTextMeasurer()
 
-        val textMeasurer = rememberTextMeasurer()
-
-        // ── Rain state: each column has a leader position, speed offset, and char set ──
-        val rainState = remember {
+        val columns = remember(colCount) {
             val rng = Random(42)
-            List(columnCount) {
-                RainColumn(
-                    leader = rng.nextFloat() * CHARS_PER_COLUMN,
-                    speed = 0.5f + rng.nextFloat() * 1.5f,
-                    charOffset = rng.nextInt(charPool.size)
-                )
+            List(colCount) {
+                RainColumn(rng.nextFloat() * ROWS, 0.5f + rng.nextFloat() * 1.5f, rng.nextInt(GLYPHS.size), rng.nextFloat() * 100f)
             }
         }
 
-        // Inference speed multiplier — processed packets = faster rain
-        val infSpeed = when {
-            state.isProcessing -> 1.8f + state.inferenceLoad
-            else -> 0.6f
+        var tSec by remember { mutableStateOf(0f) }
+        var beamStart by remember { mutableStateOf(-1f) }
+        LaunchedEffect(Unit) {
+            val start = withFrameNanos { it }
+            while (true) {
+                val now = withFrameNanos { it }
+                tSec = (now - start) / 1_000_000_000f
+            }
         }
-
-        // ── Animation ──
-        val infiniteTransition = rememberInfiniteTransition(label = "matrixRain")
-
-        val time by infiniteTransition.animateFloat(
-            initialValue = 0f,
-            targetValue = 1000f,
-            animationSpec = infiniteRepeatable(
-                animation = tween(if (lowPower) 30000 else 20000, easing = LinearEasing),
-                repeatMode = RepeatMode.Restart
-            ),
-            label = "time"
-        )
-
-        val scanlinePhase by infiniteTransition.animateFloat(
-            initialValue = 0f,
-            targetValue = 1f,
-            animationSpec = infiniteRepeatable(
-                animation = tween(2000, easing = LinearEasing),
-                repeatMode = RepeatMode.Restart
-            ),
-            label = "scanline"
-        )
 
         Canvas(modifier = modifier.fillMaxSize()) {
-            val cw = size.width / columnCount
-            val ch = size.height / CHARS_PER_COLUMN
-            val charSize = ch * 0.85f
+            val t = tSec
+            val cw = size.width / colCount
+            val ch = size.height / ROWS
+            val charPx = ch * 0.82f
 
-            // ── Background ──
-            drawRect(Color(0xFF0A0A0A))
+            drawRect(Color(0xFF040806))
 
-            // ── Dim column backgrounds (subtle phosphor glow) ──
-            if (!lowPower) {
-                for (c in rainState.indices) {
-                    val bgX = c * cw
-                    val bgAlpha = 0.015f + 0.01f * (c % 3)
-                    drawRect(
-                        color = glowColor.copy(alpha = bgAlpha),
-                        topLeft = Offset(bgX, 0f),
-                        size = androidx.compose.ui.geometry.Size(cw, size.height)
-                    )
-                }
+            // thermal hue shift
+            val amber = Color(0xFFEAB308)
+            val red = Color(0xFFEF4444)
+            val glyphColor = when {
+                state.batteryTemperature > 42f -> blend(amber, red, ((state.batteryTemperature - 42f) / 8f).clampTo(0f, 1f))
+                state.batteryTemperature > 35f -> blend(baseColor, amber, ((state.batteryTemperature - 35f) / 7f).clampTo(0f, 1f))
+                else -> baseColor
             }
+            // battery brightness (100%→full, 20%→dim)
+            val batt = lerpF(0.35f, 1f, (state.batteryLevel - 20) / 80f).clampTo(0.3f, 1f)
+            val infSpeed = if (state.isProcessing) 1.8f + state.inferenceLoad else 0.55f
+            val leaderColor = Color(0xFFD2FFD2)
 
-            // ── Draw each column of falling characters ──
-            val baseSpeed = (0.8f + 0.4f * infSpeed) * speedMul
-            val currentTime = time / 1000f * baseSpeed
-            val charAlpha = if (lowPower) 0.4f * brightness else (0.5f * brightness).coerceIn(0.15f, 1f)
-            val leadAlpha = if (lowPower) 0.6f * brightness else (0.9f * brightness).coerceIn(0.3f, 1f)
+            for (c in columns.indices) {
+                val col = columns[c]
+                val x = c * cw + cw / 2f
+                val scroll = (t * infSpeed * col.speed) % ROWS
+                val leaderRow = floor((col.leader + scroll) % ROWS).toInt()
 
-            for (colIdx in rainState.indices) {
-                val col = rainState[colIdx]
-                val x = colIdx * cw
+                if (!lowPower) drawRect(glyphColor.copy(alpha = 0.015f + 0.01f * (c % 3)), Offset(c * cw, 0f), Size(cw, size.height))
 
-                // Leader position scrolling through the column
-                val scroll = (currentTime * col.speed) % CHARS_PER_COLUMN
-                val leaderRow = ((col.leader + scroll) % CHARS_PER_COLUMN).toInt()
-
-                for (row in 0 until CHARS_PER_COLUMN) {
+                for (row in 0 until ROWS) {
                     val y = row * ch
-                    val charIdx = (row + col.charOffset) % charPool.size
-                    val char = charPool[charIdx]
+                    val dist = if (row <= leaderRow) leaderRow - row else ROWS - row + leaderRow
+                    if (dist > 13) continue
 
-                    // Distance from leader: 0 = brightest (leader), higher = dimmer trail
-                    val distFromLeader = if (row <= leaderRow) leaderRow - row
-                                         else (CHARS_PER_COLUMN - row + leaderRow)
-
-                    if (distFromLeader > 12) continue // Fade out long trail
+                    val mutRate = if (dist == 0) 14 else 3
+                    val gi = (row + col.offset + (t * mutRate + col.mutate).toInt()) % GLYPHS.size
+                    val glyph = GLYPHS[gi]
 
                     val trailFade = when {
-                        distFromLeader == 0 -> 1f // Leader
-                        distFromLeader <= 2 -> 0.7f
-                        distFromLeader <= 5 -> 0.4f
-                        else -> 0.15f
+                        dist == 0 -> 1f
+                        dist <= 2 -> 0.7f
+                        dist <= 5 -> 0.42f
+                        else -> 0.16f
                     }
+                    val leadAlpha = (if (lowPower) 0.6f else 0.95f) * batt
+                    val alpha = if (dist == 0) leadAlpha else (if (lowPower) 0.4f else 0.55f) * batt * trailFade
 
-                    val alpha = if (distFromLeader == 0) leadAlpha
-                                else charAlpha * trailFade
-
-                    val color = if (distFromLeader == 0 && !lowPower) {
-                        // Leader: bright white-green
-                        Color(0xFFCCFFCC).copy(alpha = leadAlpha)
-                    } else {
-                        glowColor.copy(alpha = alpha)
-                    }
-
-                    // Draw the character
-                    val textResult = textMeasurer.measure(
-                        text = AnnotatedString(char),
-                        style = TextStyle(
-                            color = color,
-                            fontSize = charSize.sp,
-                            fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.Bold
-                        )
-                    )
-                    drawText(
-                        textLayoutResult = textResult,
-                        topLeft = Offset(
-                            x = x + (cw - textResult.size.width) / 2f,
-                            y = y
-                        )
-                    )
-
-                    // Leader glow halo
-                    if (distFromLeader == 0 && !lowPower) {
+                    if (!lowPower && dist <= 1) {
+                        val bc = if (dist == 0) leaderColor else glyphColor
+                        val br = charPx * 0.85f
                         drawCircle(
-                            color = Color(0xFFCCFFCC).copy(alpha = 0.08f),
-                            radius = charSize * 0.8f,
-                            center = Offset(x + cw / 2f, y + ch / 2f)
+                            brush = Brush.radialGradient(
+                                colors = listOf(bc.copy(alpha = (if (dist == 0) 0.22f else 0.1f) * batt), bc.copy(alpha = 0f)),
+                                center = Offset(x, y + ch / 2f), radius = br,
+                            ),
+                            radius = br, center = Offset(x, y + ch / 2f),
                         )
                     }
+
+                    val color = if (dist == 0 && !lowPower) leaderColor.copy(alpha = leadAlpha) else glyphColor.copy(alpha = alpha)
+                    val r = measurer.measure(
+                        AnnotatedString(glyph),
+                        TextStyle(color = color, fontSize = charPx.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold),
+                    )
+                    drawText(r, topLeft = Offset(x - r.size.width / 2f, y))
                 }
 
-                // ── Peer device highlight ──
-                // Find peers whose x-position maps near this column
+                // peer highlight bands
                 if (!lowPower) {
                     for (peer in state.peerStates) {
-                        val pos = peer.position ?: continue
-                        val peerX = pos.x * size.width
-                        val peerCol = (peerX / cw).toInt()
-                        if (peerCol == colIdx) {
-                            // Highlight this column with a brighter center band
-                            val highlightY = (pos.y * size.height).coerceIn(0f, size.height - ch)
-                            val bandY = (highlightY / ch).toInt() * ch
-                            val bandAlpha = if (peer.isProcessing) 0.15f else 0.06f
-                            drawRect(
-                                color = glowColor.copy(alpha = bandAlpha),
-                                topLeft = Offset(x, bandY),
-                                size = androidx.compose.ui.geometry.Size(cw, ch * 3f)
-                            )
+                        val pp = peer.position ?: continue
+                        if ((pp.x * size.width / cw).toInt() == c) {
+                            val bandY = (pp.y * ROWS).toInt() * ch
+                            drawRect(glyphColor.copy(alpha = if (peer.isProcessing) 0.16f else 0.06f), Offset(c * cw, bandY), Size(cw, ch * 3f))
                         }
                     }
                 }
             }
 
-            // ── CRT scanline overlay ──
-            if (!lowPower) {
-                val scanY = (scanlinePhase * size.height).toInt()
-                drawRect(
-                    color = Color.White.copy(alpha = 0.03f),
-                    topLeft = Offset(0f, scanY),
-                    size = androidx.compose.ui.geometry.Size(size.width, 2f)
-                )
-                // Static faint scanlines
-                var sy = 0f
-                while (sy < size.height) {
+            // processing beam
+            if (state.isProcessing && !lowPower) {
+                if (beamStart < 0f || t - beamStart > 1.6f) beamStart = t
+                val age = (t - beamStart) / 1.6f
+                if (age <= 1f) {
+                    val beamY = age * size.height
                     drawRect(
-                        color = Color.Black.copy(alpha = 0.04f),
-                        topLeft = Offset(0f, sy),
-                        size = androidx.compose.ui.geometry.Size(size.width, 1f)
+                        brush = Brush.verticalGradient(
+                            colors = listOf(leaderColor.copy(alpha = 0f), leaderColor.copy(alpha = 0.18f * (1f - age))),
+                            startY = beamY - size.height * 0.18f, endY = beamY,
+                        ),
+                        topLeft = Offset(0f, beamY - size.height * 0.18f), size = Size(size.width, size.height * 0.18f),
                     )
-                    sy += 4f
+                    drawRect(Color(0xFFE6FFE6).copy(alpha = 0.5f * (1f - age)), Offset(0f, beamY - 2f), Size(size.width, 3f))
                 }
             }
 
-            // ── Workload indicator: ambient glow intensity ──
-            if (state.workload > 0.3f && !lowPower) {
-                val glowAlpha = (state.workload * 0.08f).coerceAtMost(0.08f)
-                val glowGradient = Brush.verticalGradient(
-                    colors = listOf(glowColor.copy(alpha = glowAlpha), Color.Transparent),
-                    startY = 0f,
-                    endY = size.height * 0.3f
-                )
-                drawRect(glowGradient)
-            }
+            // CRT scanlines (always present)
+            var sy = 0f
+            while (sy < size.height) { drawRect(Color.Black.copy(alpha = 0.12f), Offset(0f, sy), Size(size.width, 1f)); sy += 3f }
+            if (!lowPower) drawRect(Color.White.copy(alpha = 0.04f), Offset(0f, ((t * 0.5f) % 1f) * size.height), Size(size.width, 2f))
 
-            // ── Processing flash ──
-            if (state.isProcessing && !lowPower) {
-                val flashAlpha = 0.02f + 0.03f * (sin(time * 0.05f).toFloat().coerceIn(0f, 1f))
-                drawRect(color = glowColor.copy(alpha = flashAlpha))
+            // top-right HUD
+            if (!lowPower) {
+                val lines = listOf(
+                    "TPS ${state.tokensPerSecond.toInt()}",
+                    "Q ${state.queueDepth}",
+                    "BAT ${state.batteryLevel}%",
+                    "${"%.1f".format(state.batteryTemperature)}C",
+                )
+                val hudPx = charPx * 0.6f
+                lines.forEachIndexed { i, ln ->
+                    val r = measurer.measure(AnnotatedString(ln), TextStyle(color = glyphColor.copy(alpha = 0.5f), fontSize = hudPx.sp, fontFamily = FontFamily.Monospace))
+                    drawText(r, topLeft = Offset(size.width - 8f - r.size.width, 8f + i * hudPx * 1.25f))
+                }
             }
         }
     }
-
-    /**
-     * Per-column rain parameters. Created once and reused across frames
-     * so each column keeps its unique character and rhythm.
-     */
-    private data class RainColumn(
-        val leader: Float,
-        val speed: Float,
-        val charOffset: Int
-    )
-}
-
-/** Parse a hex color string (e.g. "#00FF41") into [Color]. */
-private fun parseHexColor(hex: String): Color {
-    val sanitized = hex.removePrefix("#")
-    val rgb = sanitized.toLong(16)
-    return Color(
-        red = ((rgb shr 16) and 0xFF) / 255f,
-        green = ((rgb shr 8) and 0xFF) / 255f,
-        blue = (rgb and 0xFF) / 255f,
-        alpha = 1f
-    )
 }
