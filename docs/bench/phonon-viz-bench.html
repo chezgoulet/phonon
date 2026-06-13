@@ -1987,7 +1987,734 @@ function drawGauge(ctx, x, y, w, h, fill, color, frame, label) {
   ctx.fillText(label, x + w / 2, y + h + 3);
 }
 
-const PACKS = [NeonRing, MatrixRain, CyberHud, BioluminescentDreamscape];
+
+
+// ════════════════════════════════════════════════════════
+// LCARS — Star Trek Okudagram Console
+// ════════════════════════════════════════════════════════
+/* LCARS — Library Computer Access/Retrieval System.
+ * Port of LcarsPack.kt to JS bench. */
+const Lcars = {
+  id: "lcars",
+  name: "LCARS",
+  description: "A structurally faithful Star Trek: TNG Okudagram console — unit-grid elbows, half-pill end-caps, a stacked panel of numbered elements, and bracket-grouped readouts. Calm by design; only alert states animate.",
+  author: "chezgoulet",
+  version: "2.0.0",
+
+  defaultConfig: {
+    color_primary: "#FF9966",
+    color_secondary: "#CC99CC",
+    color_tertiary: "#9999FF",
+    color_quaternary: "#FFCC99",
+    bg_color: "#000000",
+  },
+
+  /* Internal state */
+  _bar: 0,
+  _progIdx: 0,
+  _progClock: 0,
+  _transClock: -1,
+  _prevIdx: 0,
+  _wasInferring: false,
+  _t0: null,
+
+  _RED: "#CC3333",
+  _YELLOW: "#FFCC00",
+
+  _serials: ["4754", "1701-D", "021", "47", "M113", "5537", "33-A"],
+  _PROGRAMS: ["home", "engineering", "home", "planet", "home", "subspace"],
+  _HOLD: { home: 3.2, engineering: 13, planet: 13, subspace: 13 },
+  _TRANS: 1.0,
+
+  onActivate: function() {
+    this._bar = 0;
+    this._progIdx = 0;
+    this._progClock = 0;
+    this._transClock = -1;
+    this._prevIdx = 0;
+    this._wasInferring = false;
+    this._t0 = null;
+  },
+
+  _palette: function(E, healthy) {
+    // Not used — LCARS uses cfg-based palette
+    return { a: "#FFF", b: "#CCC", c: "#999", d: "#666" };
+  },
+
+  /* ── Drawing helpers ── */
+
+  _hex: function(h) {
+    if (typeof h === 'string') {
+      h = parseInt(h.replace('#', ''), 16);
+    }
+    return { r: (h >> 16) & 0xFF, g: (h >> 8) & 0xFF, b: h & 0xFF };
+  },
+
+  _rgba: function(c, a) {
+    if (typeof c === 'string') { c = this._hex(c); }
+    return 'rgba(' + c.r + ',' + c.g + ',' + c.b + ',' + (typeof a === 'number' ? a : 1) + ')';
+  },
+
+  _blendC: function(a, b, t) {
+    if (typeof a === 'string') a = this._hex(a);
+    if (typeof b === 'string') b = this._hex(b);
+    return {
+      r: Math.round(a.r + (b.r - a.r) * t),
+      g: Math.round(a.g + (b.g - a.g) * t),
+      b: Math.round(a.b + (b.b - a.b) * t),
+    };
+  },
+
+  _pal: function(cfg, critical, caution) {
+    const amber = this._hex(cfg.color_primary || "#FF9966");
+    const lavender = this._hex(cfg.color_secondary || "#CC99CC");
+    const periwinkle = this._hex(cfg.color_tertiary || "#9999FF");
+    const peach = this._hex(cfg.color_quaternary || "#FFCC99");
+    const red = this._hex(this._RED);
+    const yellow = this._hex(this._YELLOW);
+    if (critical) return { spine: red, a: red, b: amber, c: peach, d: yellow };
+    if (caution) return { spine: yellow, a: yellow, b: amber, c: peach, d: lavender };
+    return { spine: amber, a: amber, b: lavender, c: periwinkle, d: peach };
+  },
+
+  _layoutFor: function(name, pal, s) {
+    const names = ["home", "engineering", "planet", "subspace"];
+    const layouts = {
+      engineering: {
+        title: "ENGINEERING \u00B7 DIAG",
+        weights: [1.0, 1.8, 0.8, 1.2, 0.9, 2.0, 0.7],
+        colors: [pal.a, pal.c, pal.d, pal.b, pal.d, pal.a, pal.c],
+        labels: ["DIAG", "WARP", "EPS", "SIF", "47", "PLASMA", "9-T"],
+        interior: "engineering",
+      },
+      planet: {
+        title: "SENSORS \u00B7 GEOSCAN",
+        weights: [1.3, 0.8, 1.1, 1.6, 1.0, 0.9, 1.5],
+        colors: [pal.c, pal.b, pal.d, pal.a, pal.c, pal.d, pal.b],
+        labels: ["SCAN", "CLASS-M", "BIO", "ATMOS", "GEO", "021", "LAT"],
+        interior: "planet",
+      },
+      subspace: {
+        title: "SUBSPACE \u00B7 ANALYSIS",
+        weights: [0.9, 1.2, 1.7, 0.8, 1.4, 1.0, 1.1],
+        colors: [pal.b, pal.d, pal.a, pal.c, pal.b, pal.a, pal.d],
+        labels: ["FREQ", "TACHYON", "FLUX", "BAND", "PHASE", "5537", "Q-7"],
+        interior: "subspace",
+      },
+    };
+    const mode = (s.coordinatorMode || "standby").toUpperCase();
+    const homeData = {
+      title: "LCARS \u00B7 " + mode,
+      weights: [1.6, 0.9, 0.9, 2.2, 1.1, 1.4, 0.8],
+      colors: [pal.b, pal.c, pal.d, pal.a, pal.c, pal.b, pal.d],
+      labels: this._serials.slice(0, 7),
+      interior: "home",
+    };
+    return layouts[name] || homeData;
+  },
+
+  /* ── Geometry renderers ── */
+
+  _drawElbow: function(ctx, x, y, w, h, barT, outerR, innerR, top, bg, fill) {
+    ctx.save();
+    // Solid rounded rectangle body
+    ctx.beginPath();
+    if (top) {
+      ctx.moveTo(x + outerR, y);
+      ctx.lineTo(x + w, y);
+      ctx.lineTo(x + w, y + h);
+      ctx.lineTo(x, y + h);
+      ctx.lineTo(x, y + outerR);
+      ctx.quadraticCurveTo(x, y, x + outerR, y);
+    } else {
+      ctx.moveTo(x, y);
+      ctx.lineTo(x + w, y);
+      ctx.lineTo(x + w, y + h - outerR);
+      ctx.quadraticCurveTo(x + w, y + h, x + w - outerR, y + h);
+      ctx.lineTo(x, y + h);
+    }
+    ctx.closePath();
+    ctx.fillStyle = fill;
+    ctx.fill();
+    // Concave interior cut in bg color
+    ctx.beginPath();
+    if (top) {
+      ctx.moveTo(x + barT + innerR, y + barT);
+      ctx.lineTo(x + w + 2, y + barT);
+      ctx.lineTo(x + w + 2, y + h + 2);
+      ctx.lineTo(x + barT, y + h + 2);
+      ctx.lineTo(x + barT, y + barT + innerR);
+      ctx.quadraticCurveTo(x + barT, y + barT, x + barT + innerR, y + barT);
+    } else {
+      ctx.moveTo(x + barT, y - 2);
+      ctx.lineTo(x + w + 2, y - 2);
+      ctx.lineTo(x + w + 2, y + h - barT - innerR);
+      ctx.quadraticCurveTo(x + w + 2, y + h - barT, x + w + 2 - innerR, y + h - barT);
+      ctx.lineTo(x + barT, y + h - barT);
+    }
+    ctx.closePath();
+    ctx.fillStyle = bg;
+    ctx.fill();
+    ctx.restore();
+  },
+
+  _drawBarWithCap: function(ctx, x, y, w, h, color) {
+    ctx.save();
+    ctx.beginPath();
+    const r = h / 2;
+    ctx.moveTo(x, y);
+    ctx.lineTo(x + w - r, y);
+    ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+    ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    ctx.lineTo(x, y + h);
+    ctx.closePath();
+    ctx.fillStyle = color;
+    ctx.fill();
+    ctx.restore();
+  },
+
+  _drawSweep: function(ctx, edge, y, h, barT, pal) {
+    const bw = barT * 0.7;
+    // gradient before edge
+    const grad = ctx.createLinearGradient(edge - bw * 5, 0, edge, 0);
+    grad.addColorStop(0, this._rgba(pal.a, 0));
+    grad.addColorStop(1, this._rgba(pal.a, 0.22));
+    ctx.fillStyle = grad;
+    ctx.fillRect(edge - bw * 5, y, bw * 5, h);
+    // bright bars
+    ctx.fillStyle = this._rgba(pal.a, 1);
+    ctx.fillRect(edge - bw, y, bw, h);
+    ctx.fillStyle = this._rgba("#FFFFFF", 0.5);
+    ctx.fillRect(edge - bw * 0.4, y, bw * 0.25, h);
+    ctx.fillStyle = this._rgba(this._YELLOW, 1);
+    ctx.fillRect(edge - bw, y + h * 0.20, bw, h * 0.05);
+    ctx.fillRect(edge - bw, y + h * 0.72, bw, h * 0.05);
+  },
+
+  _drawLabel: function(ctx, text, x, y, color, sizePx, alignRight, middle, bold, maxW) {
+    ctx.save();
+    const upper = text.toUpperCase();
+    let fs = sizePx;
+    ctx.font = (bold ? 'bold ' : '') + fs + 'px -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif';
+    ctx.fillStyle = color;
+    ctx.textBaseline = middle ? 'middle' : 'bottom';
+    ctx.letterSpacing = (fs * 0.04) + 'px';
+    // Shrink to fit
+    let m;
+    let guard = 0;
+    while (maxW > 0 && (m = ctx.measureText(upper)).width > maxW && fs > 7 && guard++ < 24) {
+      fs *= 0.92;
+      ctx.font = (bold ? 'bold ' : '') + fs + 'px -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif';
+    }
+    m = ctx.measureText(upper);
+    const tx = alignRight ? x - m.width : x;
+    ctx.fillText(upper, tx, y);
+    ctx.restore();
+  },
+
+  // ════════════════════════════════════════════════════════════════
+  //  INTERIOR PROGRAMS
+  // ════════════════════════════════════════════════════════════════
+
+  _progEngineering: function(ctx, x, y, w, h, s, pal, barT, t) {
+    this._drawLabel(ctx, "WARP CORE \u00B7 INTERMIX", x, y, this._rgba(pal.a, 1), barT * 0.4, false, false, true, w);
+    const top = y + barT * 0.9;
+    const hh = h - barT * 0.9;
+    const coreX = x + w * 0.20;
+    const coreW = Math.max(w * 0.08, barT * 0.7);
+    const coreTop = top + hh * 0.06;
+    const coreBot = top + hh * 0.94;
+    const coreH = coreBot - coreTop;
+    const chamberR = coreW * 0.95;
+    const load = 0.5 + 0.5 * s.inferenceLoad;
+
+    ctx.fillStyle = this._rgba(pal.d, 0.25);
+    ctx.fillRect(coreX - coreW / 2, coreTop, coreW, coreH);
+    const segs = 9;
+    for (let i = 0; i < segs; i++) {
+      const phase = ((t * (1.2 + load * 1.8) + i / segs) % 1);
+      const yTop = coreTop + (coreTop + coreBot) / 2 * (1 - phase) - coreTop * (1 - phase);
+      const yBot = coreBot - (coreBot - (coreTop + coreBot) / 2) * (1 - phase);
+      const a = 0.15 + 0.6 * (1 - phase);
+      const segH = coreH * 0.05;
+      ctx.fillStyle = this._rgba(this._YELLOW, a);
+      ctx.fillRect(coreX - coreW / 2, yTop, coreW, segH);
+      ctx.fillStyle = this._rgba(pal.a, a);
+      ctx.fillRect(coreX - coreW / 2, yBot - segH, coreW, segH);
+    }
+    // chambers
+    [coreTop, coreBot].forEach(function(cy) {
+      ctx.beginPath(); ctx.arc(coreX, cy, chamberR, 0, Math.PI * 2); ctx.fillStyle = this._rgba(pal.b, 0.9); ctx.fill();
+      ctx.beginPath(); ctx.arc(coreX, cy, chamberR * 0.5, 0, Math.PI * 2); ctx.fillStyle = "#000"; ctx.fill();
+    }, this);
+    // dilithium diamond
+    const midY = (coreTop + coreBot) / 2;
+    const pulse = 0.6 + 0.4 * (0.5 + 0.5 * Math.sin(t * (3 + load * 4)));
+    const dia = chamberR * 1.1;
+    ctx.save();
+    ctx.translate(coreX, midY);
+    ctx.rotate(Math.PI / 4);
+    ctx.fillStyle = this._rgba(this._YELLOW, pulse);
+    ctx.fillRect(-dia / 2, -dia / 2, dia, dia);
+    ctx.restore();
+    // EPS gauges
+    const gx = x + w * 0.42;
+    const gw = w - (gx - x);
+    const gauges = [
+      { k: "EPS",   v: 0.4 + 0.5 * s.inferenceLoad, c: pal.c },
+      { k: "SIF",   v: s.isHealthy ? 0.92 : 0.4,     c: s.isHealthy ? pal.c : this._RED },
+      { k: "PLASMA", v: Math.max(0, Math.min(1, 0.55 + 0.4 * Math.sin(t * 0.8) * 0.5 + 0.2)), c: pal.a },
+      { k: "DRIVE", v: Math.min(1, Math.max(0.05, s.tokensPerSecond / 60)), c: pal.d },
+    ];
+    const rowH = coreH / gauges.length;
+    let gy = coreTop;
+    for (let gi = 0; gi < gauges.length; gi++) {
+      const g = gauges[gi];
+      const barY = gy + rowH * 0.30;
+      const barH2 = rowH * 0.34;
+      ctx.fillStyle = this._rgba(g.c, 0.16);
+      ctx.fillRect(gx, barY, gw, barH2);
+      const cells = 14;
+      const cg = gw * 0.02;
+      const cw = (gw - cg * (cells - 1)) / cells;
+      const lit = Math.round(Math.min(1, Math.max(0, g.v)) * cells);
+      for (let i = 0; i < lit; i++) {
+        ctx.fillStyle = this._rgba(g.c, 1);
+        ctx.fillRect(gx + i * (cw + cg), barY, cw, barH2);
+      }
+      const fs = Math.min(barT * 0.34, rowH * 0.22);
+      this._drawLabel(ctx, g.k, gx, gy + rowH * 0.16, this._rgba(pal.b, 1), fs, false, false, false, gw * 0.6);
+      this._drawLabel(ctx, Math.round(g.v * 100) + "%", gx + gw, gy + rowH * 0.16, this._rgba(g.c, 1), fs, true, false, true, gw * 0.35);
+      gy += rowH;
+    }
+  },
+
+  _progPlanetScan: function(ctx, x, y, w, h, s, pal, barT, t) {
+    this._drawLabel(ctx, "GEOSCAN \u00B7 ACTIVE", x, y, this._rgba(pal.a, 1), barT * 0.4, false, false, true, w);
+    const cx = x + w * 0.32;
+    const cy = y + h * 0.42;
+    const r = Math.min(w * 0.26, h * 0.32);
+
+    // Planet sphere
+    ctx.save();
+    ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.clip();
+    ctx.fillStyle = this._rgba(pal.b, 0.9);
+    ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
+    const rot = t * 0.25;
+    for (let i = -4; i <= 4; i++) {
+      const yy = cy + (i / 5) * r + Math.sin(rot + i) * 2;
+      ctx.fillStyle = this._rgba(pal.d, 0.18 + 0.08 * ((i + 4) % 2));
+      ctx.fillRect(cx - r, yy - r * 0.06, r * 2, r * 0.12);
+    }
+    // shading
+    const shadeX = cx + Math.sin(t * 0.3) * r * 0.3;
+    const grad = ctx.createLinearGradient(shadeX, 0, cx + r, 0);
+    grad.addColorStop(0, this._rgba("#000", 0));
+    grad.addColorStop(1, this._rgba("#000", 0.55));
+    ctx.fillStyle = grad;
+    ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
+    ctx.restore();
+
+    ctx.save();
+    ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.strokeStyle = this._rgba(pal.a, 0.8);
+    ctx.lineWidth = barT * 0.1;
+    ctx.stroke();
+    ctx.restore();
+
+    // Scan line
+    const scanProg = Math.min(1, Math.max(0, this._progClock / 3)) % 1;
+    const scanY = cy - r + scanProg * r * 2;
+    ctx.save();
+    ctx.strokeStyle = this._rgba(this._YELLOW, 0.85);
+    ctx.lineWidth = barT * 0.08;
+    ctx.beginPath(); ctx.moveTo(cx - r, scanY); ctx.lineTo(cx + r, scanY); ctx.stroke();
+    ctx.fillStyle = this._rgba(this._YELLOW, 0.10);
+    ctx.fillRect(cx - r, scanY, r * 2, r * 0.5);
+    ctx.restore();
+
+    // Lifeform detection
+    const detected = this._progClock > 5;
+    if (detected) {
+      const bx = cx + r * 0.35;
+      const by = cy - r * 0.2;
+      const flash = 0.5 + 0.5 * Math.sin(t * 6);
+      ctx.save();
+      ctx.beginPath(); ctx.arc(bx, by, r * 0.10, 0, Math.PI * 2);
+      ctx.fillStyle = this._rgba(this._RED, 0.5 + 0.5 * flash);
+      ctx.fill();
+      ctx.beginPath(); ctx.arc(bx, by, r * 0.20, 0, Math.PI * 2);
+      ctx.strokeStyle = this._rgba(this._RED, 0.9);
+      ctx.lineWidth = barT * 0.07;
+      ctx.stroke();
+      // crosshair lines
+      ctx.beginPath();
+      ctx.moveTo(bx - r * 0.28, by); ctx.lineTo(bx - r * 0.12, by);
+      ctx.moveTo(bx + r * 0.12, by); ctx.lineTo(bx + r * 0.28, by);
+      ctx.moveTo(bx, by - r * 0.28); ctx.lineTo(bx, by - r * 0.12);
+      ctx.moveTo(bx, by + r * 0.12); ctx.lineTo(bx, by + r * 0.28);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // Right panel data
+    const tx = x + w * 0.62;
+    const tw = x + w - tx;
+    const rows = [
+      { k: "CLASS", v: "M", c: pal.c },
+      { k: "ATMOS", v: "N2-O2", c: pal.d },
+      { k: "HYDRO", v: "71%", c: pal.d },
+      { k: "GEO", v: "STABLE", c: pal.c },
+      { k: "LIFE", v: detected ? "DETECTED" : "SCAN...", c: detected ? this._RED : pal.d },
+      { k: "FORM", v: detected ? "UNKNOWN" : "---", c: detected ? this._RED : pal.b },
+    ];
+    const lh = Math.min(h / (rows.length + 1), Math.max(barT * 0.7, barT * 1.5));
+    const fs = Math.max(9, Math.min(lh * 0.42, tw * 0.16, 26));
+    let yy = y + h * 0.12;
+    for (let ri = 0; ri < rows.length; ri++) {
+      const row = rows[ri];
+      this._drawLabel(ctx, row.k, tx, yy + lh / 2, this._rgba(pal.b, 1), fs, false, true, false, tw * 0.5);
+      this._drawLabel(ctx, row.v, x + w, yy + lh / 2, this._rgba(row.c, 1), fs, true, true, true, tw * 0.5);
+      yy += lh;
+    }
+  },
+
+  _progSubspace: function(ctx, x, y, w, h, s, pal, barT, t) {
+    this._drawLabel(ctx, "SUBSPACE FLUX \u00B7 SCAN", x, y, this._rgba(pal.a, 1), barT * 0.4, false, false, true, w);
+    const gx = x; const gy = y + barT; const gw = w; const gh = h * 0.52;
+    const midY = gy + gh / 2;
+
+    ctx.save();
+    // Grid
+    ctx.strokeStyle = this._rgba(pal.d, 0.16);
+    ctx.lineWidth = 1;
+    for (let i = 0; i <= 8; i++) {
+      const xx = gx + gw * i / 8;
+      ctx.beginPath(); ctx.moveTo(xx, gy); ctx.lineTo(xx, gy + gh); ctx.stroke();
+    }
+    for (let i = 0; i <= 4; i++) {
+      const yy = gy + gh * i / 4;
+      ctx.beginPath(); ctx.moveTo(gx, yy); ctx.lineTo(gx + gw, yy); ctx.stroke();
+    }
+    ctx.strokeStyle = this._rgba(pal.b, 0.3);
+    ctx.beginPath(); ctx.moveTo(gx, midY); ctx.lineTo(gx + gw, midY); ctx.stroke();
+    ctx.restore();
+
+    // Waveform
+    const amp = gh * 0.40 * (0.5 + 0.5 * s.inferenceLoad);
+    const spikePos = (Math.sin(t * 0.5) * 0.5 + 0.5);
+    ctx.save();
+    ctx.strokeStyle = this._rgba(this._YELLOW, 0.95);
+    ctx.lineWidth = barT * 0.09;
+    ctx.lineJoin = 'round';
+    ctx.beginPath();
+    const n = 120;
+    for (let i = 0; i <= n; i++) {
+      const fx = i / n;
+      const xx = gx + fx * gw;
+      let yv = Math.sin(fx * 18 + t * 3) * 0.5 + Math.sin(fx * 7 - t * 2) * 0.3 + Math.sin(fx * 31 + t * 5) * 0.18;
+      const d = fx - spikePos;
+      const spike = Math.exp(-(d * d) / 0.0016) * (1.2 + 0.6 * Math.sin(t * 8));
+      yv += spike;
+      const yy = midY - yv * amp * 0.5;
+      if (i === 0) ctx.moveTo(xx, yy); else ctx.lineTo(xx, yy);
+    }
+    ctx.stroke();
+    ctx.restore();
+
+    // Spike line
+    const sx = gx + spikePos * gw;
+    ctx.save();
+    ctx.strokeStyle = this._rgba(this._RED, 0.7);
+    ctx.lineWidth = barT * 0.05;
+    ctx.beginPath(); ctx.moveTo(sx, gy); ctx.lineTo(sx, gy + gh); ctx.stroke();
+    ctx.restore();
+
+    // Row data
+    const ry0 = gy + gh + barT * 0.6;
+    const tw = gw;
+    const peak = Math.round(40 + spikePos * 1200);
+    const rows = [
+      { k: "FREQ", v: peak + " THz", c: pal.c },
+      { k: "FLUX", v: (1.5 + s.inferenceLoad * 4).toFixed(1) + " cochrane", c: pal.d },
+      { k: "BAND", v: "THETA-9", c: pal.d },
+      { k: "ANOMALY", v: "TYPE-IV", c: this._RED },
+    ];
+    const lh = Math.max(barT * 0.6, Math.min((y + h - ry0) / rows.length, barT * 1.3));
+    const fs = Math.max(9, Math.min(lh * 0.46, tw * 0.5 * 0.14, 24));
+    let yy = ry0;
+    for (let ri = 0; ri < rows.length; ri++) {
+      const row = rows[ri];
+      this._drawLabel(ctx, row.k, gx, yy + lh / 2, this._rgba(pal.b, 1), fs, false, true, false, tw * 0.42);
+      this._drawLabel(ctx, row.v, gx + gw, yy + lh / 2, this._rgba(row.c, 1), fs, true, true, true, tw * 0.5);
+      yy += lh;
+    }
+  },
+
+  // ── Readout bracket + data rows ──
+  _drawReadout: function(ctx, x, y, w, h, s, pal, barT) {
+    const brW = barT * 0.32;
+    const armLen = barT * 1.1;
+    ctx.fillStyle = this._rgba(pal.b, 1);
+    ctx.fillRect(x, y, brW, h);              // spine
+    ctx.fillRect(x, y, armLen, brW);         // top arm
+    ctx.fillRect(x, y + h - brW, armLen, brW); // bottom arm
+
+    const padL = x + brW + barT * 0.5;
+    const right = x + w;
+    const innerW = right - padL;
+    const valW = innerW * 0.42;
+    const keyRight = right - valW - barT * 0.4;
+
+    let tempCol = pal.d;
+    if (s.batteryTemperature > 42) tempCol = this._RED;
+    else if (s.batteryTemperature > 35) tempCol = this._YELLOW;
+
+    const rows = [
+      { k: "MODE",  v: (s.coordinatorMode || "standby").toUpperCase(), c: pal.c },
+      { k: "TOK/S", v: Math.round(s.tokensPerSecond || 0) + "", c: pal.d },
+      { k: "QUEUE", v: (s.queueDepth || 0) + "", c: pal.d },
+      { k: "TEMP",  v: Math.round(s.batteryTemperature || 0) + "C", c: tempCol },
+      { k: "POWER", v: Math.round(s.batteryLevel || 0) + "%" + (s.isCharging ? "+" : ""),
+        c: (s.batteryLevel < 20 && !s.isCharging) ? this._RED : pal.d },
+      { k: "NODES", v: (s.peerCount || 0) + "", c: pal.c },
+      { k: "STATUS", v: s.isHealthy ? "NOMINAL" : "FAULT", c: s.isHealthy ? pal.c : this._RED },
+    ];
+    const lineH = Math.max(barT * 0.55, Math.min(h / (rows.length + 0.5), barT * 1.4));
+    const fs = Math.max(9, Math.min(lineH * 0.46, innerW * 0.5 * 0.16, barT * 0.42, 34));
+    let ry = y + lineH * 0.4;
+    for (let ri = 0; ri < rows.length; ri++) {
+      const row = rows[ri];
+      this._drawLabel(ctx, row.k, padL, ry + lineH / 2, this._rgba(pal.b, 1), fs, false, true, false, keyRight - padL);
+      this._drawLabel(ctx, row.v, right, ry + lineH / 2, this._rgba(row.c, 1), fs, true, true, true, valW);
+      ry += lineH;
+    }
+  },
+
+  // ── Bar graph ──
+  _drawBarGraph: function(ctx, x, y, w, h, s, pal, barT, dt) {
+    this._drawLabel(ctx, "INFERENCE LOAD", x, y, this._rgba(pal.b, 1), barT * 0.42, false, false, true, w * 0.6);
+    const gy = y + barT * 0.7;
+    const gh2 = h - barT * 0.7;
+    const prev = this._bar;
+    this._bar += (s.inferenceLoad - this._bar) * (1 - Math.pow(0.05, Math.min(dt, 0.05)));
+    const cells = 16;
+    const cgap = w * 0.012;
+    const cw = (w - cgap * (cells - 1)) / cells;
+    for (let i = 0; i < cells; i++) {
+      const frac = (i + 1) / cells;
+      const lit = frac <= this._bar + 1e-3;
+      let stepCol;
+      if (frac > 0.8) stepCol = this._YELLOW;
+      else if (frac > 0.5) stepCol = pal.a;
+      else stepCol = pal.c;
+      ctx.fillStyle = this._rgba(stepCol, lit ? 1 : 0.14);
+      ctx.fillRect(x + i * (cw + cgap), gy, cw, gh2);
+    }
+    const pctStr = String(Math.round(this._bar * 100)).padStart(3, '0');
+    this._drawLabel(ctx, pctStr, x + w, y, this._rgba(pal.d, 1), barT * 0.42, true, false, true, w * 0.35);
+  },
+
+  // ── Dispatch to active interior renderer ──
+  _drawInterior: function(ctx, name, x, y, w, h, s, pal, barT, dt, t) {
+    switch (name) {
+      case "engineering": this._progEngineering(ctx, x, y, w, h, s, pal, barT, t); break;
+      case "planet": this._progPlanetScan(ctx, x, y, w, h, s, pal, barT, t); break;
+      case "subspace": this._progSubspace(ctx, x, y, w, h, s, pal, barT, t); break;
+      default:
+        // Home interior
+        const bandH = Math.max(barT * 2, Math.min(h * 0.34, 220));
+        this._drawBarGraph(ctx, x, y, w, bandH, s, pal, barT, dt);
+        const readTop = y + bandH + barT;
+        this._drawReadout(ctx, x, readTop, w, h - bandH - barT, s, pal, barT);
+        break;
+    }
+  },
+
+  // ════════════════════════════════════════════════════════════════
+  //  MAIN RENDER
+  // ════════════════════════════════════════════════════════════════
+  render: function(ctx, sw, sh, s, dtSec) {
+    const t = this._t0 === null ? 0 : (this._t0 + dtSec);
+    if (this._t0 === null) this._t0 = 0;
+    const dt = dtSec;
+    const w = sw, h = sh;
+    const cfg = s.themeConfig || this.defaultConfig;
+    const bg = this._hex(cfg.bg_color || "#000000");
+
+    ctx.fillStyle = this._rgba(bg, 1);
+    ctx.fillRect(0, 0, w, h);
+
+    const overheating = s.batteryTemperature > 42;
+    const critical = !s.isHealthy || overheating;
+    const caution = s.batteryLevel < 20 && !s.isCharging;
+    const pal = this._pal(cfg, critical, caution);
+
+    // ── Drive the program state machine ──
+    const lowPower = s.lowPowerMode;
+    const heavy = s.isProcessing && s.inferenceLoad > 0.55 && !lowPower && !critical;
+
+    if (!this._wasInferring && heavy) { this._progIdx = 0; this._progClock = 0; this._transClock = -1; }
+    this._wasInferring = heavy;
+
+    if (heavy) {
+      this._progClock += dt;
+      if (this._transClock >= 0) {
+        this._transClock += dt;
+        if (this._transClock >= this._TRANS) this._transClock = -1;
+      }
+      const curName0 = this._PROGRAMS[this._progIdx];
+      if (this._transClock < 0 && this._progClock >= (this._HOLD[curName0] || 12)) {
+        this._prevIdx = this._progIdx;
+        this._progIdx = (this._progIdx + 1) % this._PROGRAMS.length;
+        this._progClock = 0;
+        this._transClock = 0;
+      }
+    } else {
+      if (this._progIdx !== 0 || this._transClock >= 0) {
+        this._prevIdx = this._progIdx;
+        if (this._progIdx !== 0 && this._transClock < 0) this._transClock = 0;
+        this._progIdx = 0;
+        this._progClock = 0;
+      }
+      if (this._transClock >= 0) {
+        this._transClock += dt;
+        if (this._transClock >= this._TRANS) this._transClock = -1;
+      }
+    }
+
+    const forcedHome = lowPower || critical || caution;
+    const curName = forcedHome ? "home" : this._PROGRAMS[this._progIdx];
+    const prevName = forcedHome ? "home" : this._PROGRAMS[this._prevIdx];
+    const transP = this._transClock >= 0 ? Math.min(1, Math.max(0, this._transClock / this._TRANS)) : 1;
+
+    // ── Unit grid ──
+    const u = Math.max(90, Math.min(240, w * 0.30));
+    const barT = u / 3;
+    const gap = Math.max(5, Math.min(14, w * 0.018));
+    const m = Math.max(8, Math.min(22, w * 0.03));
+    const outerR = u * 0.7;
+    const innerR = barT * 0.8;
+    const panelX = m;
+    const panelW = u;
+    const topY = m;
+    const bottomY = h - m;
+    const inX = panelX + panelW + gap;
+    const rightX = w - m;
+    const elbowH = barT + outerR;
+
+    const blink = critical ? (0.55 + 0.45 * (0.5 + 0.5 * Math.sin(t * 5))) :
+      caution ? (0.7 + 0.3 * (0.5 + 0.5 * Math.sin(t * 2.2))) : 1;
+
+    const bgStr = this._rgba(bg, 1);
+
+    // Build current layout
+    const curLayout = this._layoutFor(curName, pal, s);
+    const reconfig = transP < 1 && prevName !== curName;
+
+    let layout, title;
+    if (reconfig) {
+      const prevLayout = this._layoutFor(prevName, pal, s);
+      const e = transP < 0.5 ? 2 * transP * transP : 1 - Math.pow(-2 * transP + 2, 2) / 2;
+      const blended = curLayout.weights.map(function(wi, i) {
+        const a = (prevLayout.weights[i] === undefined ? wi : prevLayout.weights[i]);
+        return a + (wi - a) * e;
+      });
+      const swapped = transP > 0.5;
+      layout = {
+        title: swapped ? curLayout.title : prevLayout.title,
+        weights: blended,
+        colors: swapped ? curLayout.colors : prevLayout.colors,
+        labels: swapped ? curLayout.labels : prevLayout.labels,
+        interior: curLayout.interior,
+      };
+      title = layout.title;
+    } else {
+      layout = curLayout;
+      title = curLayout.title;
+    }
+
+    if (critical && overheating) title = "ALERT \u00B7 THERMAL";
+    else if (critical) title = "ALERT \u00B7 SYSTEM";
+    else if (caution) title = "PWR RESERVE";
+
+    // ── Frame ──
+    // Top elbow + bar
+    this._drawElbow(ctx, panelX, topY, panelW, elbowH, barT, outerR, innerR, true, bgStr, this._rgba(pal.spine, blink));
+    this._drawBarWithCap(ctx, inX, topY, rightX - inX, barT, this._rgba(pal.b, 1));
+    this._drawLabel(ctx, title, rightX - barT * 0.5, topY + barT * 0.5, bgStr, barT * 0.5, true, true, true, (rightX - inX) - barT);
+
+    // Bottom elbow + bar
+    this._drawElbow(ctx, panelX, bottomY - elbowH, panelW, elbowH, barT, outerR, innerR, false, bgStr, this._rgba(pal.spine, blink));
+    this._drawBarWithCap(ctx, inX, bottomY - barT, rightX - inX, barT, this._rgba(pal.c, 1));
+
+    // Side-panel elements
+    const panelTop = topY + elbowH + gap;
+    const panelBot = bottomY - elbowH - gap;
+    const panelH = panelBot - panelTop;
+    const weights = layout.weights;
+    const wSum = weights.reduce(function(a, b) { return a + b; }, 0);
+    let ey = panelTop;
+    for (let i = 0; i < weights.length; i++) {
+      const eh = (panelH - gap * (weights.length - 1)) * (weights[i] / wSum);
+      let ec = layout.colors[i % layout.colors.length];
+      let label = layout.labels[i % layout.labels.length];
+      let alpha = 1;
+      if (layout.interior === "home" && i === 0) {
+        ec = critical ? this._RED : pal.a;
+        label = critical ? "ALERT" : "NOMINAL";
+        if (critical) alpha = blink;
+      } else if (layout.interior === "home" && i === 3) {
+        ec = s.isCharging ? this._YELLOW : (s.batteryLevel < 20 ? this._RED : pal.d);
+        label = s.isCharging ? "CHRG" : Math.round(s.batteryLevel) + "%";
+        if (s.batteryLevel < 20 && !s.isCharging) alpha = blink;
+      }
+      ctx.fillStyle = this._rgba(ec, alpha);
+      ctx.fillRect(panelX, ey, panelW, eh);
+      this._drawLabel(ctx, label, panelX + panelW - barT * 0.4, ey + eh - barT * 0.32, bgStr,
+        Math.min(barT * 0.42, eh * 0.4), true, false, true, panelW - barT * 0.8);
+      ey += eh + gap;
+    }
+
+    // ── Interior region ──
+    const cTop = topY + elbowH + gap;
+    const cBot = bottomY - elbowH - gap;
+    const cLeft = inX;
+    const cW = rightX - cLeft;
+    const regH = cBot - cTop;
+
+    if (lowPower) {
+      this._drawReadout(ctx, cLeft, cTop, cW, regH, s, pal, barT);
+      return;
+    }
+
+    if (reconfig) {
+      const edge = cLeft + cW * transP;
+      ctx.save();
+      // Outgoing program on the right of the sweep
+      ctx.beginPath(); ctx.rect(edge, cTop - barT, rightX + barT - edge, cBot + barT - (cTop - barT)); ctx.clip();
+      const prevInterior = this._layoutFor(prevName, pal, s).interior;
+      this._drawInterior(ctx, prevInterior, cLeft, cTop, cW, regH, s, pal, barT, dt, t);
+      ctx.restore();
+      ctx.save();
+      // Incoming program on the left
+      ctx.beginPath(); ctx.rect(cLeft - barT, cTop - barT, edge - (cLeft - barT), cBot + barT - (cTop - barT)); ctx.clip();
+      this._drawInterior(ctx, layout.interior, cLeft, cTop, cW, regH, s, pal, barT, dt, t);
+      ctx.restore();
+      // Sweep bar at reveal edge
+      this._drawSweep(ctx, edge, topY, bottomY - topY, barT, pal);
+    } else {
+      this._drawInterior(ctx, layout.interior, cLeft, cTop, cW, regH, s, pal, barT, dt, t);
+    }
+
+    // Update time reference
+    if (this._t0 !== null) this._t0 = t;
+    else this._t0 = t;
+  },
+};
+
+
+const PACKS = [NeonRing, MatrixRain, CyberHud, BioluminescentDreamscape, Lcars];
 
 
 // bench.js — wires the control rail to a live VizState and renders all three
