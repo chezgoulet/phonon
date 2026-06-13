@@ -2198,7 +2198,6 @@ const Lcars = {
     ctx.font = (bold ? 'bold ' : '') + fs + 'px -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif';
     ctx.fillStyle = color;
     ctx.textBaseline = middle ? 'middle' : 'bottom';
-    ctx.letterSpacing = (fs * 0.04) + 'px';
     // Shrink to fit
     let m;
     let guard = 0;
@@ -2534,11 +2533,9 @@ const Lcars = {
   // ════════════════════════════════════════════════════════════════
   //  MAIN RENDER
   // ════════════════════════════════════════════════════════════════
-  render: function(ctx, sw, sh, s, dtSec) {
-    const t = this._t0 === null ? 0 : (this._t0 + dtSec);
-    if (this._t0 === null) this._t0 = 0;
-    const dt = dtSec;
-    const w = sw, h = sh;
+  render: function(ctx, W, H, s, t, dt) {
+    dt = Math.min(dt, 0.05);
+    const w = W, h = H;
     const cfg = s.themeConfig || this.defaultConfig;
     const bg = this._hex(cfg.bg_color || "#000000");
 
@@ -2707,9 +2704,7 @@ const Lcars = {
       this._drawInterior(ctx, layout.interior, cLeft, cTop, cW, regH, s, pal, barT, dt, t);
     }
 
-    // Update time reference
-    if (this._t0 !== null) this._t0 = t;
-    else this._t0 = t;
+
   },
 };
 
