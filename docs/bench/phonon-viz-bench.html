@@ -1514,7 +1514,8 @@ const BioluminescentDreamscape = {
  for (let ri = 0; ri < 3; ri++) {
  const rr = rad + ri * W * 0.015;
  const ra = alpha * (1 - ri * 0.3);
- const g = ctx.createRadialGradient(p.x, p.y, rr - W * 0.025, p.x, p.y, rr + W * 0.025);
+ const r0 = Math.max(0, rr - W * 0.025);
+ const g = ctx.createRadialGradient(p.x, p.y, r0, p.x, p.y, rr + W * 0.025);
  g.addColorStop(0, rgba(col, 0));
  g.addColorStop(0.4, rgba(col, ra));
  g.addColorStop(0.6, rgba(col, ra));
@@ -1527,7 +1528,8 @@ const BioluminescentDreamscape = {
  const mAge = (age - 0.4) / 0.5;
  const mRad = rad + W * 0.04;
  const mAlpha = (1 - mAge) * 0.08 * p.hot * glowMod;
- const mg = ctx.createRadialGradient(p.x, p.y, mRad - W * 0.008, p.x, p.y, mRad + W * 0.008);
+ const mr0 = Math.max(0, mRad - W * 0.008);
+ const mg = ctx.createRadialGradient(p.x, p.y, mr0, p.x, p.y, mRad + W * 0.008);
  mg.addColorStop(0, rgba(col, 0));
  mg.addColorStop(0.3, rgba(col, mAlpha));
  mg.addColorStop(0.7, rgba(col, mAlpha));
@@ -1540,7 +1542,7 @@ const BioluminescentDreamscape = {
  if (s.queueDepth > 10) {
  const qbAlpha = clamp(s.queueDepth / 20, 0, 1) * 0.08 * glowMod;
  const qbRad = W * 0.22;
- const qg = ctx.createRadialGradient(cx, cy, qbRad - W * 0.02, cx, cy, qbRad + W * 0.02);
+ const qg = ctx.createRadialGradient(cx, cy, Math.max(0, qbRad - W * 0.02), cx, cy, qbRad + W * 0.02);
  qg.addColorStop(0, rgba(pal.accent, 0));
  qg.addColorStop(0.3, rgba(pal.accent, qbAlpha));
  qg.addColorStop(0.7, rgba(pal.accent, qbAlpha));
