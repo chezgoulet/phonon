@@ -185,6 +185,7 @@ object BioluminescentPack : VisualizationPack {
             val k = 1f - 0.001f.pow(dt.coerceAtMost(0.05f))
             energy += (target - energy) * k
             val e = energy
+            val panic = if (state.batteryTemperature > 38f) ((state.batteryTemperature - 38f) / 10f).coerceIn(0f, 1f) else 0f
 
             val pal = palette(e, state.isHealthy, state.isCharging, state.batteryLevel, state.batteryTemperature)
 
@@ -277,12 +278,12 @@ object BioluminescentPack : VisualizationPack {
 
                         // ═══ LAYER 2: FREE-SWIMMERS — trail-based slithering ═══
             val MAX_TRAIL = 120
-            val maxSwimmers = if (lowPower) 2 else (3 + (e * 5f).roundToInt()).coerceIn(3, 8)
+            val maxSwimmers = if (lowPower) 2 else (3 + (e * 8f).roundToInt()).coerceIn(3, 11)
             if (swimmers == null) {
                 val rng = Random(88); val pool = mutableListOf<SwimmerSeed>()
-                for (i in 0 until 8) {
+                for (i in 0 until 14) {
                     val sx = rng.nextFloat() * w; val sy = rng.nextFloat() * h; val sa = rng.nextFloat() * 6.28f
-                    val sSpeed = 0.15f + rng.nextFloat() * 0.25f; val sBodyLen = 50f + rng.nextFloat() * 20f
+                    val sSpeed = 0.2f + rng.nextFloat() * 0.3f; val sBodyLen = 50f + rng.nextFloat() * 20f
                     val tr = mutableListOf<Offset>()
                     for (j in 0 until MAX_TRAIL) {
                         tr.add(Offset(
@@ -294,7 +295,7 @@ object BioluminescentPack : VisualizationPack {
                     pool.add(SwimmerSeed(
                         x = sx, y = sy, angle = sa,
                         phase = rng.nextFloat() * 6.28f, driftPhase = rng.nextFloat() * 6.28f,
-                        size = 0.7f + rng.nextFloat() * 0.6f, speed = sSpeed, swimFreq = 2f + rng.nextFloat() * 3f,
+                        size = 0.7f + rng.nextFloat() * 0.6f, speed = sSpeed, swimFreq = 3f + rng.nextFloat() * 3f,
                         bodyLen = sBodyLen, hueOff = hueOff,
                         colorIdx = (hueOff * 6f).toInt().coerceIn(0, 5),
                         targetX = rng.nextFloat() * w, targetY = rng.nextFloat() * h,
@@ -336,6 +337,7 @@ object BioluminescentPack : VisualizationPack {
                 val tdx = cr.targetX - cr.x; val tdy = cr.targetY - cr.y
                 val tDist = hypot(tdx, tdy)
                 cr.turnTimer -= dt
+                if (panic > 0f) cr.turnTimer -= panic * dt * 2f
                 if (cr.turnTimer <= 0f || tDist < 40f) {
                     cr.targetX = cx + (Random.nextFloat() * 2f - 1f) * w * 0.38f
                     cr.targetY = cy + (Random.nextFloat() * 2f - 1f) * h * 0.38f
@@ -345,9 +347,10 @@ object BioluminescentPack : VisualizationPack {
                 var angleDiff = tAngle - cr.angle
                 while (angleDiff > 3.14159f) angleDiff -= 6.28318f
                 while (angleDiff < -3.14159f) angleDiff += 6.28318f
-                val turnRate = (1.8f + e * 2f) * dt
+                val turnRate = (1.8f + e * 2f + panic * 3f) * dt
                 cr.angle += angleDiff.coerceIn(-turnRate, turnRate)
-                val speedMul = if (lowPower) 0.4f else lerp(0.6f, 1.8f, e)
+                if (panic > 0f && Random.nextFloat() < 0.02f) cr.angle += (Random.nextFloat() - 0.5f) * panic * 0.5f
+                val speedMul = if (lowPower) 0.4f else lerp(0.6f, 3.0f, e) * (1f + panic * Random.nextFloat() * 0.3f)
                 cr.x += cos(cr.angle) * cr.speed * speedMul * dt * 60f
                 cr.y += sin(cr.angle) * cr.speed * speedMul * dt * 60f
                 cr.driftPhase += dt * 0.3f
@@ -457,7 +460,8 @@ object BioluminescentPack : VisualizationPack {
                     }
                     lineTo(pts.last().x, pts.last().y)
                 }
-                val bodyAlpha = fade * lerp(0.5f, 0.9f, e) * (0.6f + 0.4f * (1f - e * state.inferenceLoad))
+                val panicFlicker = if (panic > 0f) (0.7f + 0.3f * sin(t * 12f + i * 3f)) else 1f
+                val bodyAlpha = fade * lerp(0.5f, 0.9f, e) * (0.6f + 0.4f * (1f - e * state.inferenceLoad)) * panicFlicker
                 val activity = if (state.isProcessing) (1f + e * 0.5f) else 1f
                 drawPath(bodyPath, vividCol.copy(alpha = bodyAlpha * 0.1f),
                     style = Stroke(width = cr.size * 10f * activity, cap = StrokeCap.Round, join = StrokeJoin.Round))
