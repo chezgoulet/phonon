@@ -1353,8 +1353,7 @@ const BioluminescentDreamscape = {
 
  _energy: 0,
  _shimmers: [],
- _blooms: [],
- _lastShimmer: 0,
+_lastShimmer: 0,
  _lastCascade: 0,
  _plankton: null,
  _swimmers: null,
@@ -1371,9 +1370,192 @@ const BioluminescentDreamscape = {
   [{r:0xFF,g:0x70,b:0xC0}, {r:0xFF,g:0xA0,b:0xD8}],  // pink
  ],
 
+ _BODY_PARTS: (function() {
+  const p = [];
+  function leg(v, segs, len, amp, cyc, w) {
+   return {
+    type:'leg',var:v,
+    render(ctx, pts, side, par, t, cr, pal, hc) {
+     const attach = [2,4,6,8];
+     ctx.save(); ctx.lineCap = 'round';
+     for (let ai = 0; ai < attach.length; ai++) {
+      const ai2 = attach[ai];
+      if (ai2 >= pts.length) continue;
+      const pt = pts[ai2];
+      const dirN = Math.min(ai2+1, pts.length-1);
+      const dirP = Math.max(0, ai2-1);
+      const dx = pts[dirN].x - pts[dirP].x;
+      const dy = pts[dirN].y - pts[dirP].y;
+      const dl = Math.hypot(dx,dy)||0.001;
+      const px = -dy / dl, py = dx / dl;
+      const cycle = Math.sin(t * par.speed * cyc + ai + par.phase);
+      let cx = pt.x + px * side * 2, cy2 = pt.y + py * side * 2;
+      ctx.strokeStyle = rgba(hc, 0.7);
+      ctx.lineWidth = w;
+      for (let s = 0; s < segs; s++) {
+       const f = (s + 1) / segs;
+       const ang = cycle * amp * (1 - f * 0.5);
+       const nx = cx + Math.cos(ang + (side > 0 ? 0 : Math.PI)) * len / segs;
+       const ny = cy2 + Math.sin(ang + (side > 0 ? 0 : Math.PI)) * len / segs;
+       ctx.beginPath(); ctx.moveTo(cx, cy2); ctx.lineTo(nx, ny); ctx.stroke();
+       cx = nx; cy2 = ny;
+      }
+     }
+     ctx.restore();
+    }
+   };
+  }
+  function flagella(v, len, amp, w) {
+   return {
+    type:'flagella',var:v,
+    render(ctx, pts, side, par, t, cr, pal, hc) {
+     if (pts.length < 3) return;
+     const tail = pts[pts.length-1];
+     const t2 = pts[Math.max(0,pts.length-3)];
+     const dx = tail.x - t2.x, dy = tail.y - t2.y;
+     const dl = Math.hypot(dx,dy)||0.001;
+     const px = -dy / dl, py = dx / dl;
+     const segs = 10;
+     ctx.save();
+     ctx.lineCap = 'round'; ctx.strokeStyle = rgba(pal.accent, 0.4);
+     ctx.lineWidth = w; ctx.beginPath();
+     ctx.moveTo(tail.x, tail.y);
+     for (let i = 1; i <= segs; i++) {
+      const f = i / segs;
+      const wave = Math.sin(t * par.speed * 2 - i * 0.8 + par.phase) * amp * f;
+      const ex = tail.x + dx * f - px * wave * f;
+      const ey = tail.y + dy * f - py * wave * f;
+      ctx.lineTo(ex, ey);
+     }
+     ctx.stroke(); ctx.restore();
+    }
+   };
+  }
+  function pili(v, cnt, height, amp, w) {
+   return {
+    type:'pili',var:v,
+    render(ctx, pts, side, par, t, cr, pal, hc) {
+     ctx.save(); ctx.lineCap = 'round';
+     const step = Math.max(1, Math.floor((pts.length - 2) / cnt));
+     for (let i = 1; i < pts.length - 1; i += step) {
+      const pt = pts[i];
+      const pn = Math.min(i+1, pts.length-1);
+      const pp = Math.max(0, i-1);
+      const dx = pts[pn].x - pts[pp].x;
+      const dy = pts[pn].y - pts[pp].y;
+      const dl = Math.hypot(dx,dy)||0.001;
+      const px = -dy / dl, py = dx / dl;
+      const wave = Math.sin(t * par.speed * 2 + i * 0.5 + par.phase) * amp;
+      const h = height + wave;
+      ctx.strokeStyle = rgba(hc, 0.2 + 0.08 * Math.sin(t + i));
+      ctx.lineWidth = w;
+      ctx.beginPath(); ctx.moveTo(pt.x, pt.y);
+      ctx.lineTo(pt.x + px * side * h, pt.y + py * side * h);
+      ctx.stroke();
+     }
+     ctx.restore();
+    }
+   };
+  }
+  function mandible(v, len, w) {
+   return {
+    type:'mandible',var:v,
+    render(ctx, pts, side, par, t, cr, pal, hc) {
+     if (pts.length < 3) return;
+     const attach = side > 0 ? 1 : 1;
+     const pt = pts[attach];
+     const head = pts[0];
+     const dx = head.x - pt.x, dy = head.y - pt.y;
+     const dl = Math.hypot(dx,dy)||0.001;
+     const px = -dy / dl, py = dx / dl;
+     const open = Math.sin(t * par.speed * 4 + par.phase) * 0.4 + 0.3;
+     ctx.save(); ctx.lineCap = 'round';
+     ctx.strokeStyle = rgba(hc, 0.8);
+     ctx.lineWidth = w;
+     // Outer curve
+     const mx = pt.x + px * side * len * 0.5;
+     const my = pt.y + py * side * len * 0.5;
+     const tipX = pt.x + px * side * len * open + head.x * 0.3;
+     const tipY = pt.y + py * side * len * open + head.y * 0.3;
+     ctx.beginPath(); ctx.moveTo(pt.x, pt.y);
+     ctx.quadraticCurveTo(mx, my, tipX, tipY);
+     ctx.stroke();
+     // Inner curve
+     const ix = pt.x + px * side * len * 0.3;
+     const iy = pt.y + py * side * len * 0.3;
+     ctx.strokeStyle = rgba(pal.accent, 0.5);
+     ctx.lineWidth = w * 0.5;
+     ctx.beginPath(); ctx.moveTo(pt.x, pt.y);
+     ctx.quadraticCurveTo(ix, iy, tipX * 0.8 + pt.x * 0.2, tipY * 0.8 + pt.y * 0.2);
+     ctx.stroke();
+     ctx.restore();
+    }
+   };
+  }
+  function antenna(v, len, amp, w) {
+   return {
+    type:'antenna',var:v,
+    render(ctx, pts, side, par, t, cr, pal, hc) {
+     if (pts.length < 2) return;
+     const head = pts[0];
+     const p2 = pts[Math.min(1, pts.length-1)];
+     const dx = head.x - p2.x, dy = head.y - p2.y;
+     const dl = Math.hypot(dx,dy)||0.001;
+     const px = -dy / dl, py = dx / dl;
+     const sweep = Math.sin(t * par.speed * 2 + par.phase) * amp;
+     ctx.save(); ctx.lineCap = 'round';
+     ctx.strokeStyle = rgba(lerpRgb(hc, pal.accent, 0.3), 0.7);
+     ctx.lineWidth = w; ctx.beginPath();
+     ctx.moveTo(head.x, head.y);
+     const segs = 8;
+     for (let i = 1; i <= segs; i++) {
+      const f = i / segs;
+      const angle = sweep + f * 0.8 * side;
+      const x = head.x + Math.cos(angle + Math.PI * 0.5) * f * len;
+      const y = head.y + Math.sin(angle + Math.PI * 0.5) * f * len;
+      ctx.lineTo(x, y);
+     }
+     ctx.stroke(); ctx.restore();
+    }
+   };
+  }
+  // 10 legs (var 0-9): segs 3-5, len 6-24, amp 0.3-1.2, cyc 2.5-4.0, w 0.8-1.5
+  for (let v = 0; v < 10; v++) p.push(leg(v, 3 + Math.floor(v/4), 6 + v * 2, 0.3 + v * 0.1, 2.5 + v * 0.15, 0.8 + v * 0.07));
+  // 10 flagella (var 0-9): len 25-70, amp 8-25, w 0.5-1.8
+  for (let v = 0; v < 10; v++) p.push(flagella(v, 25 + v * 5, 8 + v * 2, 0.5 + v * 0.13));
+  // 10 pili (var 0-9): count 4-8, height 3-10, amp 1-4, w 0.3-0.8
+  for (let v = 0; v < 10; v++) p.push(pili(v, 4 + Math.floor(v/3), 3 + v * 0.7, 1 + v * 0.3, 0.3 + v * 0.05));
+  // 10 mandibles (var 0-9): len 8-22, w 0.8-2
+  for (let v = 0; v < 10; v++) p.push(mandible(v, 8 + v * 1.4, 0.8 + v * 0.12));
+  // 10 antennae (var 0-9): len 12-40, amp 0.2-1.0, w 0.5-1.5
+  for (let v = 0; v < 10; v++) p.push(antenna(v, 12 + v * 3, 0.2 + v * 0.08, 0.5 + v * 0.1));
+  return p;
+ })(),
+
+ _assignParts(rng) {
+  const pool = this._BODY_PARTS;
+  const count = 2 + Math.floor(rng() * 4);
+  const used = new Set();
+  const parts = [];
+  for (let i = 0; i < count; i++) {
+   let tries = 0, defIdx;
+   do {
+    defIdx = Math.floor(rng() * pool.length);
+    tries++;
+   } while (tries < 10 && used.has(pool[defIdx].type) && rng() < 0.5);
+   used.add(pool[defIdx].type);
+   parts.push({
+    defIdx,
+    side: rng() < 0.5 ? -1 : 1,
+    speed: 0.8 + rng() * 0.4,
+    phase: rng() * Math.PI * 2,
+   });
+  }
+  return parts;
+ },
+
  reset() {
-  this._energy = 0; this._shimmers = []; this._blooms = [];
-  this._lastShimmer = 0; this._lastCascade = 0;
+  this._energy = 0; this._shimmers = [];this._lastShimmer = 0; this._lastCascade = 0;
   this._plankton = null; this._swimmers = null;
   this._caustics = null; this._depthDust = null;
  },
@@ -1481,12 +1663,14 @@ const BioluminescentDreamscape = {
      });
     }
     const hueOff = rng();
+    const swimParts = this._assignParts(rng);
     this._swimmers.push({
      x: sx, y: sy, angle: sa, phase: rng() * 6.28, driftPhase: rng() * 6.28,
      size: 0.7 + rng() * 0.6, speed: sSpeed, swimFreq: 3 + rng() * 3,
      bodyLen: sBodyLen, hueOff: hueOff, colorIdx: Math.min(Math.floor(hueOff * 6), 5),
      targetX: rng() * W, targetY: rng() * H, turnTimer: 2 + rng() * 4,
      trail: trail, active: true, age: 0, lifeSpan: 15 + rng() * 15, fadeAlpha: 1,
+     parts: swimParts,
     });
    }
   }
@@ -1509,6 +1693,7 @@ const BioluminescentDreamscape = {
     cr.targetX = rng2() * W; cr.targetY = rng2() * H;
     cr.age = 0; cr.lifeSpan = 15 + rng2() * 15; cr.fadeAlpha = 0;
     cr.hueOff = rng2(); cr.colorIdx = Math.min(Math.floor(cr.hueOff * 6), 5);
+     cr.parts = this._assignParts(rng2);
     for (let j = 0; j < MAX_TRAIL; j++) {
      cr.trail[j] = {
       x: cr.x - Math.cos(cr.angle) * j * (cr.speed * 60 / MAX_TRAIL),
@@ -1659,6 +1844,16 @@ const BioluminescentDreamscape = {
    ctx.save(); ctx.strokeStyle = rgba(lerpRgb(heatShift, {r:0xFF,g:0xFF,b:0xFF}, 0.25), bodyAlpha * 0.85);
    ctx.lineWidth = Math.max(1.2, cr.size * 2.2 * activity); ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.stroke(); ctx.restore();
 
+   
+   // ── Body parts (legs, flagella, pili, mandibles, antennae) ──
+   if (cr.parts) {
+    for (let pi = 0; pi < cr.parts.length; pi++) {
+     const pDef = cr.parts[pi];
+     const def = this._BODY_PARTS[pDef.defIdx];
+     if (def) def.render(ctx, pts, pDef.side, pDef, t, cr, pal, heatShift);
+    }
+   }
+
    // Head glow
    const headSz = 3.5 * cr.size * activity;
    const headGrad = ctx.createRadialGradient(pts[0].x, pts[0].y, 0, pts[0].x, pts[0].y, headSz * 4);
@@ -1769,35 +1964,6 @@ const BioluminescentDreamscape = {
     qbGrad.addColorStop(1, 'rgba(0,0,0,0)');
     ctx.fillStyle = qbGrad; ctx.beginPath(); ctx.arc(cx, cy, rMax * 0.35, 0, Math.PI * 2); ctx.fill();
    }
-  }
-
-  // ═══ LAYER 5: CORE BLOOM ═══
-  if (e > 0.6 && s.isProcessing && !lowPower) {
-   if (this._blooms.length === 0 || t - this._blooms[this._blooms.length - 1].born > 0.8) {
-    this._blooms.push({born: t});
-   }
-  }
-  while (this._blooms.length && t - this._blooms[0].born >= 0.8) this._blooms.shift();
-  for (const bl of this._blooms) {
-   const age = (t - bl.born) / 0.6;
-   if (age > 1) continue;
-   const br = W * 0.08 + W * 0.22 * age;
-   const bGrad = ctx.createRadialGradient(cx, cy, 0, cx, cy, br);
-   bGrad.addColorStop(0, toRgba(lerpRgb(pal.accent, {r:0xFF,g:0xFF,b:0xFF}, 0.6), (1 - age) * 0.3));
-   bGrad.addColorStop(0.6, toRgba(pal.accent, (1 - age) * 0.08));
-   bGrad.addColorStop(1, 'rgba(0,0,0,0)');
-   ctx.fillStyle = bGrad; ctx.beginPath(); ctx.arc(cx, cy, br, 0, Math.PI * 2); ctx.fill();
-   for (let ri = 0; ri < 10; ri++) {
-    const ra = (ri / 10) * Math.PI * 2 + Math.sin(bl.born * 3 + ri * 0.7) * 0.3;
-    ctx.beginPath();
-    ctx.moveTo(cx + Math.cos(ra) * W * 0.01, cy + Math.sin(ra) * H * 0.01);
-    ctx.lineTo(cx + Math.cos(ra) * br * (0.5 + 0.5 * Math.sin(t * 3 + ri)),
-     cy + Math.sin(ra) * br * (0.5 + 0.5 * Math.sin(t * 3 + ri)));
-    ctx.strokeStyle = rgba(pal.accent, (1 - age) * 0.06);
-    ctx.lineWidth = 0.6; ctx.stroke();
-   }
-   ctx.fillStyle = rgba({r:0xFF,g:0xFF,b:0xFF}, (1 - age) * 0.6);
-   ctx.beginPath(); ctx.arc(cx, cy, lerp(4, br * 0.2, age), 0, Math.PI * 2); ctx.fill();
   }
 
   // ═══ LAYER 6: OVERLAYS ═══
