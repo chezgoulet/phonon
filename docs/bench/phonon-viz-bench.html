@@ -1387,6 +1387,1550 @@ _lastShimmer: 0,
       const dx = pts[dirN].x - pts[dirP].x;
       const dy = pts[dirN].y - pts[dirP].y;
       const dl = Math.hypot(dx,dy)||0.001;
+      // perpendicular direction, scaled by side
+      const spx = (-dy / dl) * side;
+      const spy = (dx / dl) * side;
+      const cycle = Math.sin(t * par.speed * cyc + ai + par.phase);
+      let cx = pt.x + spx * 2;
+      let cy2 = pt.y + spy * 2;
+      ctx.strokeStyle = rgba(hc, 0.7);
+      ctx.lineWidth = w;
+      for (let s = 0; s < segs; s++) {
+       const f = (s + 1) / segs;
+       const ang = cycle * amp * (1 - f * 0.5);
+       // rotate the perp direction by ang for natural bend
+       const dirX = spx * Math.cos(ang) - spy * Math.sin(ang);
+       const dirY = spx * Math.sin(ang) + spy * Math.cos(ang);
+       ctx.beginPath(); ctx.moveTo(cx, cy2);
+       ctx.lineTo(cx + dirX * len / segs, cy2 + dirY * len / segs);
+       ctx.stroke();
+       cx += dirX * len / segs;
+       cy2 += dirY * len / segs;
+      }
+     }
+     ctx.restore();
+    }
+   };
+  }
+  function flagella(v, len, amp, w) {
+   return {
+    type:'flagella',var:v,
+    render(ctx, pts, side, par, t, cr, pal, hc) {
+     if (pts.length < 3) return;
+     const tail = pts[pts.length-1];
+     const t2 = pts[Math.max(0,pts.length-3)];
+     const dx = tail.x - t2.x, dy = tail.y - t2.y;
+     const dl = Math.hypot(dx,dy)||0.001;
+     const ndx = dx / dl, ndy = dy / dl; // normalized body direction at tail
+     const px = -ndy, py = ndx;          // perpendicular (for wave offset)
+     const segs = 12;
+     ctx.save();
+     ctx.lineCap = 'round'; ctx.strokeStyle = rgba(pal.accent, 0.4 + 0.2 * Math.sin(t * 2 + par.phase));
+     ctx.lineWidth = w; ctx.beginPath();
+     ctx.moveTo(tail.x, tail.y);
+     for (let i = 1; i <= segs; i++) {
+      const f = i / segs;
+      const wave = Math.sin(t * par.speed * 2.5 - i * 0.7 + par.phase) * amp * f * f;
+      const ex = tail.x + ndx * len * f - px * wave;
+      const ey = tail.y + ndy * len * f - py * wave;
+      ctx.lineTo(ex, ey);
+     }
+     ctx.stroke(); ctx.restore();
+    }
+   };
+  }
+  function pili(v, cnt, height, amp, w) {
+   return {
+    type:'pili',var:v,
+    render(ctx, pts, side, par, t, cr, pal, hc) {
+     ctx.save(); ctx.lineCap = 'round'; ctx.strokeStyle = rgba(hc, 0.25);
+     ctx.lineWidth = w;
+     const step = Math.max(1, Math.floor((pts.length - 2) / cnt));
+     for (let i = 1; i < pts.length - 1; i += step) {
+      const pt = pts[i];
+      const pn = Math.min(i+1, pts.length-1);
+      const pp = Math.max(0, i-1);
+      const dx = pts[pn].x - pts[pp].x;
+      const dy = pts[pn].y - pts[pp].y;
+      const dl = Math.hypot(dx,dy)||0.001;
+      const spx = (-dy / dl) * side;
+      const spy = (dx / dl) * side;
+      const wave = Math.sin(t * par.speed * 2 + i * 0.5 + par.phase) * amp;
+      const h = height + wave;
+      // draw as tiny arc for organic look instead of straight line
+      const midX = pt.x + spx * h * 0.5;
+      const midY = pt.y + spy * h * 0.5;
+      ctx.beginPath(); ctx.moveTo(pt.x, pt.y);
+      ctx.quadraticCurveTo(midX + spx * 1.5, midY + spy * 1.5, pt.x + spx * h, pt.y + spy * h);
+      ctx.stroke();
+     }
+     ctx.restore();
+    }
+   };
+  }
+  function mandible(v, len, w) {
+   return {
+    type:'mandible',var:v,
+    render(ctx, pts, side, par, t, cr, pal, hc) {
+     if (pts.length < 3) return;
+     const pt = pts[1];
+     const head = pts[0];
+     const hdx = head.x - pt.x, hdy = head.y - pt.y;
+     const hdl = Math.hypot(hdx,hdy)||0.001;
+     const fdx = hdx / hdl; // forward direction (head to pt1)
+     const fdy = hdy / hdl;
+     const px = -fdy, py = fdx;  // perpendicular
+     const open = Math.sin(t * par.speed * 4 + par.phase) * 0.4 + 0.3;
+     ctx.save(); ctx.lineCap = 'round';
+     // Outer claw
+     const mx = pt.x + px * side * len * 0.6;
+     const my = pt.y + py * side * len * 0.6;
+     const tipX = pt.x + px * side * len * open + fdx * len * 0.3;
+     const tipY = pt.y + py * side * len * open + fdy * len * 0.3;
+     ctx.strokeStyle = rgba(hc, 0.8);
+     ctx.lineWidth = w;
+     ctx.beginPath(); ctx.moveTo(pt.x, pt.y);
+     ctx.quadraticCurveTo(mx, my, tipX, tipY);
+     ctx.stroke();
+     // Inner claw
+     const ix = pt.x + px * side * len * 0.2 + fdx * len * 0.2;
+     const iy = pt.y + py * side * len * 0.2 + fdy * len * 0.2;
+     ctx.strokeStyle = rgba(pal.accent, 0.55);
+     ctx.lineWidth = w * 0.5;
+     ctx.beginPath(); ctx.moveTo(pt.x + fdx * 2, pt.y + fdy * 2);
+     ctx.quadraticCurveTo(ix, iy, tipX * 0.7 + pt.x * 0.3 + fdx * 2, tipY * 0.7 + pt.y * 0.3 + fdy * 2);
+     ctx.stroke();
+     ctx.restore();
+    }
+   };
+  }
+  function antenna(v, len, amp, w) {
+   return {
+    type:'antenna',var:v,
+    render(ctx, pts, side, par, t, cr, pal, hc) {
+     if (pts.length < 2) return;
+     const head = pts[0];
+     const p2 = pts[Math.min(1, pts.length-1)];
+     const hdx = head.x - p2.x, hdy = head.y - p2.y;
+     const hdl = Math.hypot(hdx,hdy)||0.001;
+     const baseAngle = Math.atan2(hdy, hdl); // direction the head is moving
+     const sweep = Math.sin(t * par.speed * 2 + par.phase) * amp;
+     ctx.save(); ctx.lineCap = 'round';
+     ctx.strokeStyle = rgba(lerpRgb(hc, pal.accent, 0.3), 0.7);
+     ctx.lineWidth = w; ctx.beginPath();
+     ctx.moveTo(head.x, head.y);
+     const segs = 8;
+     for (let i = 1; i <= segs; i++) {
+      const f = i / segs;
+      const angle = baseAngle + sweep + f * 0.8 * side;
+      const x = head.x + Math.cos(angle) * f * len;
+      const y = head.y + Math.sin(angle) * f * len;
+      ctx.lineTo(x, y);
+     }
+     ctx.stroke(); ctx.restore();
+    }
+   };
+  }
+  // 10 legs: segs 3-5, len 10-28, amp 0.4-1.3, cyc 2.5-4.0, w 0.8-1.5
+  for (let v = 0; v < 10; v++) p.push(leg(v, 3 + Math.floor(v/4), 10 + v * 2, 0.4 + v * 0.1, 2.5 + v * 0.15, 0.8 + v * 0.07));
+  // 10 flagella: len 30-75, amp 10-30, w 0.5-1.8
+  for (let v = 0; v < 10; v++) p.push(flagella(v, 30 + v * 5, 10 + v * 2, 0.5 + v * 0.14));
+  // 10 pili: cnt 4-8, height 4-12, amp 1-4, w 0.3-0.8
+  for (let v = 0; v < 10; v++) p.push(pili(v, 4 + Math.floor(v/3), 4 + v * 0.8, 1 + v * 0.3, 0.3 + v * 0.05));
+  // 10 mandibles: len 10-24, w 0.8-2
+  for (let v = 0; v < 10; v++) p.push(mandible(v, 10 + v * 1.4, 0.8 + v * 0.12));
+  // 10 antennae: len 15-42, amp 0.3-1.2, w 0.5-1.5
+  for (let v = 0; v < 10; v++) p.push(antenna(v, 15 + v * 3, 0.3 + v * 0.1, 0.5 + v * 0.1));
+  return p;
+ })()<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Phonon · Visualization Pack Bench</title>
+<style>
+  :root {
+    --bench: #0b0d10;
+    --bench-2: #111418;
+    --panel: #14181d;
+    --line: #232a31;
+    --line-soft: #1a2026;
+    --ink: #e7edf3;
+    --ink-dim: #8b97a3;
+    --ink-faint: #58626c;
+    --accent: #f4b740;     /* sodium-lamp amber — the bench's one warm signal */
+    --accent-cool: #5cc8ff;
+    --ok: #22c55e;
+    --warn: #eab308;
+    --bad: #ef4444;
+    --mono: "SFMono-Regular", "JetBrains Mono", ui-monospace, "Cascadia Code", Menlo, Consolas, monospace;
+    --sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    background:
+      radial-gradient(120% 80% at 50% -10%, #16191e 0%, var(--bench) 55%) fixed,
+      var(--bench);
+    color: var(--ink);
+    font-family: var(--sans);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ── Masthead ───────────────────────────────────────────── */
+  header.masthead {
+    padding: 22px 28px 18px;
+    border-bottom: 1px solid var(--line);
+    display: flex;
+    align-items: baseline;
+    gap: 18px;
+    flex-wrap: wrap;
+  }
+  .wordmark {
+    font-family: var(--mono);
+    font-weight: 600;
+    font-size: 15px;
+    letter-spacing: 0.32em;
+    text-transform: uppercase;
+    color: var(--ink);
+  }
+  .wordmark .dot { color: var(--accent); }
+  .tagline {
+    font-size: 12.5px;
+    color: var(--ink-dim);
+    letter-spacing: 0.01em;
+  }
+  .masthead .spec {
+    margin-left: auto;
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    color: var(--ink-faint);
+    text-transform: uppercase;
+  }
+
+  .layout {
+    display: grid;
+    grid-template-columns: 300px 1fr;
+    gap: 0;
+    min-height: calc(100vh - 62px);
+  }
+
+  /* ── Control rail ───────────────────────────────────────── */
+  aside.rail {
+    border-right: 1px solid var(--line);
+    padding: 20px 20px 40px;
+    background: linear-gradient(180deg, var(--bench-2), transparent 320px);
+    position: sticky;
+    top: 0;
+    align-self: start;
+    max-height: calc(100vh - 62px);
+    overflow-y: auto;
+  }
+  .rail h2 {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.24em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    margin: 0 0 14px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--line-soft);
+  }
+  .rail h2:not(:first-child) { margin-top: 30px; }
+
+  .ctl { margin-bottom: 16px; }
+  .ctl-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 6px;
+  }
+  .ctl label {
+    font-size: 12.5px;
+    color: var(--ink-dim);
+  }
+  .ctl .val {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--ink);
+    font-variant-numeric: tabular-nums;
+  }
+  input[type="range"] {
+    -webkit-appearance: none;
+    width: 100%;
+    height: 3px;
+    border-radius: 2px;
+    background: var(--line);
+    outline: none;
+  }
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 13px; height: 13px;
+    border-radius: 50%;
+    background: var(--accent);
+    cursor: pointer;
+    border: 2px solid var(--bench);
+    box-shadow: 0 0 0 1px var(--accent);
+  }
+  input[type="range"]::-moz-range-thumb {
+    width: 13px; height: 13px; border-radius: 50%;
+    background: var(--accent); cursor: pointer; border: 2px solid var(--bench);
+  }
+
+  .toggle {
+    display: flex; align-items: center; gap: 10px;
+    cursor: pointer; user-select: none;
+    margin-bottom: 11px;
+  }
+  .toggle .sw {
+    width: 34px; height: 19px; border-radius: 11px;
+    background: var(--line); position: relative;
+    transition: background 0.18s ease; flex: none;
+  }
+  .toggle .sw::after {
+    content: ""; position: absolute; top: 2px; left: 2px;
+    width: 15px; height: 15px; border-radius: 50%;
+    background: var(--ink-dim); transition: transform 0.18s ease, background 0.18s ease;
+  }
+  .toggle.on .sw { background: color-mix(in srgb, var(--accent) 35%, transparent); }
+  .toggle.on .sw::after { transform: translateX(15px); background: var(--accent); }
+  .toggle span.lbl { font-size: 12.5px; color: var(--ink-dim); }
+  .toggle.on span.lbl { color: var(--ink); }
+
+  .seg {
+    display: flex; gap: 4px; flex-wrap: wrap;
+  }
+  .seg button {
+    flex: 1; min-width: 60px;
+    font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 7px 4px; border-radius: 6px;
+    border: 1px solid var(--line);
+    background: transparent; color: var(--ink-dim);
+    cursor: pointer; transition: all 0.14s ease;
+  }
+  .seg button:hover { border-color: var(--ink-faint); color: var(--ink); }
+  .seg button.active {
+    background: color-mix(in srgb, var(--accent) 16%, transparent);
+    border-color: var(--accent); color: var(--accent);
+  }
+
+  .scenario {
+    width: 100%; text-align: left;
+    font-size: 12.5px; color: var(--ink-dim);
+    padding: 9px 11px; margin-bottom: 6px;
+    border: 1px solid var(--line); border-radius: 7px;
+    background: transparent; cursor: pointer; transition: all 0.14s ease;
+    display: flex; flex-direction: column; gap: 2px;
+  }
+  .scenario:hover { border-color: var(--ink-faint); color: var(--ink); background: var(--panel); }
+  .scenario b { color: var(--ink); font-weight: 600; font-size: 12.5px; }
+  .scenario small { color: var(--ink-faint); font-size: 11px; }
+
+  /* ── Bench (canvas grid) ────────────────────────────────── */
+  main.bench {
+    padding: 30px 34px 60px;
+    overflow: hidden;
+  }
+  .bench-head {
+    display: flex; align-items: baseline; gap: 14px;
+    margin-bottom: 26px;
+  }
+  .bench-head .lede {
+    font-size: 13px; color: var(--ink-dim); max-width: 640px; line-height: 1.5;
+  }
+
+  .decks {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 30px;
+    align-items: start;
+  }
+
+  .deck { display: flex; flex-direction: column; }
+  .deck-frame {
+    position: relative;
+    border-radius: 30px;
+    padding: 9px;
+    background: linear-gradient(155deg, #2a2f36, #15181c 60%);
+    box-shadow:
+      0 1px 0 rgba(255,255,255,0.05) inset,
+      0 26px 50px -24px rgba(0,0,0,0.9),
+      0 0 0 1px var(--line);
+  }
+  .deck-frame::before {
+    /* earpiece / camera notch hint */
+    content: "";
+    position: absolute; top: 17px; left: 50%; transform: translateX(-50%);
+    width: 46px; height: 4px; border-radius: 3px;
+    background: #0a0c0e; z-index: 3;
+  }
+  .screen {
+    position: relative;
+    border-radius: 23px;
+    overflow: hidden;
+    background: #000;
+    aspect-ratio: 9 / 19.5;
+  }
+  .screen canvas { display: block; width: 100%; height: 100%; }
+
+  .deck-meta {
+    display: flex; align-items: baseline; justify-content: space-between;
+    margin: 16px 4px 0;
+  }
+  .deck-name {
+    font-family: var(--mono); font-size: 13px; letter-spacing: 0.06em;
+    color: var(--ink);
+  }
+  .deck-id {
+    font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.1em;
+    color: var(--ink-faint); text-transform: uppercase;
+  }
+  .deck-desc {
+    margin: 6px 4px 0;
+    font-size: 12px; color: var(--ink-dim); line-height: 1.45;
+  }
+  .fps {
+    font-family: var(--mono); font-size: 10px; color: var(--ink-faint);
+    margin: 8px 4px 0; letter-spacing: 0.08em;
+  }
+
+  .note {
+    margin-top: 38px; padding: 16px 18px;
+    border: 1px solid var(--line-soft); border-left: 2px solid var(--accent);
+    border-radius: 0 8px 8px 0; background: var(--panel);
+    font-size: 12.5px; color: var(--ink-dim); line-height: 1.55; max-width: 760px;
+  }
+  .note b { color: var(--ink); }
+
+  @media (max-width: 880px) {
+    .layout { grid-template-columns: 1fr; }
+    aside.rail { position: static; max-height: none; border-right: none; border-bottom: 1px solid var(--line); }
+  }
+</style>
+</head>
+<body>
+  <header class="masthead">
+    <span class="wordmark">Phonon<span class="dot">.</span></span>
+    <span class="tagline">Visualization pack bench — live <code style="font-family:var(--mono);color:var(--accent-cool)">VizState</code> preview</span>
+    <span class="spec">4 packs · canvas parity build</span>
+  </header>
+
+  <div class="layout">
+    <aside class="rail">
+      <h2>Scenarios</h2>
+      <div id="scenarios"></div>
+
+      <h2>Inference</h2>
+      <div class="ctl">
+        <label class="toggle" data-bind="isProcessing"><span class="sw"></span><span class="lbl">Processing</span></label>
+      </div>
+      <div class="ctl">
+        <div class="ctl-row"><label>Inference load</label><span class="val" data-val="inferenceLoad">0.00</span></div>
+        <input type="range" min="0" max="100" data-range="inferenceLoad" value="0" />
+      </div>
+      <div class="ctl">
+        <div class="ctl-row"><label>Tokens / sec</label><span class="val" data-val="tokensPerSecond">0</span></div>
+        <input type="range" min="0" max="80" data-range="tokensPerSecond" value="0" />
+      </div>
+      <div class="ctl">
+        <div class="ctl-row"><label>Queue depth</label><span class="val" data-val="queueDepth">0</span></div>
+        <input type="range" min="0" max="20" data-range="queueDepth" value="0" />
+      </div>
+
+      <h2>Battery &amp; Thermal</h2>
+      <div class="ctl">
+        <div class="ctl-row"><label>Battery</label><span class="val" data-val="batteryLevel">82%</span></div>
+        <input type="range" min="0" max="100" data-range="batteryLevel" value="82" />
+      </div>
+      <div class="ctl">
+        <div class="ctl-row"><label>Temperature</label><span class="val" data-val="batteryTemperature">28.0°C</span></div>
+        <input type="range" min="15" max="55" data-range="batteryTemperature" value="28" />
+      </div>
+      <div class="ctl">
+        <label class="toggle" data-bind="isCharging"><span class="sw"></span><span class="lbl">Charging</span></label>
+      </div>
+
+      <h2>Cluster</h2>
+      <div class="ctl">
+        <div class="ctl-row"><label>Peer devices</label><span class="val" data-val="peerCount">3</span></div>
+        <input type="range" min="0" max="8" data-range="peerCount" value="3" />
+      </div>
+      <div class="ctl">
+        <label class="toggle on" data-bind="placed"><span class="sw"></span><span class="lbl">This device placed</span></label>
+        <label class="toggle" data-bind="showNumbers"><span class="sw"></span><span class="lbl">Show display number</span></label>
+      </div>
+      <div class="ctl">
+        <div class="ctl-row"><label>Coordinator mode</label></div>
+        <div class="seg" data-seg="coordinatorMode">
+          <button data-opt="pool">pool</button>
+          <button data-opt="standby">standby</button>
+          <button data-opt="inference">infer</button>
+          <button data-opt="update">update</button>
+        </div>
+      </div>
+
+      <h2>System</h2>
+      <div class="ctl">
+        <label class="toggle on" data-bind="isHealthy"><span class="sw"></span><span class="lbl">Healthy</span></label>
+        <label class="toggle" data-bind="forceLowPower"><span class="sw"></span><span class="lbl">Force low-power mode</span></label>
+      </div>
+    </aside>
+
+    <main class="bench">
+      <div class="bench-head">
+        <p class="lede">Four theme packs, each fed the same <code style="font-family:var(--mono);color:var(--accent-cool)">VizState</code> snapshot ~60&nbsp;fps. Drive the controls on the left to watch them react to inference, battery drain, heat, and cluster layout. Low-power mode engages automatically at ≤20% battery off charger.</p>
+      </div>
+      <div class="decks" id="decks"></div>
+
+      <div class="note">
+        <b>Parity build.</b> Every pack here mirrors the Kotlin <code style="font-family:var(--mono)">Render()</code> drawing logic one-to-one — same primitives, same state mapping, same low-power degradation — so anything tuned on this bench ports straight back to the sidecar APK.
+      </div>
+    </main>
+  </div>
+
+  <script>
+// packs.js — faithful Canvas-2D mirrors of the three Phonon visualization packs.
+// Each pack mirrors the Kotlin VisualizationPack.Render() logic 1:1 so visuals
+// tuned here port straight back to the sidecar APK. Time is in seconds.
+
+// ── shared helpers ──────────────────────────────────────────────
+function hexToRgb(hex) {
+  const s = hex.replace("#", "");
+  const n = parseInt(s, 16);
+  return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
+}
+function rgba({ r, g, b }, a) { return `rgba(${r},${g},${b},${a})`; }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+function lerpRgb(c1, c2, t) {
+  return { r: lerp(c1.r, c2.r, t), g: lerp(c1.g, c2.g, t), b: lerp(c1.b, c2.b, t) };
+}
+
+// Deterministic peer layout around the canvas (mirrors arrangement positions).
+function makePeers(count) {
+  const peers = [];
+  const rng = mulberry32(7);
+  for (let i = 0; i < count; i++) {
+    peers.push({
+      deviceId: "peer-" + i,
+      displayNumber: i + 2,
+      x: 0.12 + rng() * 0.76,
+      y: 0.12 + rng() * 0.76,
+      isProcessing: rng() > 0.55,
+    });
+  }
+  return peers;
+}
+function mulberry32(seed) {
+  let a = seed;
+  return function () {
+    a |= 0; a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// ════════════════════════════════════════════════════════════════
+//  NEON RING — flagship reactive scene. A living reactor core whose
+//  entire palette, motion, and animation vocabulary shift smoothly
+//  from a calm idle state to a turbulent high-inference state.
+//  State is read by EYE, not by text: cool & slow = idle, hot &
+//  squiggling & busy = heavy inference.
+// ════════════════════════════════════════════════════════════════
+const NeonRing = {
+  id: "neon-ring",
+  name: "Neon Ring",
+  description: "A living reactor core: palette, turbulence, orbital collisions and energy arcs all shift smoothly from calm idle to a roiling high-inference state. Reads at a glance, no text needed.",
+  glyphs: "01<>[]{}/\\=+*ABCDEF0123456789アカサタナ",
+
+  // persistent animation state
+  _energy: 0,          // smoothed 0..1 activity level
+  _pulses: [],         // expanding shockwaves {born, hot}
+  _lastEmit: 0,
+  _sparks: [],         // collision spark bursts {x,y,born,vx,vy,col}
+  _arcs: [],           // energy arcs jumping between orbit nodes {born, a0, r0, a1, r1}
+  _lastArc: 0,
+  _motes: null,        // idle drifting motes
+  _nodes: null,        // orbiting node phases for collision detection
+
+  reset() {
+    this._energy = 0; this._pulses = []; this._lastEmit = 0;
+    this._sparks = []; this._arcs = []; this._lastArc = 0;
+    this._motes = null; this._nodes = null;
+  },
+
+  // palette stops interpolated by energy: idle(cool) -> active(hot)
+  _palette(energy, healthy) {
+    // anchor colors
+    const idleA = { r: 56, g: 189, b: 248 };   // cyan
+    const idleB = { r: 99, g: 102, b: 241 };   // indigo
+    const idleBg = { r: 12, g: 12, b: 38 };
+    const hotA = { r: 34, g: 233, b: 168 };    // spring green
+    const hotB = { r: 217, g: 70, b: 239 };    // magenta
+    const hotBg = { r: 38, g: 8, b: 46 };
+    if (!healthy) {
+      // unhealthy biases toward red regardless of energy
+      return {
+        a: lerpRgb(idleA, { r: 239, g: 68, b: 68 }, 0.7),
+        b: lerpRgb(idleB, { r: 244, g: 63, b: 94 }, 0.7),
+        bg: { r: 30, g: 6, b: 10 },
+        accent: { r: 255, g: 90, b: 90 },
+      };
+    }
+    return {
+      a: lerpRgb(idleA, hotA, energy),
+      b: lerpRgb(idleB, hotB, energy),
+      bg: lerpRgb(idleBg, hotBg, energy),
+      accent: lerpRgb({ r: 180, g: 220, b: 255 }, { r: 255, g: 240, b: 180 }, energy),
+    };
+  },
+
+  render(ctx, W, H, s, t, dt) {
+    const lowPower = s.lowPowerMode;
+    const glowMod = parseFloat(s.cfg?.glow_intensity ?? "1.0");
+    const speedMul = parseFloat(s.cfg?.rotation_speed ?? "0.8");
+    const cx = W / 2, cy = H / 2;
+    const maxR = Math.min(cx, cy);
+
+    // ── target energy from state, then smooth toward it ──
+    // processing is the dominant driver; load and queue add to it.
+    const target = lowPower ? 0 : clamp(
+      (s.isProcessing ? 0.45 : 0) + s.inferenceLoad * 0.5 + clamp(s.queueDepth / 20, 0, 1) * 0.15,
+      0, 1
+    );
+    const k = 1 - Math.pow(0.001, Math.min(dt, 0.05)); // time-correct smoothing
+    this._energy += (target - this._energy) * k;
+    const E = this._energy;
+
+    const pal = this._palette(E, s.isHealthy);
+    // rotation accelerates with energy
+    const spin = (t * speedMul * (0.35 + E * 1.6));
+    const phaseDeg = (spin * 60) % 360;
+    const phase = spin;
+
+    // ── background: radial, energy-tinted, with a subtle vignette ──
+    {
+      const bg = ctx.createRadialGradient(cx, cy, 0, cx, cy, maxR * 1.25);
+      const core = lowPower ? { r: 10, g: 10, b: 26 } : lerpRgb(pal.bg, pal.a, 0.10 * E);
+      bg.addColorStop(0, rgba(core, 1));
+      bg.addColorStop(0.6, rgba(pal.bg, 1));
+      bg.addColorStop(1, rgba(lerpRgb(pal.bg, { r: 0, g: 0, b: 0 }, 0.6), 1));
+      ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H);
+    }
+
+    if (lowPower) { this._renderIdleLowPower(ctx, W, H, s, t, cx, cy, maxR, pal); return; }
+
+    // ── idle character: slow drifting motes (fade OUT as energy rises) ──
+    if (!this._motes) {
+      const rng = mulberry32(99);
+      this._motes = Array.from({ length: 30 }, () => ({
+        a: rng() * Math.PI * 2, r: 0.2 + rng() * 0.75, sp: 0.05 + rng() * 0.12, ph: rng() * 6.28, sz: 0.6 + rng() * 1.4,
+      }));
+    }
+    const idleVis = 1 - E;
+    if (idleVis > 0.02) {
+      for (const m of this._motes) {
+        const a = m.a + t * m.sp * 0.3;
+        const rr = m.r + Math.sin(t * 0.4 + m.ph) * 0.04;
+        const mx = cx + Math.cos(a) * rr * maxR;
+        const my = cy + Math.sin(a) * rr * maxR;
+        const tw = 0.5 + 0.5 * Math.sin(t * 1.5 + m.ph);
+        ctx.fillStyle = rgba(pal.a, 0.12 * idleVis * tw);
+        ctx.beginPath(); ctx.arc(mx, my, m.sz, 0, 7); ctx.fill();
+      }
+    }
+
+    // ── shockwave pulses: frequent under load, rare & gentle when idle ──
+    const emitGap = lerp(3.2, 0.55, E);   // seconds between pulses
+    if (t - this._lastEmit > emitGap) { this._pulses.push({ born: t, hot: E }); this._lastEmit = t; }
+    this._pulses = this._pulses.filter((p) => t - p.born < 2.4);
+    for (const p of this._pulses) {
+      const age = (t - p.born) / 2.4;
+      const r = maxR * (0.1 + age * 1.05);
+      const col = lerpRgb(pal.a, pal.b, p.hot);
+      ctx.strokeStyle = rgba(col, (1 - age) * (0.18 + 0.42 * p.hot) * glowMod);
+      ctx.lineWidth = (2.5 * (1 - age) + 0.4) * (0.6 + p.hot);
+      ctx.beginPath(); ctx.arc(cx, cy, r, 0, 7); ctx.stroke();
+    }
+
+    // ── the rings: thick, glowing, and squiggling under load ──
+    const ringCount = 4;
+    const baseR = maxR * 0.16;
+    const breathe = 1 + Math.sin(t * (1.2 + E * 2.5)) * (0.02 + E * 0.05);
+    // squiggle params grow with energy; near-zero when idle.
+    // each ring gets its own lobe count / speed / drift so the whole thing
+    // churns turbulently rather than locking into a symmetric mandala.
+    const wobAmp = E * E * maxR * 0.045;          // radial wobble amplitude
+
+    // remember node angular positions for collision detection
+    const nodeAngles = [];
+
+    for (let i = 0; i < ringCount; i++) {
+      const dir = i % 2 === 0 ? 1 : -1;
+      const ringPhase = phase * dir * (1 + i * 0.15) + i * 1.7;
+      // per-ring turbulence: coprime-ish lobe counts + varied speeds + drift
+      const wobFreq = 3 + i * 2 + Math.round(E * 5);
+      const wobSpeed = (1.4 + i * 0.7 + E * 4) * dir;
+      const wobDrift = t * (0.3 + i * 0.4);
+      const radius = baseR * (1 + i * 0.42) * breathe;
+      const ringColor = lerpRgb(i % 2 === 0 ? pal.a : pal.b, pal.accent, E * 0.25);
+      const alpha = clamp(0.6 - i * 0.08, 0.2, 0.62);
+      const baseW = Math.max(1.4, 3.4 - i * 0.4) * (1 + E * 0.7); // thicker overall, thicker under load
+
+      // draw the (possibly squiggling) ring as a path
+      const segs = 80;
+      const drawRingPath = () => {
+        ctx.beginPath();
+        for (let sgi = 0; sgi <= segs; sgi++) {
+          const a = (sgi / segs) * Math.PI * 2;
+          const wob = wobAmp * Math.sin(a * wobFreq + t * wobSpeed + wobDrift + i * 1.3) * (1 - i * 0.12);
+          const rr = radius + wob;
+          const x = cx + Math.cos(a + ringPhase) * rr;
+          const y = cy + Math.sin(a + ringPhase) * rr;
+          sgi === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+        }
+        ctx.closePath();
+      };
+      // outer glow pass
+      ctx.strokeStyle = rgba(ringColor, alpha * (0.22 + 0.25 * E) * glowMod);
+      ctx.lineWidth = baseW + 7 + E * 5;
+      drawRingPath(); ctx.stroke();
+      // crisp core line
+      ctx.strokeStyle = rgba(ringColor, alpha);
+      ctx.lineWidth = baseW;
+      drawRingPath(); ctx.stroke();
+
+      // orbiting node(s): one per ring, plus a counter-orbiting one under load
+      const nodeCount = E > 0.45 ? 2 : 1;
+      for (let n = 0; n < nodeCount; n++) {
+        const na = ringPhase + n * Math.PI; // opposite sides
+        const wob = wobAmp * Math.sin(na * wobFreq + t * wobSpeed + wobDrift + i * 1.3);
+        const nr = radius + wob;
+        const nx = cx + Math.cos(na) * nr;
+        const ny = cy + Math.sin(na) * nr;
+        const orbR = (Math.max(2, 3.6 - i * 0.4)) * (1 + E * 0.5);
+        ctx.fillStyle = rgba(ringColor, 0.28 * glowMod);
+        ctx.beginPath(); ctx.arc(nx, ny, orbR * 2.6, 0, 7); ctx.fill();
+        ctx.fillStyle = rgba(lerpRgb(ringColor, { r: 255, g: 255, b: 255 }, 0.5), 0.95);
+        ctx.beginPath(); ctx.arc(nx, ny, orbR, 0, 7); ctx.fill();
+        nodeAngles.push({ x: nx, y: ny, ring: i, col: ringColor, r: nr, a: na });
+      }
+    }
+
+    // ── collisions: when two nodes from adjacent rings get close, spark ──
+    // (more likely under load because there are more nodes & faster motion)
+    for (let p = 0; p < nodeAngles.length; p++) {
+      for (let q = p + 1; q < nodeAngles.length; q++) {
+        const A = nodeAngles[p], B = nodeAngles[q];
+        if (Math.abs(A.ring - B.ring) !== 1) continue;
+        const d = Math.hypot(A.x - B.x, A.y - B.y);
+        if (d < maxR * 0.06) {
+          // emit a spark burst at midpoint, throttled by storing last collision time per-pair-ish
+          const mx = (A.x + B.x) / 2, my = (A.y + B.y) / 2;
+          if (Math.random() < 0.4) {
+            const burst = 4 + Math.floor(E * 6);
+            for (let k2 = 0; k2 < burst; k2++) {
+              const ang = Math.random() * Math.PI * 2;
+              const spd = (0.4 + Math.random() * 1.2) * (1 + E);
+              this._sparks.push({ x: mx, y: my, vx: Math.cos(ang) * spd, vy: Math.sin(ang) * spd, born: t, col: lerpRgb(A.col, B.col, 0.5) });
+            }
+          }
+        }
+      }
+    }
+    // render + age sparks
+    this._sparks = this._sparks.filter((sp) => t - sp.born < 0.8);
+    for (const sp of this._sparks) {
+      const age = (t - sp.born) / 0.8;
+      const px = sp.x + sp.vx * age * 40;
+      const py = sp.y + sp.vy * age * 40;
+      ctx.fillStyle = rgba(lerpRgb(sp.col, { r: 255, g: 255, b: 255 }, 0.4), (1 - age) * 0.9);
+      ctx.beginPath(); ctx.arc(px, py, (1 - age) * 2.4 + 0.3, 0, 7); ctx.fill();
+    }
+
+    // ── energy arcs: lightning jumps between random orbit nodes under load ──
+    if (E > 0.35 && nodeAngles.length >= 2) {
+      const arcGap = lerp(0.9, 0.12, E);
+      if (t - this._lastArc > arcGap) {
+        this._lastArc = t;
+        const A = nodeAngles[Math.floor(Math.random() * nodeAngles.length)];
+        const B = nodeAngles[Math.floor(Math.random() * nodeAngles.length)];
+        if (A !== B) this._arcs.push({ born: t, ax: A.x, ay: A.y, bx: B.x, by: B.y, col: lerpRgb(A.col, B.col, 0.5), seed: Math.random() * 1000 });
+      }
+    }
+    this._arcs = this._arcs.filter((arc) => t - arc.born < 0.22);
+    for (const arc of this._arcs) {
+      const age = (t - arc.born) / 0.22;
+      const segs = 8;
+      ctx.strokeStyle = rgba(lerpRgb(arc.col, { r: 255, g: 255, b: 255 }, 0.5), (1 - age) * 0.85);
+      ctx.lineWidth = 1.6 * (1 - age) + 0.5;
+      ctx.beginPath();
+      for (let sgi = 0; sgi <= segs; sgi++) {
+        const f = sgi / segs;
+        const jitter = sgi === 0 || sgi === segs ? 0 : (Math.sin(arc.seed + sgi * 12.9) * maxR * 0.04);
+        const nrm = { x: -(arc.by - arc.ay), y: arc.bx - arc.ax };
+        const nl = Math.hypot(nrm.x, nrm.y) || 1;
+        const x = lerp(arc.ax, arc.bx, f) + (nrm.x / nl) * jitter;
+        const y = lerp(arc.ay, arc.by, f) + (nrm.y / nl) * jitter;
+        sgi === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+    }
+
+    // ── reactor core: bright, hot, pulsing with energy ──
+    const coreBeat = 1 + Math.sin(t * (3 + E * 6)) * (0.06 + E * 0.12);
+    const centerR = (5 + E * 9) * coreBeat;
+    const coreCol = lerpRgb(pal.a, pal.b, E);
+    // big soft halo
+    const haloR = centerR * (3.5 + E * 4);
+    const halo = ctx.createRadialGradient(cx, cy, 0, cx, cy, haloR);
+    halo.addColorStop(0, rgba(coreCol, (0.3 + 0.45 * E) * glowMod));
+    halo.addColorStop(0.5, rgba(coreCol, 0.12 * glowMod));
+    halo.addColorStop(1, rgba(coreCol, 0));
+    ctx.fillStyle = halo; ctx.beginPath(); ctx.arc(cx, cy, haloR, 0, 7); ctx.fill();
+    // core body
+    ctx.fillStyle = rgba(lerpRgb(coreCol, { r: 255, g: 255, b: 255 }, 0.35 + 0.4 * E), 0.95);
+    ctx.beginPath(); ctx.arc(cx, cy, centerR, 0, 7); ctx.fill();
+    // white-hot center
+    ctx.fillStyle = rgba({ r: 255, g: 255, b: 255 }, 0.5 + 0.4 * E);
+    ctx.beginPath(); ctx.arc(cx, cy, centerR * (0.35 + 0.15 * Math.sin(t * 8)), 0, 7); ctx.fill();
+    // unhealthy: a hard red ring around the core
+    if (!s.isHealthy) {
+      ctx.strokeStyle = rgba({ r: 255, g: 70, b: 70 }, 0.4 + 0.4 * (0.5 + 0.5 * Math.sin(t * 6)));
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(cx, cy, centerR + 5, 0, 7); ctx.stroke();
+    }
+
+    // ── low-battery warning ring (full circle, only when low; avoids
+    //    a stray partial-arc artifact at the rim) ──
+    if (s.batteryLevel < 20 && !s.isCharging) {
+      const arcR = maxR * 0.94;
+      const warnPulse = 0.12 + 0.16 * (0.5 + 0.5 * Math.sin(t * 4));
+      ctx.strokeStyle = rgba({ r: 239, g: 68, b: 68 }, warnPulse);
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(cx, cy, arcR, 0, Math.PI * 2); ctx.stroke();
+    } else if (s.isCharging) {
+      // charging: a gentle full-circle breathing halo (also not a partial arc)
+      const arcR = maxR * 0.94;
+      const chg = 0.08 + 0.12 * (0.5 + 0.5 * Math.sin(t * 2.5));
+      ctx.strokeStyle = rgba({ r: 34, g: 197, b: 94 }, chg);
+      ctx.lineWidth = 1.6;
+      ctx.beginPath(); ctx.arc(cx, cy, arcR, 0, Math.PI * 2); ctx.stroke();
+    }
+  },
+
+  _renderIdleLowPower(ctx, W, H, s, t, cx, cy, maxR, pal) {
+    // calm, minimal: 2 slow breathing rings + dim core. battery-safe.
+    const breathe = 1 + Math.sin(t * 1.2) * 0.04;
+    for (let i = 0; i < 2; i++) {
+      const radius = maxR * 0.18 * (1 + i * 0.5) * breathe;
+      ctx.strokeStyle = rgba(pal.a, 0.18 - i * 0.05);
+      ctx.lineWidth = 1.4;
+      ctx.beginPath(); ctx.arc(cx, cy, radius, 0, 7); ctx.stroke();
+    }
+    ctx.fillStyle = rgba(pal.a, 0.4);
+    ctx.beginPath(); ctx.arc(cx, cy, 3, 0, 7); ctx.fill();
+    // dim full-circle battery warning (low power implies low battery)
+    const arcR = maxR * 0.9;
+    const battColor = s.batteryLevel < 15 ? { r: 239, g: 68, b: 68 } : { r: 234, g: 179, b: 8 };
+    ctx.strokeStyle = rgba(battColor, 0.16);
+    ctx.lineWidth = 1.4;
+    ctx.beginPath(); ctx.arc(cx, cy, arcR, 0, Math.PI * 2); ctx.stroke();
+  },
+};
+
+// ════════════════════════════════════════════════════════════════
+//  MATRIX RAIN — mutating glyph columns, per-char bloom, battery
+//  brightness, thermal hue-shift, processing beam, HUD overlay.
+// ════════════════════════════════════════════════════════════════
+const MatrixRain = {
+  id: "matrix-rain",
+  name: "Matrix Rain",
+  description: "CRT phosphor rain whose speed tracks workload, brightness tracks battery, and hue bends toward red as the phone heats up. A beam sweeps on every inference.",
+  glyphs: "0123456789ABCDEFアイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホ:;<>?@[]^_{|}~".split(""),
+  _cols: null, _colCount: 0, _beam: -1,
+
+  reset() { this._cols = null; this._beam = -1; },
+
+  _ensure(count) {
+    if (this._cols && this._colCount === count) return;
+    const rng = mulberry32(42);
+    this._cols = Array.from({ length: count }, () => ({
+      leader: rng() * 20,
+      speed: 0.5 + rng() * 1.5,
+      offset: Math.floor(rng() * this.glyphs.length),
+      // each cell keeps a mutation clock so glyphs flip independently
+      mutate: rng() * 100,
+    }));
+    this._colCount = count;
+  },
+
+  render(ctx, W, H, s, t, dt) {
+    const baseColor = hexToRgb(s.cfg?.base_color || "#00FF41");
+    const lowPower = s.lowPowerMode;
+    const density = parseFloat(s.cfg?.column_density ?? "1.0");
+    const ROWS = 22;
+    const colCount = lowPower ? 7 : clamp(Math.round(20 * density), 6, 30);
+    this._ensure(colCount);
+
+    const cw = W / colCount, ch = H / ROWS;
+    const charPx = ch * 0.82;
+
+    // background
+    ctx.fillStyle = "#040806"; ctx.fillRect(0, 0, W, H);
+
+    // thermal hue shift: green → amber >35°C → red >42°C
+    let glyphColor = baseColor;
+    if (s.batteryTemperature > 42) {
+      glyphColor = lerpRgb({ r: 234, g: 179, b: 8 }, { r: 239, g: 68, b: 68 }, clamp((s.batteryTemperature - 42) / 8, 0, 1));
+    } else if (s.batteryTemperature > 35) {
+      glyphColor = lerpRgb(baseColor, { r: 234, g: 179, b: 8 }, clamp((s.batteryTemperature - 35) / 7, 0, 1));
+    }
+    // battery brightness: 100% full, 20% dim (linear)
+    const batt = clamp(lerp(0.35, 1, (s.batteryLevel - 20) / 80), 0.3, 1);
+
+    // rain speed maps to workload (idle slow, processing fast)
+    const infSpeed = s.isProcessing ? 1.8 + s.inferenceLoad : 0.55;
+
+    ctx.font = `bold ${Math.round(charPx)}px ui-monospace, monospace`;
+    ctx.textAlign = "center"; ctx.textBaseline = "top";
+
+    for (let c = 0; c < colCount; c++) {
+      const col = this._cols[c];
+      const x = c * cw + cw / 2;
+      const scroll = (t * infSpeed * col.speed) % ROWS;
+      const leaderRow = Math.floor((col.leader + scroll) % ROWS);
+
+      // faint phosphor column wash
+      if (!lowPower) {
+        ctx.fillStyle = rgba(glyphColor, 0.015 + 0.01 * (c % 3));
+        ctx.fillRect(c * cw, 0, cw, H);
+      }
+
+      for (let row = 0; row < ROWS; row++) {
+        const y = row * ch;
+        const distFromLeader = row <= leaderRow ? leaderRow - row : ROWS - row + leaderRow;
+        if (distFromLeader > 13) continue;
+
+        // glyph mutates over time, faster near the leader
+        const mutRate = distFromLeader === 0 ? 14 : 3;
+        const gi = (row + col.offset + Math.floor((t * mutRate + col.mutate))) % this.glyphs.length;
+        const ch_ = this.glyphs[gi];
+
+        const trailFade = distFromLeader === 0 ? 1 : distFromLeader <= 2 ? 0.7 : distFromLeader <= 5 ? 0.42 : 0.16;
+        const leadAlpha = (lowPower ? 0.6 : 0.95) * batt;
+        const alpha = (distFromLeader === 0 ? leadAlpha : (lowPower ? 0.4 : 0.55) * batt * trailFade);
+
+        // per-character bloom behind the leader (soft radial, not a disc)
+        if (!lowPower && distFromLeader <= 1) {
+          const bc = distFromLeader === 0 ? { r: 204, g: 255, b: 204 } : glyphColor;
+          const br = charPx * 0.85;
+          const g = ctx.createRadialGradient(x, y + ch / 2, 0, x, y + ch / 2, br);
+          g.addColorStop(0, rgba(bc, (distFromLeader === 0 ? 0.22 : 0.1) * batt));
+          g.addColorStop(1, rgba(bc, 0));
+          ctx.fillStyle = g;
+          ctx.beginPath(); ctx.arc(x, y + ch / 2, br, 0, 7); ctx.fill();
+        }
+
+        ctx.fillStyle = (distFromLeader === 0 && !lowPower)
+          ? rgba({ r: 210, g: 255, b: 210 }, leadAlpha)
+          : rgba(glyphColor, alpha);
+        ctx.fillText(ch_, x, y);
+      }
+
+      // peer highlight band
+      if (!lowPower) {
+        for (const peer of s.peers) {
+          if (Math.floor(peer.x * W / cw) === c) {
+            const bandY = Math.floor(peer.y * ROWS) * ch;
+            ctx.fillStyle = rgba(glyphColor, peer.isProcessing ? 0.16 : 0.06);
+            ctx.fillRect(c * cw, bandY, cw, ch * 3);
+          }
+        }
+      }
+    }
+
+    // ── processing beam: bright vertical sweep with widening afterglow ──
+    if (s.isProcessing && !lowPower) {
+      if (this._beam < 0 || t - this._beam > 1.6) this._beam = t;
+      const age = (t - this._beam) / 1.6;
+      if (age <= 1) {
+        const beamY = age * H;
+        const grad = ctx.createLinearGradient(0, beamY - H * 0.18, 0, beamY);
+        grad.addColorStop(0, rgba({ r: 204, g: 255, b: 204 }, 0));
+        grad.addColorStop(1, rgba({ r: 204, g: 255, b: 204 }, 0.18 * (1 - age)));
+        ctx.fillStyle = grad; ctx.fillRect(0, beamY - H * 0.18, W, H * 0.18);
+        ctx.fillStyle = rgba({ r: 230, g: 255, b: 230 }, 0.5 * (1 - age));
+        ctx.fillRect(0, beamY - 2, W, 3);
+      }
+    }
+
+    // ── CRT scanlines (always present) ──
+    ctx.fillStyle = "rgba(0,0,0,0.12)";
+    for (let y = 0; y < H; y += 3) ctx.fillRect(0, y, W, 1);
+    if (!lowPower) {
+      const scanY = ((t * 0.5) % 1) * H;
+      ctx.fillStyle = "rgba(255,255,255,0.04)";
+      ctx.fillRect(0, scanY, W, 2);
+    }
+
+    // ── top-right HUD overlay ──
+    if (!lowPower) {
+      ctx.font = `${Math.round(charPx * 0.6)}px ui-monospace, monospace`;
+      ctx.textAlign = "right"; ctx.textBaseline = "top";
+      const lines = [
+        `TPS ${Math.round(s.tokensPerSecond)}`,
+        `Q ${s.queueDepth}`,
+        `BAT ${s.batteryLevel}%`,
+        `${s.batteryTemperature.toFixed(1)}C`,
+      ];
+      lines.forEach((ln, i) => {
+        ctx.fillStyle = rgba(glyphColor, 0.5);
+        ctx.fillText(ln, W - 8, 8 + i * charPx * 0.75);
+      });
+    }
+  },
+};
+
+// ════════════════════════════════════════════════════════════════
+//  CYBER HUD — wireframe grid, animated corner brackets, radar
+//  sweep + blips, telemetry rail gauges + oscilloscope, data rail.
+// ════════════════════════════════════════════════════════════════
+const CyberHud = {
+  id: "cyber-hud",
+  name: "Cyber HUD",
+  description: "Tactical heads-up display: perspective wireframe, reactive corner brackets, a radar mapping live peers, and an oscilloscope tracing inference load.",
+  _scope: [],
+  // ── tron road runner scene state ──
+  _space: null,
+
+  reset() { this._scope = []; this._space = null; },
+
+  render(ctx, W, H, s, t, dt) {
+    const primary = hexToRgb(s.cfg?.bracket_color || "#00E5FF");
+    const accent = hexToRgb(s.cfg?.bracket_alert || "#FF3D00");
+    const critical = { r: 239, g: 68, b: 68 };
+    const lowPower = s.lowPowerMode;
+    const margin = W * 0.045;
+    const pulse = 0.6 + 0.4 * (0.5 + 0.5 * Math.sin(t * 5));
+
+    ctx.fillStyle = "#050510"; ctx.fillRect(0, 0, W, H);
+    ctx.textBaseline = "top";
+
+    // ── deep-space scene: a Star Fox-style fighter dodges obstacles and
+    //    enemies in the lower screen, with a streaming starfield conveying
+    //    forward flight. Intensity scales with workload. ──
+    const sceneTop = H * 0.46;
+    if (!lowPower) this._renderSpaceScene(ctx, W, H, s, t, dt, primary, accent, critical, sceneTop);
+
+    // ── corner brackets, reactive ──
+    let bColor = primary, bGap = margin * 0.0;
+    if (!s.isHealthy || s.batteryTemperature > 45) { bColor = lerpRgb(primary, critical, pulse); }
+    else if (s.batteryLevel < 20 && !s.isCharging) { bColor = lerpRgb(primary, accent, pulse); }
+    else if (s.isProcessing) {
+      // brackets pull inward on a 1s cycle when processing
+      const c = (t % 1);
+      bGap = lerp(0, margin * 0.5, Math.sin(c * Math.PI));
+      bColor = primary;
+    }
+    const blen = (lowPower ? 0.04 : 0.08) * W;
+    const bw = lowPower ? 1.2 : 2;
+    ctx.strokeStyle = rgba(bColor, lowPower ? 0.4 : 0.55 + 0.3 * pulse);
+    ctx.lineWidth = bw;
+    const corners = [
+      [margin + bGap, margin + bGap, 1, 1],
+      [W - margin - bGap, margin + bGap, -1, 1],
+      [margin + bGap, H - margin - bGap, 1, -1],
+      [W - margin - bGap, H - margin - bGap, -1, -1],
+    ];
+    for (const [x, y, sx, sy] of corners) {
+      ctx.beginPath();
+      ctx.moveTo(x + sx * blen, y); ctx.lineTo(x, y); ctx.lineTo(x, y + sy * blen);
+      ctx.stroke();
+    }
+
+    // ── radar (upper area, floating above the road horizon) ──
+    const radarR = clamp(Math.min(W, H) * 0.26, W * 0.1, W * 0.3);
+    const rcx = W / 2, rcy = H * 0.3;
+    const radarPeriod = s.isProcessing ? 1.5 : 4.0; // sec/rev, modulated by load
+    const radarDeg = (t / radarPeriod * 360) % 360;
+    const radarRad = radarDeg * Math.PI / 180;
+
+    if (!lowPower) {
+      for (const [rr, a] of [[1, 0.35], [0.66, 0.13], [0.33, 0.1]]) {
+        ctx.strokeStyle = rgba(primary, a); ctx.lineWidth = rr === 1 ? 1.4 : 0.8;
+        ctx.beginPath(); ctx.arc(rcx, rcy, radarR * rr, 0, 7); ctx.stroke();
+      }
+      ctx.strokeStyle = rgba(primary, 0.12); ctx.lineWidth = 0.5;
+      ctx.beginPath(); ctx.moveTo(rcx - radarR, rcy); ctx.lineTo(rcx + radarR, rcy); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(rcx, rcy - radarR); ctx.lineTo(rcx, rcy + radarR); ctx.stroke();
+
+      // sweep wedge
+      const grad = ctx.createConicGradient ? null : null;
+      ctx.fillStyle = rgba(primary, 0.1);
+      ctx.beginPath(); ctx.moveTo(rcx, rcy);
+      ctx.arc(rcx, rcy, radarR, radarRad - 0.8, radarRad);
+      ctx.closePath(); ctx.fill();
+      // sweep line
+      ctx.strokeStyle = rgba(primary, 0.55); ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(rcx, rcy);
+      ctx.lineTo(rcx + Math.cos(radarRad) * radarR, rcy + Math.sin(radarRad) * radarR); ctx.stroke();
+
+      // peer blips
+      for (const peer of s.peers) {
+        const relX = (peer.x - 0.5) * 2, relY = (peer.y - 0.5) * 2;
+        const d = Math.min(1, Math.hypot(relX, relY));
+        const ang = Math.atan2(relY, relX);
+        const br = d * radarR;
+        const bx = rcx + Math.cos(ang) * br, by = rcy + Math.sin(ang) * br;
+        const bc = peer.isProcessing ? accent : primary;
+        // blip glows brighter as the sweep passes over it
+        const angDiff = Math.abs(((ang - radarRad + Math.PI * 3) % (Math.PI * 2)) - Math.PI);
+        const sweepGlow = clamp(1 - angDiff / 0.9, 0, 1);
+        ctx.fillStyle = rgba(bc, 0.4 + 0.5 * sweepGlow);
+        ctx.beginPath(); ctx.arc(bx, by, 2.5 + 3 * sweepGlow, 0, 7); ctx.fill();
+      }
+      // processing ping from center
+      if (s.isProcessing) {
+        const ping = (t % 1);
+        ctx.strokeStyle = rgba(accent, (1 - ping) * 0.5);
+        ctx.lineWidth = 1.2;
+        ctx.beginPath(); ctx.arc(rcx, rcy, ping * radarR, 0, 7); ctx.stroke();
+      }
+    } else {
+      ctx.strokeStyle = rgba(primary, 0.15); ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.arc(rcx, rcy, radarR * 0.5, 0, 7); ctx.stroke();
+    }
+
+    // center reticle (this device)
+    const retR = lowPower ? 6 : 12;
+    const retColor = s.isProcessing ? rgba(accent, 0.5 + 0.4 * pulse) : rgba(primary, 0.4);
+    ctx.strokeStyle = retColor; ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.arc(rcx, rcy, retR, 0, 7); ctx.stroke();
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      ctx.beginPath();
+      ctx.moveTo(rcx + dx * retR * 0.3, rcy + dy * retR * 0.3);
+      ctx.lineTo(rcx + dx * retR, rcy + dy * retR); ctx.stroke();
+    }
+
+    // ── compact battery / temp gauges, justified in the top-left corner
+    //    zone: inset past the bracket's max inward pulse, vertically centered
+    //    in the band between the bracket vertex and the radar's top edge ──
+    if (!lowPower) {
+      const maxGap = margin * 0.5;                 // bracket's deepest inward pulse
+      const zoneLeft = margin + maxGap + W * 0.02; // clears the vertical bracket arm
+      const zoneTop = margin + maxGap;             // clears the horizontal bracket arm
+      const radarTop = rcy - radarR;               // bottom of the usable band
+      const gw = W * 0.03, gap = W * 0.055;
+      const labelPad = H * 0.022;                  // room for the "BAT"/"TMP" caption
+      // size the gauge to fit the band, capped so it stays compact
+      const gh = clamp((radarTop - zoneTop) - labelPad - H * 0.02, H * 0.05, H * 0.085);
+      const gy = zoneTop + ((radarTop - zoneTop) - (gh + labelPad)) * 0.5;
+      const gx = zoneLeft;
+      const battColor = s.batteryLevel < 15 ? critical : s.batteryLevel < 40 ? { r: 234, g: 179, b: 8 } : { r: 34, g: 197, b: 94 };
+      drawGauge(ctx, gx, gy, gw, gh, s.batteryLevel / 100, battColor, primary, "BAT");
+      const tempColor = s.batteryTemperature > 42 ? critical : s.batteryTemperature > 35 ? { r: 234, g: 179, b: 8 } : { r: 34, g: 197, b: 94 };
+      drawGauge(ctx, gx + gap, gy, gw, gh, clamp((s.batteryTemperature - 15) / 40, 0, 1), tempColor, primary, "TMP");
+    }
+
+    // ── right data readout: justified in the top-right corner zone, between
+    //    the bracket's max inward pulse and the radar, vertically centered ──
+    if (!lowPower) {
+      const fontPx = Math.round(W * 0.024);
+      const maxGap = margin * 0.5;
+      const rightEdge = W - margin - maxGap - W * 0.02; // clears vertical bracket arm
+      const labelX = rightEdge - W * 0.22;
+      const rowH = H * 0.03;
+      const radarTop = rcy - radarR;
+      const zoneTop = margin + maxGap;
+      const modeShort = { pool: "POOL", standby: "STBY", inference: "INFER", update: "UPDT" }[s.coordinatorMode] || s.coordinatorMode.toUpperCase();
+      const rows = [
+        ["DEV", s.deviceId.slice(-6)],
+        ["TPS", Math.round(s.tokensPerSecond).toString()],
+        ["MODE", modeShort],
+        ["PEERS", s.peerCount.toString()],
+        ["QUEUE", s.queueDepth.toString()],
+      ];
+      // vertically center the block of rows in the band
+      const blockH = (rows.length - 1) * rowH;
+      const startY = zoneTop + ((radarTop - zoneTop) - blockH) * 0.5 + fontPx * 0.5;
+      ctx.font = `${fontPx}px ui-monospace, monospace`;
+      ctx.textBaseline = "middle";
+      rows.forEach(([k, v], i) => {
+        const y = startY + i * rowH;
+        ctx.textAlign = "left";
+        ctx.fillStyle = rgba(primary, 0.4); ctx.fillText(k, labelX, y);
+        ctx.textAlign = "right";
+        ctx.fillStyle = rgba(primary, 0.85); ctx.fillText(v, rightEdge, y);
+      });
+      ctx.textBaseline = "top";
+    }
+
+    // bottom status line
+    ctx.font = `${Math.round(W * 0.028)}px ui-monospace, monospace`;
+    ctx.textAlign = "left";
+    ctx.fillStyle = rgba(primary, 0.45);
+    ctx.fillText(s.isProcessing ? "● INFERENCE" : "○ STANDBY", margin + 4, H - margin - blen - H * 0.05);
+
+    // unhealthy alert overlay
+    if (!s.isHealthy) {
+      ctx.fillStyle = rgba(critical, 0.06 + 0.06 * pulse); ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = rgba(critical, 0.8); ctx.textAlign = "center";
+      ctx.font = `bold ${Math.round(W * 0.04)}px ui-monospace, monospace`;
+      ctx.fillText("⚠ SYSTEM ALERT", W / 2, H * 0.12);
+    }
+  },
+
+  // ════════════════════════════════════════════════════════
+  //  SPACE SCENE — a Star Fox-style fighter flies through a
+  //  streaming starfield in the lower screen. It strafes up/down/
+  //  left/right to dodge obstacles and enemies, banking as it moves
+  //  and snapping a barrel roll under load. Star speed, obstacle
+  //  cadence and combat all scale with workload.
+  // ════════════════════════════════════════════════════════
+  _renderSpaceScene(ctx, W, H, s, t, dt, primary, accent, critical, sceneTop) {
+    const intensity = clamp((s.isProcessing ? 0.3 : 0) + s.workload * 0.6 + s.inferenceLoad * 0.45, 0, 1);
+    const dts = Math.min(dt, 0.05);
+
+    if (!this._space) {
+      this._space = {
+        stars: null,
+        shipX: 0, shipY: 0, tgtX: 0, tgtY: 0, vx: 0, vy: 0,
+        roll: 0, rolling: false, rollT: 0, nextRoll: 3,
+        obstacles: [], enemies: [], shots: [], bursts: [],
+        nextObstacle: 1.5, nextEnemy: 2.5, nextShot: 0, muzzle: -1, retarget: 0,
+      };
+    }
+    const S = this._space;
+
+    // ── full-screen starfield (drawn unclipped, behind the HUD) ──
+    // Stars stream radially from the screen center so the warp effect fills
+    // the entire UI rather than ending at the scene boundary.
+    const scx = W / 2, scy = H / 2;
+
+    // faint nebula wash, full-screen and centered so there's no seam at the
+    // scene boundary; warmer under load.
+    const neb = ctx.createRadialGradient(scx, scy, 0, scx, scy, Math.hypot(W, H) * 0.6);
+    neb.addColorStop(0, rgba(lerpRgb(primary, accent, intensity), 0.05 + 0.05 * intensity));
+    neb.addColorStop(1, rgba(primary, 0));
+    ctx.fillStyle = neb; ctx.fillRect(0, 0, W, H);
+
+    if (!S.stars) {
+      const rng = mulberry32(2025);
+      S.stars = Array.from({ length: 200 }, () => ({
+        a: rng() * Math.PI * 2,
+        r: rng(),         // 0 (center) .. 1 (edge)
+        sp: 0.25 + rng() * 0.7,
+        z: 0.4 + rng() * 0.6,
+      }));
+    }
+    const flowSpeed = 0.2 + intensity * 1.3;
+    const starMaxRad = Math.hypot(W * 0.55, H * 0.55);
+    for (const star of S.stars) {
+      star.r += star.sp * flowSpeed * dts;
+      if (star.r > 1.05) { star.r = 0.02; star.a = Math.random() * Math.PI * 2; star.z = 0.4 + Math.random() * 0.6; }
+      const rad = star.r * starMaxRad;
+      const sx = scx + Math.cos(star.a) * rad;
+      const sy = scy + Math.sin(star.a) * rad;
+      const bright = clamp(star.r * 1.3, 0.12, 1) * star.z;
+      const streak = (5 + intensity * 34) * star.r;
+      const tailX = scx + Math.cos(star.a) * (rad - streak);
+      const tailY = scy + Math.sin(star.a) * (rad - streak);
+      ctx.strokeStyle = rgba({ r: 210, g: 235, b: 255 }, bright * 0.8);
+      ctx.lineWidth = 0.6 + star.z * 1.5;
+      ctx.beginPath(); ctx.moveTo(tailX, tailY); ctx.lineTo(sx, sy); ctx.stroke();
+    }
+
+    // ── gameplay layer (ship, enemies, obstacles) clipped to lower region ──
+    const top = sceneTop;
+    const cx = W / 2, cyc = (top + H) / 2; // flow origin for spawns
+    const regionH = H - top;
+
+    ctx.save();
+    ctx.beginPath(); ctx.rect(0, top, W, H - top); ctx.clip();
+
+    // playfield bounds for the ship (normalized -1..1 around center band)
+    const playCx = cx, playCy = top + regionH * 0.5;
+    const playHalfW = W * 0.38, playHalfH = regionH * 0.28;
+    const toScreen = (nx, ny) => ({ x: playCx + nx * playHalfW, y: playCy + ny * playHalfH });
+    // depth → screen position. d 0 (far, at the starfield vanishing point =
+    // screen center) .. 1 (near viewer, full playfield position). Objects
+    // emerge from the same point the stars stream from.
+    const projObj = (nx, ny, d) => {
+      const px = scx + (toScreen(nx, ny).x - scx) * d;
+      const py = scy + (toScreen(nx, ny).y - scy) * d;
+      return { x: px, y: py, sc: d };
+    };
+
+    // ── obstacles & enemies emerge from the vanishing point, grow toward viewer ──
+    S.nextObstacle -= dts;
+    if (S.nextObstacle <= 0 && intensity > 0.1) {
+      S.obstacles.push({ d: 0, nx: (Math.random() * 2 - 1) * 0.9, ny: (Math.random() * 2 - 1) * 0.9, spin: Math.random() * 6 });
+      S.nextObstacle = lerp(2.4, 0.55, intensity) * (0.7 + Math.random() * 0.6);
+    }
+    for (const o of S.obstacles) o.d += (0.25 + intensity * 0.9) * dts;
+    S.obstacles = S.obstacles.filter((o) => o.d < 1.25);
+
+    S.nextEnemy -= dts;
+    if (S.nextEnemy <= 0 && intensity > 0.35) {
+      S.enemies.push({ d: 0, nx: (Math.random() * 2 - 1) * 0.85, ny: (Math.random() * 2 - 1) * 0.7, hp: 1, wob: Math.random() * 6 });
+      S.nextEnemy = lerp(3.0, 0.85, intensity) * (0.6 + Math.random() * 0.7);
+    }
+    for (const e of S.enemies) e.d += (0.18 + intensity * 0.5) * dts;
+    S.enemies = S.enemies.filter((e) => e.d < 1.25 && e.hp > 0);
+
+    // ── ship AI: pick a target away from the nearest threats ──
+    S.retarget -= dts;
+    const threats = [...S.obstacles, ...S.enemies].filter((o) => o.d > 0.45 && o.d < 1.05);
+    if (S.retarget <= 0 || threats.some((o) => Math.abs(o.nx - S.shipX) < 0.3 && Math.abs(o.ny - S.shipY) < 0.3 && o.d > 0.7)) {
+      // sample candidate positions, choose the one furthest from threats
+      let best = { nx: 0, ny: 0 }, bestScore = -1;
+      for (let i = 0; i < 8; i++) {
+        const cand = { nx: (Math.random() * 2 - 1) * 0.85, ny: (Math.random() * 2 - 1) * 0.8 };
+        let score = 1;
+        for (const o of threats) {
+          const dist = Math.hypot(o.nx - cand.nx, o.ny - cand.ny);
+          score = Math.min(score, dist);
+        }
+        if (score > bestScore) { bestScore = score; best = cand; }
+      }
+      S.tgtX = best.nx; S.tgtY = best.ny;
+      S.retarget = lerp(1.4, 0.4, intensity);
+    }
+    // ease ship toward target (record velocity for banking)
+    const prevX = S.shipX, prevY = S.shipY;
+    const follow = 1 - Math.pow(0.0006, dts);
+    S.shipX += (S.tgtX - S.shipX) * follow;
+    S.shipY += (S.tgtY - S.shipY) * follow;
+    S.vx = (S.shipX - prevX) / Math.max(dts, 1e-3);
+    S.vy = (S.shipY - prevY) / Math.max(dts, 1e-3);
+
+    // ── barrel roll under load ──
+    S.nextRoll -= dts;
+    if (!S.rolling && S.nextRoll <= 0 && intensity > 0.45) { S.rolling = true; S.rollT = 0; }
+    if (S.rolling) {
+      S.rollT += dts * 3.2;
+      S.roll = S.rollT * Math.PI * 2;
+      if (S.rollT >= 1) { S.rolling = false; S.roll = 0; S.nextRoll = lerp(6, 2, intensity) * (0.7 + Math.random() * 0.6); }
+    }
+
+    // ── ship fires at nearest enemy ahead ──
+    S.nextShot -= dts;
+    const shipScreen = toScreen(S.shipX, S.shipY);
+    if (S.nextShot <= 0 && S.enemies.length > 0 && intensity > 0.35) {
+      S.shots.push({ d: 0.35, nx: S.shipX, ny: S.shipY });
+      S.nextShot = lerp(0.85, 0.2, intensity);
+      S.muzzle = t;
+    }
+    for (const sh of S.shots) sh.d -= (1.2 + intensity) * dts; // travels toward vanishing point (away)
+    S.shots = S.shots.filter((sh) => sh.d > 0);
+    for (const sh of S.shots) {
+      for (const e of S.enemies) {
+        if (e.hp > 0 && Math.abs(sh.d - e.d) < 0.08 && Math.abs(sh.nx - e.nx) < 0.18 && Math.abs(sh.ny - e.ny) < 0.18) {
+          e.hp = 0; sh.d = -1;
+          const sp = projObj(e.nx, e.ny, e.d);
+          for (let k = 0; k < 9; k++) {
+            const a = Math.random() * Math.PI * 2, v = (0.4 + Math.random()) * (30 + 50 * e.d);
+            S.bursts.push({ x: sp.x, y: sp.y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, born: t });
+          }
+        }
+      }
+    }
+
+    // ── draw enemies (far first) ──
+    for (const e of S.enemies) {
+      const p = projObj(e.nx, e.ny, e.d);
+      this._drawSpaceFoe(ctx, p.x, p.y, p.sc, t, e.wob, critical);
+    }
+    // ── shots (energy bolts heading away) ──
+    for (const sh of S.shots) {
+      if (sh.d <= 0) continue; // killed/expired this frame — don't draw
+      const p = projObj(sh.nx, sh.ny, sh.d);
+      const r = Math.max(0.5, 1.5 + sh.d * 3);
+      ctx.fillStyle = rgba(accent, 0.5);
+      ctx.beginPath(); ctx.arc(p.x, p.y, r * 2, 0, 7); ctx.fill();
+      ctx.fillStyle = rgba({ r: 255, g: 255, b: 255 }, 0.9);
+      ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, 7); ctx.fill();
+    }
+    // ── obstacles (asteroid-like wire chunks) ──
+    for (const o of S.obstacles) {
+      const p = projObj(o.nx, o.ny, o.d);
+      this._drawSpaceRock(ctx, p.x, p.y, p.sc, o.spin + t * 0.6, critical);
+    }
+
+    // ── the fighter ──
+    this._drawFighter(ctx, shipScreen.x, shipScreen.y, regionH * 0.1, S.vx, S.roll, t, intensity, primary, accent);
+
+    // muzzle flash
+    if (S.muzzle >= 0 && t - S.muzzle < 0.08) {
+      ctx.fillStyle = rgba({ r: 255, g: 255, b: 255 }, 0.8);
+      ctx.beginPath(); ctx.arc(shipScreen.x, shipScreen.y - regionH * 0.05, regionH * 0.02, 0, 7); ctx.fill();
+    }
+
+    // explosion bursts
+    S.bursts = S.bursts.filter((b) => t - b.born < 0.5);
+    for (const b of S.bursts) {
+      const age = (t - b.born) / 0.5;
+      ctx.fillStyle = rgba(lerpRgb(accent, { r: 255, g: 255, b: 255 }, 0.5), 1 - age);
+      ctx.beginPath(); ctx.arc(b.x + b.vx * age, b.y + b.vy * age, (1 - age) * 2.5 + 0.4, 0, 7); ctx.fill();
+    }
+
+    ctx.restore();
+  },
+
+  // a Star Fox-style fighter seen from behind. banks with lateral velocity,
+  // spins for a barrel roll (roll in radians). sc = body half-size.
+  _drawFighter(ctx, x, y, sc, vx, roll, t, intensity, primary, accent) {
+    const bank = clamp(vx * 0.5, -1, 1); // -1..1 lean
+    // barrel roll is simulated by horizontally scaling the silhouette by cos(roll)
+    const rollScaleX = Math.cos(roll);
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(bank * 0.4); // lean into the turn
+    ctx.scale(rollScaleX, 1);
+
+    const w = sc, h = sc * 1.15;
+    const cyan = primary, hot = accent;
+
+    // engine exhaust glow (twin)
+    const thrust = 0.55 + 0.45 * Math.sin(t * 30) + intensity * 0.3;
+    for (const ex of [-0.34, 0.34]) {
+      const g = ctx.createLinearGradient(0, h * 0.2, 0, h * 0.2 + sc * (0.9 + intensity));
+      g.addColorStop(0, rgba(hot, 0.9));
+      g.addColorStop(1, rgba(hot, 0));
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.moveTo(ex * w - w * 0.08, h * 0.2);
+      ctx.lineTo(ex * w, h * 0.2 + sc * (0.7 + intensity) * thrust);
+      ctx.lineTo(ex * w + w * 0.08, h * 0.2);
+      ctx.closePath(); ctx.fill();
+    }
+
+    // body fill (dark) so stars don't show through
+    ctx.fillStyle = "rgba(8,12,20,0.9)";
+    ctx.beginPath();
+    ctx.moveTo(0, -h * 0.55);
+    ctx.lineTo(w * 0.22, h * 0.25);
+    ctx.lineTo(0, h * 0.12);
+    ctx.lineTo(-w * 0.22, h * 0.25);
+    ctx.closePath(); ctx.fill();
+
+    // wings (swept back)
+    ctx.strokeStyle = rgba(cyan, 0.95); ctx.lineWidth = Math.max(1, sc * 0.09); ctx.lineJoin = "round";
+    ctx.beginPath();
+    ctx.moveTo(0, -h * 0.55);                 // nose
+    ctx.lineTo(w * 0.22, h * 0.25);           // right body
+    ctx.lineTo(w * 0.95, h * 0.5);            // right wingtip
+    ctx.lineTo(w * 0.3, h * 0.32);            // right wing root
+    ctx.lineTo(0, h * 0.12);                  // tail center
+    ctx.lineTo(-w * 0.3, h * 0.32);
+    ctx.lineTo(-w * 0.95, h * 0.5);
+    ctx.lineTo(-w * 0.22, h * 0.25);
+    ctx.closePath(); ctx.stroke();
+
+    // spine highlight
+    ctx.strokeStyle = rgba({ r: 230, g: 250, b: 255 }, 0.7); ctx.lineWidth = Math.max(0.6, sc * 0.04);
+    ctx.beginPath(); ctx.moveTo(0, -h * 0.5); ctx.lineTo(0, h * 0.1); ctx.stroke();
+
+    // wingtip lights
+    ctx.fillStyle = rgba(hot, 0.9);
+    ctx.beginPath(); ctx.arc(w * 0.95, h * 0.5, sc * 0.06, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.arc(-w * 0.95, h * 0.5, sc * 0.06, 0, 7); ctx.fill();
+    // cockpit
+    ctx.fillStyle = rgba(cyan, 0.6);
+    ctx.beginPath(); ctx.ellipse(0, -h * 0.15, w * 0.1, h * 0.16, 0, 0, 7); ctx.fill();
+
+    ctx.restore();
+  },
+
+  // wireframe enemy fighter near the vanishing point (chevron pointing at us)
+  _drawSpaceFoe(ctx, x, y, sc, t, wob, critical) {
+    const r = sc * 60;
+    if (r < 2) return;
+    const yy = y + Math.sin(t * 4 + wob) * r * 0.1;
+    ctx.strokeStyle = rgba(critical, 0.9); ctx.lineWidth = Math.max(1, sc * 3); ctx.lineJoin = "round";
+    ctx.beginPath();
+    ctx.moveTo(x, yy + r * 0.6);
+    ctx.lineTo(x + r * 0.8, yy - r * 0.5);
+    ctx.lineTo(x, yy - r * 0.2);
+    ctx.lineTo(x - r * 0.8, yy - r * 0.5);
+    ctx.closePath(); ctx.stroke();
+    ctx.fillStyle = rgba(critical, 0.12); ctx.fill();
+    ctx.fillStyle = rgba({ r: 255, g: 120, b: 120 }, 0.9);
+    ctx.beginPath(); ctx.arc(x, yy - r * 0.1, Math.max(0.8, r * 0.12), 0, 7); ctx.fill();
+  },
+
+  // tumbling wireframe asteroid/obstacle
+  _drawSpaceRock(ctx, x, y, sc, spin, critical) {
+    const r = sc * 55;
+    if (r < 2) return;
+    const sides = 7;
+    ctx.strokeStyle = rgba(critical, 0.8); ctx.lineWidth = Math.max(1, sc * 3); ctx.lineJoin = "round";
+    ctx.beginPath();
+    for (let i = 0; i <= sides; i++) {
+      const a = spin + (i / sides) * Math.PI * 2;
+      const rr = r * (0.7 + 0.3 * Math.sin(i * 2.3 + spin));
+      const px = x + Math.cos(a) * rr, py = y + Math.sin(a) * rr;
+      i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+    }
+    ctx.closePath(); ctx.stroke();
+    ctx.fillStyle = rgba(critical, 0.08); ctx.fill();
+  },
+
+};
+
+// ════════════════════════════════════════════════════════════════
+// BIOLUMINESCENT DREAMSCAPE — organic tidepool. Drifting motes
+// of light, swaying kelp-like tendrils, and concentric pulse waves
+// that bloom with device activity. A calm alternative to the
+// existing packs.
+// ════════════════════════════════════════════════════════════════
+const BioluminescentDreamscape = {
+ id: "bioluminescent",
+ name: "Bioluminescent Dreamscape",
+ description: "Free-swimming bioluminescent organisms drift through the abyss, their luminous bodies tracing sinuous paths in the dark. Caustic light shimmers across the depths, shifting with each pulse of device activity.",
+
+ _energy: 0,
+ _shimmers: [],
+_lastShimmer: 0,
+ _lastCascade: 0,
+ _plankton: null,
+ _swimmers: null,
+ _caustics: null,
+ _depthDust: null,
+
+ // Rich color palette — blues, violets, pinks under heavy load
+ _SWIMMER_COLORS: [
+  [{r:0x38,g:0xF8,b:0xC8}, {r:0x60,g:0xF0,b:0xFF}],  // cyan-green
+  [{r:0x22,g:0xE9,b:0xA8}, {r:0xFF,g:0xE0,b:0x66}],  // emerald + gold
+  [{r:0x30,g:0xB8,b:0xFF}, {r:0x80,g:0xD0,b:0xFF}],  // ocean blue
+  [{r:0x78,g:0x64,b:0xFF}, {r:0xB0,g:0x90,b:0xFF}],  // violet
+  [{r:0xB0,g:0x60,b:0xFF}, {r:0xD0,g:0x90,b:0xFF}],  // purple
+  [{r:0xFF,g:0x70,b:0xC0}, {r:0xFF,g:0xA0,b:0xD8}],  // pink
+ ],
+
+ _BODY_PARTS: (function() {
+  const p = [];
+  function leg(v, segs, len, amp, cyc, w) {
+   return {
+    type:'leg',var:v,
+    render(ctx, pts, side, par, t, cr, pal, hc) {
+     const attach = [2,4,6,8];
+     ctx.save(); ctx.lineCap = 'round';
+     for (let ai = 0; ai < attach.length; ai++) {
+      const ai2 = attach[ai];
+      if (ai2 >= pts.length) continue;
+      const pt = pts[ai2];
+      const dirN = Math.min(ai2+1, pts.length-1);
+      const dirP = Math.max(0, ai2-1);
+      const dx = pts[dirN].x - pts[dirP].x;
+      const dy = pts[dirN].y - pts[dirP].y;
+      const dl = Math.hypot(dx,dy)||0.001;
       const px = -dy / dl, py = dx / dl;
       const cycle = Math.sin(t * par.speed * cyc + ai + par.phase);
       let cx = pt.x + px * side * 2, cy2 = pt.y + py * side * 2;
