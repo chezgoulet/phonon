@@ -1349,56 +1349,51 @@ const CyberHud = {
 const BioluminescentDreamscape = {
  id: "bioluminescent",
  name: "Bioluminescent Dreamscape",
- description: "Deep-sea bioluminescence: drifting motes, swaying tendrils, and pulse waves that bloom with device activity — organic and calming.",
+ description: "An abyssal tidepool: kelp fronds sway in a deep current, caustic light filters through the depths, plankton classes drift and pulse, and bioluminescent ripples respond to the device — all within a living, submerged ecosystem.",
 
- // persistent animation state
  _energy: 0,
  _pulses: [],
  _blooms: [],
  _lastPulse: 0,
  _lastCascade: 0,
- _moteSeeds: null,
- _tendrilSeeds: null,
+ _plankton: null,
+ _kelp: null,
+ _caustics: null,
+ _depthDust: null,
 
  reset() {
  this._energy = 0; this._pulses = []; this._blooms = [];
  this._lastPulse = 0; this._lastCascade = 0;
- this._moteSeeds = null; this._tendrilSeeds = null;
+ this._plankton = null; this._kelp = null;
+ this._caustics = null; this._depthDust = null;
  },
 
  _palette(E, healthy, charging, batt, temp) {
- const idleP = { r: 56, g: 248, b: 200 }; // teal
- const idleA = { r: 96, g: 240, b: 255 }; // light cyan
- const hotP = { r: 34, g: 233, b: 168 }; // spring green
- const hotA = { r: 255, g: 224, b: 102 }; // warm yellow
+ const idleP = { r: 56, g: 248, b: 200 };
+ const idleA = { r: 96, g: 240, b: 255 };
+ const hotP = { r: 34, g: 233, b: 168 };
+ const hotA = { r: 255, g: 224, b: 102 };
  const idleBgC = { r: 10, g: 24, b: 32 };
  const idleBg = { r: 4, g: 11, b: 15 };
  const hotBgC = { r: 15, g: 30, b: 26 };
  const hotBg = { r: 9, g: 21, b: 20 };
-
- // overheating => shift warm
  const tempT = clamp((temp - 35) / 10, 0, 1);
  const warmP = lerpRgb(idleP, { r: 234, g: 179, b: 8 }, tempT);
  const warmA = lerpRgb(idleA, { r: 255, g: 90, b: 90 }, tempT);
  const realP = temp > 42 ? lerpRgb(warmP, { r: 239, g: 68, b: 68 }, clamp((temp - 42) / 6, 0, 1)) : warmP;
  const realA = temp > 42 ? lerpRgb(warmA, { r: 239, g: 68, b: 68 }, clamp((temp - 42) / 6, 0, 1)) : warmA;
-
- // low battery => dim blue
  let battP = realP, battA = realA, battBg = hotBg, battBgC = hotBgC;
  if (batt < 20 && !charging) {
  const dim = 1 - (20 - batt) / 20 * 0.7;
- battP = { r: 26 / 255 * dim, g: 76 / 255 * dim, b: 120 / 255 * dim };
- battA = { r: 26 / 255 * dim, g: 58 / 255 * dim, b: 92 / 255 * dim };
- battBg = { r: 2, g: 6, b: 8 };
- battBgC = { r: 4, g: 8, b: 16 };
+ battP = { r: Math.round(26 * dim), g: Math.round(76 * dim), b: Math.round(120 * dim) };
+ battA = { r: Math.round(26 * dim), g: Math.round(58 * dim), b: Math.round(92 * dim) };
+ battBg = { r: 2, g: 6, b: 8 }; battBgC = { r: 4, g: 8, b: 16 };
  }
-
  if (!healthy) {
  return {
  primary: lerpRgb(battP, { r: 239, g: 68, b: 68 }, 0.6),
  accent: { r: 239, g: 68, b: 68 },
- bgCenter: { r: 20, g: 6, b: 8 },
- bg: { r: 10, g: 3, b: 4 },
+ bgCenter: { r: 20, g: 6, b: 8 }, bg: { r: 10, g: 3, b: 4 },
  warning: { r: 255, g: 70, b: 70 },
  };
  }
@@ -1415,9 +1410,8 @@ const BioluminescentDreamscape = {
  const lowPower = s.lowPowerMode;
  const glowMod = parseFloat(s.cfg?.glow_intensity ?? "1.0");
  const pulseFreq = parseFloat(s.cfg?.pulse_frequency ?? "1.0");
- const moteCount = clamp(parseInt(s.cfg?.mote_count ?? "30") || 30, 10, 60);
- const tendrilCount = clamp(parseInt(s.cfg?.tendril_count ?? "5") || 5, 1, 8);
  const cx = W / 2, cy = H / 2;
+ const rMax = Math.hypot(W, H);
 
  // ── energy smoothing ──
  const target = lowPower ? 0 : clamp(
@@ -1427,26 +1421,74 @@ const BioluminescentDreamscape = {
  const k = 1 - Math.pow(0.001, Math.min(dt, 0.05));
  this._energy += (target - this._energy) * k;
  const E = this._energy;
-
  const pal = this._palette(E, s.isHealthy, s.isCharging, s.batteryLevel, s.batteryTemperature);
 
- // ── background: radial abyss gradient ──
- const bg = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.hypot(W, H) * 0.7);
+ // ═══════════════ LAYER 1: THE ABYSS ═══════════════
+ // Deep gradient + drifting caustic light patches + surface shimmer + depth dust
+
+ // 1a. Deep abyss gradient
+ const bg = ctx.createRadialGradient(cx, cy * 0.9, 0, cx, cy * 1.1, rMax * 0.8);
  bg.addColorStop(0, rgba(pal.bgCenter, 1));
- bg.addColorStop(0.6, rgba(pal.bg, 1));
- bg.addColorStop(1, rgba(lerpRgb(pal.bg, { r: 0, g: 0, b: 0 }, 0.5), 1));
+ bg.addColorStop(0.35, rgba(pal.bg, 1));
+ bg.addColorStop(0.7, rgba(lerpRgb(pal.bg, { r: 0, g: 0, b: 0 }, 0.3), 1));
+ bg.addColorStop(1, rgba({ r: 0, g: 0, b: 0 }, 1));
  ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H);
 
- // ── charging edge glow ──
- if (s.isCharging && !lowPower) {
- const chgAlpha = 0.06 + 0.08 * (0.5 + 0.5 * Math.sin(t * 2));
- const chg = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.hypot(W, H) * 0.9);
- chg.addColorStop(0, rgba({ r: 34, g: 197, b: 94 }, 0));
- chg.addColorStop(1, rgba({ r: 34, g: 197, b: 94 }, chgAlpha));
- ctx.fillStyle = chg; ctx.fillRect(0, 0, W, H);
+ // 1b. Surface shimmer band (warmer, brighter at top — like light from above)
+ if (!lowPower) {
+ const surf = ctx.createLinearGradient(0, 0, 0, H * 0.3);
+ surf.addColorStop(0, rgba(lerpRgb(pal.primary, { r: 130, g: 255, b: 240 }, 0.3), 0.03 + 0.03 * (0.5 + 0.5 * Math.sin(t * 0.7))));
+ surf.addColorStop(0.5, rgba(pal.bgCenter, 0.02));
+ surf.addColorStop(1, rgba(pal.bgCenter, 0));
+ ctx.fillStyle = surf; ctx.fillRect(0, 0, W, H * 0.35);
  }
 
- // ── pulse waves ──
+ // 1c. Caustic light patches (very large, very soft blobs drifting slowly)
+ if (!this._caustics) {
+ const rng = mulberry32(133);
+ this._caustics = Array.from({ length: 6 }, () => ({
+ x: rng() * W, y: 0.1 + rng() * 0.6 * H,
+ phase: rng() * 6.28,
+ speed: 0.3 + rng() * 0.5,
+ sz: 0.2 + rng() * 0.3, // fraction of rMax
+ wobble: rng() * 6.28,
+ wobbleSpeed: 0.2 + rng() * 0.4,
+ }));
+ }
+ if (!lowPower) {
+ for (const c of this._caustics) {
+ const cx2 = c.x + Math.sin(t * c.speed * 0.15 + c.phase) * W * 0.15;
+ const cy2 = c.y + Math.sin(t * c.speed * 0.1 + c.phase * 1.3) * H * 0.1;
+ const r = rMax * c.sz * (1 + 0.1 * Math.sin(t * c.wobbleSpeed + c.wobble));
+ const caust = ctx.createRadialGradient(cx2, cy2, 0, cx2, cy2, r);
+ caust.addColorStop(0, rgba(lerpRgb(pal.primary, { r: 200, g: 255, b: 255 }, 0.5), 0.03 * glowMod));
+ caust.addColorStop(0.6, rgba(pal.primary, 0.015 * glowMod));
+ caust.addColorStop(1, rgba(pal.primary, 0));
+ ctx.fillStyle = caust; ctx.beginPath(); ctx.arc(cx2, cy2, r, 0, 7); ctx.fill();
+ }
+ }
+
+ // 1d. Depth dust (tiny distant particles)
+ if (!this._depthDust) {
+ const rng = mulberry32(211);
+ this._depthDust = Array.from({ length: 45 }, () => ({
+ x: rng() * W, y: rng() * H,
+ phase: rng() * 6.28,
+ sz: 0.6 + rng() * 1.3,
+ depth: rng(), // 0 = far, 1 = near-ish
+ dx: rng() * W * 0.08,
+ dy: rng() * H * 0.06,
+ }));
+ }
+ for (const d of this._depthDust) {
+ const dx = d.x + Math.sin(t * (0.12 + d.depth * 0.2) + d.phase * 1.1) * d.dx;
+ const dy = d.y + Math.sin(t * (0.1 + d.depth * 0.15) + d.phase * 0.8) * d.dy;
+ const dustAlpha = (0.2 + 0.3 * (1 - d.depth)) * glowMod;
+ ctx.fillStyle = rgba(pal.primary, dustAlpha);
+ ctx.beginPath(); ctx.arc(dx, dy, d.sz, 0, 7); ctx.fill();
+ }
+
+ // ═══════════════ LAYER 2: RIPPLES (soft pulse waves) ═══════════════
  if (!lowPower) {
  const emitGap = E > 0.7 ? lerp(0.6, 0.3, pulseFreq)
  : E > 0.3 ? lerp(3, 1.5, (E - 0.3) / 0.4) / pulseFreq
@@ -1454,150 +1496,377 @@ const BioluminescentDreamscape = {
  : 8;
  if (t - this._lastPulse > emitGap) {
  const px = 0.15 + Math.random() * 0.7;
- const py = 0.15 + Math.random() * 0.6;
+ const py = 0.1 + Math.random() * 0.5;
  this._pulses.push({ born: t, x: px * W, y: py * H, hot: E });
  this._lastPulse = t;
- // cascade
  if (E > 0.6 && t - this._lastCascade > 0.5) {
- this._pulses.push({ born: t, x: (0.15 + Math.random() * 0.7) * W, y: (0.15 + Math.random() * 0.6) * H, hot: E * 0.8 });
+ this._pulses.push({ born: t, x: (0.15 + Math.random() * 0.7) * W, y: (0.1 + Math.random() * 0.5) * H, hot: E * 0.7 });
  this._lastCascade = t;
  }
  }
- this._pulses = this._pulses.filter(p => t - p.born < 1.2);
+ this._pulses = this._pulses.filter(p => t - p.born < 1.8);
  for (const p of this._pulses) {
- const age = (t - p.born) / 1.2;
- const pr = lerp(0, W * 0.35, age);
- const pCol = E > 0.6 ? lerpRgb(pal.accent, { r: 255, g: 255, b: 255 }, 0.4) : pal.accent;
- ctx.strokeStyle = rgba(pCol, (1 - age) * (0.3 + 0.3 * p.hot) * glowMod);
- ctx.lineWidth = lerp(3, 0.5, age) * (0.6 + p.hot);
- ctx.beginPath(); ctx.arc(p.x, p.y, pr, 0, 7); ctx.stroke();
+ const age = (t - p.born) / 1.8;
+ const rad = lerp(W * 0.02, W * 0.4, age);
+ const alpha = (1 - age) * (0.2 + 0.25 * p.hot) * glowMod;
+ const col = lerpRgb(pal.primary, pal.accent, p.hot);
+ // soft gradient ring — multiple layers for blur
+ for (let ri = 0; ri < 3; ri++) {
+ const rr = rad + ri * W * 0.015;
+ const ra = alpha * (1 - ri * 0.3);
+ const g = ctx.createRadialGradient(p.x, p.y, rr - W * 0.025, p.x, p.y, rr + W * 0.025);
+ g.addColorStop(0, rgba(col, 0));
+ g.addColorStop(0.4, rgba(col, ra));
+ g.addColorStop(0.6, rgba(col, ra));
+ g.addColorStop(1, rgba(col, 0));
+ ctx.fillStyle = g;
+ ctx.beginPath(); ctx.arc(p.x, p.y, rr + W * 0.025, 0, 7); ctx.fill();
  }
- // sustained bloom for deep queue
+ // micro-ripple tail
+ if (age > 0.4 && age < 0.9 && p.hot > 0.3) {
+ const mAge = (age - 0.4) / 0.5;
+ const mRad = rad + W * 0.04;
+ const mAlpha = (1 - mAge) * 0.08 * p.hot * glowMod;
+ const mg = ctx.createRadialGradient(p.x, p.y, mRad - W * 0.008, p.x, p.y, mRad + W * 0.008);
+ mg.addColorStop(0, rgba(col, 0));
+ mg.addColorStop(0.3, rgba(col, mAlpha));
+ mg.addColorStop(0.7, rgba(col, mAlpha));
+ mg.addColorStop(1, rgba(col, 0));
+ ctx.fillStyle = mg;
+ ctx.beginPath(); ctx.arc(p.x, p.y, mRad + W * 0.008, 0, 7); ctx.fill();
+ }
+ }
+ // deep queue: sustained ring
  if (s.queueDepth > 10) {
- const qbAlpha = clamp(s.queueDepth / 20, 0, 1) * 0.12 * glowMod;
- ctx.strokeStyle = rgba(pal.accent, qbAlpha);
- ctx.lineWidth = 4;
- ctx.beginPath(); ctx.arc(cx, cy, W * 0.25, 0, 7); ctx.stroke();
+ const qbAlpha = clamp(s.queueDepth / 20, 0, 1) * 0.08 * glowMod;
+ const qbRad = W * 0.22;
+ const qg = ctx.createRadialGradient(cx, cy, qbRad - W * 0.02, cx, cy, qbRad + W * 0.02);
+ qg.addColorStop(0, rgba(pal.accent, 0));
+ qg.addColorStop(0.3, rgba(pal.accent, qbAlpha));
+ qg.addColorStop(0.7, rgba(pal.accent, qbAlpha));
+ qg.addColorStop(1, rgba(pal.accent, 0));
+ ctx.fillStyle = qg;
+ ctx.beginPath(); ctx.arc(cx, cy, qbRad + W * 0.02, 0, 7); ctx.fill();
  }
  }
 
- // ── tendrils (swaying curves from bottom anchors) ──
- if (!this._tendrilSeeds) {
+ // ═══════════════ LAYER 3: KELP FRONDS ═══════════════
+ // Organic bezier curves with branches, complex multi-harmonic sway, and attached spore glows
+ if (!this._kelp) {
  const rng = mulberry32(77);
- const count = lowPower ? 1 : tendrilCount;
- this._tendrilSeeds = Array.from({ length: count }, (_, i) => ({
- anchorX: 0.1 + (i + 0.5) / count * 0.8,
+ const count = lowPower ? 1 : clamp(parseInt(s.cfg?.tendril_count ?? "6") || 6, 1, 8);
+ this._kelp = Array.from({ length: count }, (_, i) => {
+ const sk = rng() * 6.28;
+ const branchH = 0.35 + rng() * 0.2; // where branch sprouts (fraction of height)
+ return {
+ anchorX: 0.06 + (i + 0.5) / count * 0.88,
  phase: rng() * 6.28,
- }));
+ restTipX: (rng() - 0.5) * 0.12, // natural S-curve rest offset
+ restMidX: (rng() - 0.5) * 0.08,
+ freq1: 0.5 + rng() * 0.3, freq2: 0.8 + rng() * 0.4, freq3: 1.2 + rng() * 0.6,
+ amp1: 1, amp2: 0.5 + rng() * 0.3, amp3: 0.2 + rng() * 0.2,
+ phase1: rng() * 6.28, phase2: rng() * 6.28, phase3: rng() * 6.28,
+ hasBranch: rng() > 0.3, branchSide: rng() > 0.5 ? 1 : -1,
+ branchH: branchH, branchLen: 0.15 + rng() * 0.2,
+ // spore clusters (bioluminescent bacteria on the frond)
+ sporeCount: 3 + Math.floor(rng() * 4),
+ sporeH: Array.from({ length: 3 + Math.floor(rng() * 4) }, () => 0.1 + rng() * 0.75),
+ };
+ });
  }
- const tendrilAlpha = lowPower ? 0.12 : lerp(0.25, 0.7, E) * glowMod;
- const swaySpeed = lowPower ? 0.3 : lerp(1, 3, E);
- const swayAmp = lowPower ? 0.02 : lerp(0.04, 0.12, E);
- const tendrilW = lerp(2.5, 6, E) * (0.5 + 0.5 * glowMod);
- const segs = 12;
+ if (!lowPower) {
+ const swaySpeed = lerp(0.5, 2.5, E);
+ const swayAmp = lerp(0.03, 0.08, E);
+ const frondAlpha = lerp(0.25, 0.6, E) * glowMod;
 
- for (const td of this._tendrilSeeds) {
- const ax = td.anchorX * W;
- const ay = H * 0.98;
- const path = new Path2D();
+ for (const k of this._kelp) {
+ const ax = k.anchorX * W;
+ const ay = H + 5;
+ const segs = 20;
+ const points = [];
+
+ // Build bezier points along the frond
  for (let si = 0; si <= segs; si++) {
  const f = si / segs;
- const yy = ay - f * H * 0.7;
- const sway1 = Math.sin(t * swaySpeed * 0.6 + td.phase + f * 2.1) * swayAmp * W;
- const sway2 = Math.sin(t * swaySpeed * 1.4 + td.phase * 1.7 + f * 3.3) * swayAmp * W * 0.5;
- const xx = ax + sway1 + sway2;
- si === 0 ? path.moveTo(xx, yy) : path.lineTo(xx, yy);
+ // Height with ease-out for natural kelp taper
+ const yy = ay - Math.pow(f, 0.85) * H * 0.72;
+ // Multi-frequency sway
+ const s1 = Math.sin(t * swaySpeed * k.freq1 + k.phase1 + f * 1.7) * swayAmp * W * k.amp1;
+ const s2 = Math.sin(t * swaySpeed * k.freq2 + k.phase2 + f * 3.1) * swayAmp * W * k.amp2;
+ const s3 = Math.sin(t * swaySpeed * k.freq3 + k.phase3 + f * 4.7) * swayAmp * W * k.amp3;
+ // Rest shape: natural S-curve (tip and mid have rest offsets)
+ const restDrift = f < 0.3 ? 0 : lerp(k.restMidX * 0.5, k.restMidX, clamp((f - 0.3) / 0.2, 0, 1)) * W
+ + (f > 0.5 ? lerp(0, k.restTipX, clamp((f - 0.5) / 0.3, 0, 1)) * W : 0);
+ const xx = ax + restDrift + s1 + s2 + s3;
+ points.push({ x: xx, y: yy, f: f });
  }
- ctx.strokeStyle = rgba(pal.primary, tendrilAlpha);
- ctx.lineWidth = tendrilW;
+
+ // Draw frond body: 3-layer soft rendering
+ const path = new Path2D();
+ for (let si = 0; si <= segs; si++) {
+ const p = points[si];
+ si === 0 ? path.moveTo(p.x, p.y) : path.lineTo(p.x, p.y);
+ }
+ // Outer glow (wide, dim)
+ ctx.strokeStyle = rgba(pal.primary, frondAlpha * 0.12);
+ ctx.lineWidth = lerp(12, 2, 1) * (1 + E * 0.5);
  ctx.lineCap = "round"; ctx.lineJoin = "round";
  ctx.stroke(path);
- // outer glow
- ctx.strokeStyle = rgba(pal.primary, tendrilAlpha * 0.25);
- ctx.lineWidth = tendrilW + 6 * glowMod;
+ // Medium glow
+ ctx.strokeStyle = rgba(pal.primary, frondAlpha * 0.35);
+ ctx.lineWidth = lerp(6, 1.5, 1) * (1 + E * 0.3);
  ctx.stroke(path);
+ // Core line (thin, bright)
+ ctx.strokeStyle = rgba(lerpRgb(pal.primary, pal.accent, 0.2), frondAlpha * 0.85);
+ ctx.lineWidth = lerp(2.5, 0.8, 1) * (1 + E * 0.2);
+ ctx.stroke(path);
+
+ // Branch frond
+ if (k.hasBranch) {
+ const bi = Math.round(k.branchH * segs);
+ const bp = points[bi] || points[0];
+ const bSegs = 8;
+ const branchPath = new Path2D();
+ for (let si = 0; si <= bSegs; si++) {
+ const f = si / bSegs;
+ const yy = bp.y - Math.pow(f, 0.8) * k.branchLen * H * 0.6;
+ const s1b = Math.sin(t * swaySpeed * k.freq1 * 0.8 + k.phase1 + f * 1.7) * swayAmp * W * k.amp1 * 0.7;
+ const s2b = Math.sin(t * swaySpeed * k.freq2 * 1.1 + k.phase2 + f * 2.5) * swayAmp * W * k.amp2 * 0.5;
+ const xx = bp.x + k.branchSide * f * W * 0.06 + s1b + s2b;
+ si === 0 ? branchPath.moveTo(xx, yy) : branchPath.lineTo(xx, yy);
+ }
+ ctx.strokeStyle = rgba(pal.primary, frondAlpha * 0.25);
+ ctx.lineWidth = lerp(4, 1, 1) * (1 + E * 0.2);
+ ctx.stroke(branchPath);
+ ctx.strokeStyle = rgba(pal.primary, frondAlpha * 0.6);
+ ctx.lineWidth = lerp(1.5, 0.5, 1);
+ ctx.stroke(branchPath);
+ }
+
+ // Spore glow: tiny bioluminescent dots clustered along the frond
+ for (let si = 0; si < k.sporeCount; si++) {
+ const sh = k.sporeH[si];
+ const pi = Math.round(sh * segs);
+ const sp = points[Math.min(pi, segs)] || points[0];
+ if (!sp) continue;
+ const sPhase = k.phase + si * 2.1;
+ const sBreathe = 0.3 + 0.7 * (0.5 + 0.5 * Math.sin(t * 1.8 + sPhase));
+ const sGlowR = 3 + 4 * sBreathe;
+ const sCol = pal.accent;
+ // spore glow
+ const sg = ctx.createRadialGradient(sp.x, sp.y, 0, sp.x, sp.y, sGlowR);
+ sg.addColorStop(0, rgba(sCol, 0.5 * sBreathe * glowMod));
+ sg.addColorStop(1, rgba(sCol, 0));
+ ctx.fillStyle = sg;
+ ctx.beginPath(); ctx.arc(sp.x, sp.y, sGlowR, 0, 7); ctx.fill();
+ // spore core
+ ctx.fillStyle = rgba(lerpRgb(sCol, { r: 255, g: 255, b: 255 }, 0.5), 0.7 * sBreathe);
+ ctx.beginPath(); ctx.arc(sp.x, sp.y, 0.8 + 0.5 * sBreathe, 0, 7); ctx.fill();
+ }
+ }
  }
  ctx.lineCap = "butt"; ctx.lineJoin = "miter";
 
- // ── motes (drifting glowing particles, positions from seeds + time) ──
- if (!this._moteSeeds) {
+ // ═══════════════ LAYER 4: PLANKTON (three classes) ═══════════════
+ if (!this._plankton) {
  const rng = mulberry32(42);
- const count = lowPower ? Math.min(10, moteCount) : moteCount;
- this._moteSeeds = Array.from({ length: count }, () => ({
- ax: rng() * W,
- ay: rng() * H,
+ this._plankton = [];
+ // Nano (distant): many tiny dim dots
+ for (let i = 0; i < 25; i++) {
+ this._plankton.push({
+ type: "nano",
+ ax: rng() * W, ay: rng() * H,
  phase: rng() * 6.28,
- sz: lowPower ? 1.2 + rng() : 1.5 + rng() * 4,
- dx: rng() * W * 0.15,
- dy: rng() * H * 0.15,
- }));
+ sz: 0.7 + rng() * 1.0,
+ depth: 0.1 + rng() * 0.2,
+ driftX: (rng() - 0.5) * 0.4,
+ driftY: (rng() - 0.5) * 0.3,
+ });
  }
- const moteSpeed = lowPower ? 0.3 : lerp(0.3, 1.2, E);
- const moteMaxAlpha = lowPower ? 0.4 : lerp(0.5, 0.9, E) * glowMod;
- const doClustering = E > 0.15 && !lowPower;
-
- // compute positions
- const motePos = this._moteSeeds.map(s => ({
- x: s.ax + Math.sin(t * moteSpeed * 0.5 + s.phase * 1.3) * s.dx,
- y: s.ay + Math.sin(t * moteSpeed * 0.4 + s.phase * 0.7) * s.dy,
- }));
-
- for (let i = 0; i < this._moteSeeds.length; i++) {
- const seed = this._moteSeeds[i];
- const pos = motePos[i];
- const breath = 0.4 + 0.6 * (0.5 + 0.5 * Math.sin(t * 1.2 + seed.phase));
-
- // proximity clustering
- let clusterBonus = 0;
- if (doClustering) {
- for (let q = 0; q < motePos.length; q++) {
- if (q === i) continue;
- const dist = Math.hypot(pos.x - motePos[q].x, pos.y - motePos[q].y);
- if (dist < W * 0.12) {
- clusterBonus += (1 - dist / (W * 0.12)) * 0.15;
+ // Micro (mid): soft glowing dots with trails
+ for (let i = 0; i < 14; i++) {
+ this._plankton.push({
+ type: "micro",
+ ax: rng() * W, ay: rng() * H,
+ phase: rng() * 6.28,
+ sz: 1.5 + rng() * 2.5,
+ depth: 0.3 + rng() * 0.3,
+ driftX: (rng() - 0.3) * 0.5,
+ driftY: (rng() - 0.5) * 0.4,
+ trailLen: 0.3 + rng() * 0.4,
+ });
+ }
+ // Macro (jellyfish): large complex glows with trailing tentacles
+ for (let i = 0; i < 4; i++) {
+ this._plankton.push({
+ type: "jelly",
+ ax: 0.15 + rng() * 0.7 * W, ay: 0.2 + rng() * 0.6 * H,
+ phase: rng() * 6.28,
+ sz: 6 + rng() * 8,
+ depth: 0.5 + rng() * 0.2,
+ driftX: (rng() - 0.2) * 0.3,
+ driftY: -0.2 - rng() * 0.3, // drift upward
+ pulsePhase: rng() * 6.28,
+ tentacleCount: 4 + Math.floor(rng() * 3),
+ });
  }
  }
- }
- const alpha = clamp(moteMaxAlpha * breath + clusterBonus, 0, 0.95);
- if (alpha < 0.02) continue;
- const sizeMult = lowPower ? 1 : 1 + E * 0.5 + clusterBonus * 0.5;
- const drawSz = seed.sz * sizeMult;
- const glowR = drawSz * 3 * glowMod;
 
- // mote outer glow
+ const currentDirX = 0.3; // gentle current left-to-right
+ const currentDirY = -0.05; // slight upward drift
+ const plankSpeed = lowPower ? 0.2 : lerp(0.3, 1.2, E);
+
+ // Build positions for proximity
+ const plankPos = this._plankton.map(p => {
+ const cx3 = p.ax + Math.sin(t * plankSpeed * 0.4 + p.phase * 1.3) * p.driftX * W * 0.1
+ + t * currentDirX * W * 0.04;
+ const cy3 = p.ay + Math.sin(t * plankSpeed * 0.35 + p.phase * 0.9) * p.driftY * H * 0.1
+ + t * currentDirY * H * 0.02;
+ return { x: cx3, y: cy3 };
+ });
+
+ for (let i = 0; i < this._plankton.length; i++) {
+ const p = this._plankton[i];
+ const pos = plankPos[i];
+ const breathe = 0.3 + 0.7 * (0.5 + 0.5 * Math.sin(t * 1.5 + p.phase));
+
+ if (p.type === "nano") {
+ const na = 0.06 * breathe * glowMod * (1 + E * 0.5);
+ ctx.fillStyle = rgba(pal.primary, na);
+ ctx.beginPath(); ctx.arc(pos.x, pos.y, p.sz, 0, 7); ctx.fill();
+
+ } else if (p.type === "micro") {
+ const ma = clamp(0.4 * breathe * glowMod * (0.4 + E * 0.6), 0, 0.8);
+ const szM = p.sz * (1 + E * 0.3);
+ const glowR = szM * 3.5 * glowMod;
+ // Trailing light (comet tail)
+ const tailLen = p.trailLen * 30;
+ const tDirX = Math.cos(t * plankSpeed * 0.4 + p.phase * 1.3) * p.driftX;
+ const tDirY = Math.cos(t * plankSpeed * 0.35 + p.phase * 0.9) * p.driftY;
+ const tlGrad = ctx.createLinearGradient(pos.x, pos.y, pos.x - tDirX * tailLen * 5, pos.y - tDirY * tailLen * 5);
+ tlGrad.addColorStop(0, rgba(pal.primary, ma * 0.3));
+ tlGrad.addColorStop(1, rgba(pal.primary, 0));
+ ctx.fillStyle = tlGrad;
+ ctx.beginPath(); ctx.arc(pos.x - tDirX * tailLen * 2, pos.y - tDirY * tailLen * 2, szM * 0.8, 0, 7); ctx.fill();
+ // Outer glow
  const g = ctx.createRadialGradient(pos.x, pos.y, 0, pos.x, pos.y, glowR);
- g.addColorStop(0, rgba(pal.primary, alpha * 0.3));
+ g.addColorStop(0, rgba(pal.primary, ma * 0.25));
  g.addColorStop(1, rgba(pal.primary, 0));
  ctx.fillStyle = g;
  ctx.beginPath(); ctx.arc(pos.x, pos.y, glowR, 0, 7); ctx.fill();
- // mote core
- ctx.fillStyle = rgba(pal.primary, alpha);
- ctx.beginPath(); ctx.arc(pos.x, pos.y, drawSz, 0, 7); ctx.fill();
+ // Core
+ ctx.fillStyle = rgba(lerpRgb(pal.primary, { r: 200, g: 255, b: 240 }, 0.3), ma * 0.8);
+ ctx.beginPath(); ctx.arc(pos.x, pos.y, szM, 0, 7); ctx.fill();
+
+ } else if (p.type === "jelly" && !lowPower) {
+ const pulse = 1 + 0.15 * Math.sin(t * 2.5 + p.pulsePhase);
+ const ja = clamp(0.3 * breathe * glowMod * (0.3 + E * 0.7), 0, 0.6);
+ const szJ = p.sz * pulse;
+ // Jellyfish body: large soft gradient
+ const jg = ctx.createRadialGradient(pos.x, pos.y, 0, pos.x, pos.y, szJ * 2);
+ jg.addColorStop(0, rgba(pal.primary, ja * 0.3));
+ jg.addColorStop(0.3, rgba(pal.accent, ja * 0.12));
+ jg.addColorStop(1, rgba(pal.accent, 0));
+ ctx.fillStyle = jg;
+ ctx.beginPath(); ctx.arc(pos.x, pos.y, szJ * 2, 0, 7); ctx.fill();
+ // Body core (dome shape)
+ const jBody = ctx.createRadialGradient(pos.x, pos.y - szJ * 0.2, 0, pos.x, pos.y, szJ);
+ jBody.addColorStop(0, rgba(lerpRgb(pal.primary, { r: 255, g: 255, b: 255 }, 0.4), ja * 0.5));
+ jBody.addColorStop(0.7, rgba(pal.primary, ja * 0.15));
+ jBody.addColorStop(1, rgba(pal.primary, 0));
+ ctx.fillStyle = jBody;
+ ctx.beginPath(); ctx.arc(pos.x, pos.y, szJ, 0, 7); ctx.fill();
+ // Trailing tentacles
+ const tentLen = szJ * (2 + 0.5 * Math.sin(t * 1.8 + p.pulsePhase));
+ ctx.strokeStyle = rgba(pal.primary, ja * 0.2);
+ ctx.lineWidth = 0.8;
+ ctx.lineCap = "round";
+ for (let ti = 0; ti < p.tentacleCount; ti++) {
+ const ta = (ti / p.tentacleCount) * Math.PI * 2 + Math.sin(t * 0.6 + p.phase + ti) * 0.5;
+ const tx = Math.cos(ta) * szJ * 0.5;
+ const ty = Math.sin(ta) * szJ * 0.5;
+ const tSegs = 6;
+ ctx.beginPath();
+ for (let tsi = 0; tsi <= tSegs; tsi++) {
+ const f = tsi / tSegs;
+ const yt = pos.y + Math.abs(ty) + f * tentLen;
+ const xt = pos.x + tx + Math.sin(t * 2 + p.phase + ti + f * 2.5) * szJ * 0.15 * (1 - f);
+ tsi === 0 ? ctx.moveTo(xt, pos.y + Math.abs(ty)) : ctx.lineTo(xt, yt);
+ }
+ ctx.stroke();
+ }
+ ctx.lineCap = "butt";
+ }
  }
 
- // ── core bloom (white-blue flash under heavy load) ──
+ // Proximity glow enhancement (nano + micro only — too expensive for all)
+ if (E > 0.2 && !lowPower) {
+ const microIndices = this._plankton.reduce((acc, p, i) => {
+ if (p.type === "micro" || p.type === "jelly") acc.push(i);
+ return acc;
+ }, []);
+ for (let mi = 0; mi < microIndices.length; mi++) {
+ for (let mj = mi + 1; mj < microIndices.length; mj++) {
+ const ii = microIndices[mi], jj = microIndices[mj];
+ const dist = Math.hypot(plankPos[ii].x - plankPos[jj].x, plankPos[ii].y - plankPos[jj].y);
+ if (dist < W * 0.15) {
+ const bAlpha = (1 - dist / (W * 0.15)) * 0.15 * glowMod;
+ const midX = (plankPos[ii].x + plankPos[jj].x) / 2;
+ const midY = (plankPos[ii].y + plankPos[jj].y) / 2;
+ const bg = ctx.createRadialGradient(midX, midY, 0, midX, midY, W * 0.04);
+ bg.addColorStop(0, rgba(pal.accent, bAlpha));
+ bg.addColorStop(1, rgba(pal.accent, 0));
+ ctx.fillStyle = bg;
+ ctx.beginPath(); ctx.arc(midX, midY, W * 0.04, 0, 7); ctx.fill();
+ }
+ }
+ }
+ }
+
+ // ═══════════════ LAYER 5: CORE BLOOM (jellyfish flash) ═══════════════
  if (E > 0.6 && s.isProcessing && !lowPower) {
- if (this._blooms.length === 0 || t - this._blooms[this._blooms.length - 1].born > 0.5) {
- this._blooms.push({ born: t });
+ if (this._blooms.length === 0 || t - this._blooms[this._blooms.length - 1].born > 0.8) {
+ this._blooms.push({ born: t, seed: Math.random() * 100 });
  }
  }
- this._blooms = this._blooms.filter(b => t - b.born < 0.5);
+ this._blooms = this._blooms.filter(b => t - b.born < 0.8);
  for (const bl of this._blooms) {
- const age = (t - bl.born) / 0.4;
+ const age = (t - bl.born) / 0.6;
  if (age > 1) continue;
- const br = W * 0.2 * age;
+ const br = W * 0.08 + W * 0.22 * age;
+ // Soft radial burst
  const bg = ctx.createRadialGradient(cx, cy, 0, cx, cy, br);
- bg.addColorStop(0, rgba(lerpRgb(pal.accent, { r: 255, g: 255, b: 255 }, 0.7), (1 - age) * 0.5 * glowMod));
- bg.addColorStop(0.6, rgba({ r: 255, g: 255, b: 255 }, (1 - age) * 0.3 * glowMod));
- bg.addColorStop(1, rgba({ r: 255, g: 255, b: 255 }, 0));
+ bg.addColorStop(0, rgba(lerpRgb(pal.accent, { r: 255, g: 255, b: 255 }, 0.6), (1 - age) * 0.3 * glowMod));
+ bg.addColorStop(0.5, rgba(pal.accent, (1 - age) * 0.08 * glowMod));
+ bg.addColorStop(1, rgba(pal.accent, 0));
  ctx.fillStyle = bg;
  ctx.beginPath(); ctx.arc(cx, cy, br, 0, 7); ctx.fill();
- // core dot
- ctx.fillStyle = rgba({ r: 255, g: 255, b: 255 }, (1 - age) * 0.7);
- ctx.beginPath(); ctx.arc(cx, cy, lerp(2, br * 0.3, age), 0, 7); ctx.fill();
+ // Radiating tentacle rays
+ ctx.strokeStyle = rgba(pal.accent, (1 - age) * 0.06 * glowMod);
+ ctx.lineWidth = 0.6;
+ for (let ri = 0; ri < 10; ri++) {
+ const ra = (ri / 10) * Math.PI * 2 + Math.sin(bl.seed + ri * 0.7) * 0.3;
+ ctx.beginPath();
+ ctx.moveTo(cx + Math.cos(ra) * W * 0.01, cy + Math.sin(ra) * H * 0.01);
+ ctx.lineTo(cx + Math.cos(ra) * br * (0.5 + 0.5 * Math.sin(t * 3 + ri)), cy + Math.sin(ra) * br * (0.5 + 0.5 * Math.sin(t * 3 + ri)));
+ ctx.stroke();
+ }
+ // Core dot
+ ctx.fillStyle = rgba({ r: 255, g: 255, b: 255 }, (1 - age) * 0.6);
+ ctx.beginPath(); ctx.arc(cx, cy, lerp(4, br * 0.2, age), 0, 7); ctx.fill();
  }
 
- // ── unhealthy red wash ──
+ // ═══════════════ LAYER 6: OVERLAYS ═══════════════
+ // Charging glow
+ if (s.isCharging && !lowPower) {
+ const chgAlpha = 0.04 + 0.06 * (0.5 + 0.5 * Math.sin(t * 2));
+ const chgG = ctx.createRadialGradient(cx, cy, 0, cx, cy, rMax * 0.9);
+ chgG.addColorStop(0, rgba({ r: 34, g: 197, b: 94 }, 0));
+ chgG.addColorStop(1, rgba({ r: 34, g: 197, b: 94 }, chgAlpha));
+ ctx.fillStyle = chgG; ctx.fillRect(0, 0, W, H);
+ }
+
+ // Unhealthy red wash
  if (!s.isHealthy) {
  const pulseAlpha = 0.08 + 0.12 * (0.5 + 0.5 * Math.sin(t * 3));
  ctx.fillStyle = rgba({ r: 255, g: 70, b: 70 }, pulseAlpha);
