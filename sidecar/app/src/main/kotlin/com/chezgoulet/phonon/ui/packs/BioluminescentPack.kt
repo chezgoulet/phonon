@@ -14,6 +14,7 @@ import com.chezgoulet.phonon.ui.VizState
 import kotlin.math.cos
 import kotlin.math.hypot
 import kotlin.math.pow
+import kotlin.math.roundToInt
 import kotlin.math.sin
 import kotlin.random.Random
 
@@ -75,11 +76,13 @@ object BioluminescentPack : VisualizationPack {
     private data class SwimmerSeed(
         var x: Float, var y: Float,
         var angle: Float,
-        val phase: Float, var driftPhase: Float,
+        var phase: Float, var driftPhase: Float,
         val size: Float, val speed: Float, val swimFreq: Float,
-        val bodyLen: Float, val hueOff: Float,
+        val bodyLen: Float, var hueOff: Float, var colorIdx: Int,
         var targetX: Float, var targetY: Float,
         var turnTimer: Float,
+        var age: Float, var lifeSpan: Float, var fadeAlpha: Float,
+        val trail: MutableList<Offset>,
     )
 
     private data class Palette(
@@ -145,7 +148,7 @@ object BioluminescentPack : VisualizationPack {
 
     @Composable
     override fun Render(state: VizState, modifier: Modifier) {
-        val tendrilCount = (state.themeConfig["tendril_count"] ?: "5").toFloatOrNull()?.toInt()?.coerceIn(2, 7) ?: 5
+        val tendrilCount = (state.themeConfig["tendril_count"] ?: "5").toFloatOrNull()?.toInt()?.coerceIn(3, 8) ?: 5
         val glowMod = (state.themeConfig["glow_intensity"] ?: "1.0").toFloatOrNull() ?: 1.0f
         val pulseFreq = (state.themeConfig["pulse_frequency"] ?: "1.0").toFloatOrNull() ?: 1.0f
         val lowPower = state.lowPowerMode
@@ -272,35 +275,65 @@ object BioluminescentPack : VisualizationPack {
                 drawCircle(pal.primary.copy(alpha = dustAlpha), d.sz, Offset(dx, dy))
             }
 
-            // ═══ LAYER 2: FREE-SWIMMERS ═══
-            // Sinuous creatures swimming freely, interacting with each other
-            val localSwimmers = swimmers ?: run {
-                val rng = Random(88)
-                val count = if (lowPower) 2 else tendrilCount
-                List(count) {
-                    SwimmerSeed(
-                        x = rng.nextFloat() * w, y = rng.nextFloat() * h,
-                        angle = rng.nextFloat() * 6.28f,
-                        phase = rng.nextFloat() * 6.28f,
-                        driftPhase = rng.nextFloat() * 6.28f,
-                        size = 0.7f + rng.nextFloat() * 0.6f,
-                        speed = 0.15f + rng.nextFloat() * 0.25f,
-                        swimFreq = 2f + rng.nextFloat() * 3f,
-                        bodyLen = 50f + rng.nextFloat() * 20f,
-                        hueOff = (rng.nextFloat() - 0.5f) * 0.15f,
-                        targetX = rng.nextFloat() * w,
-                        targetY = rng.nextFloat() * h,
+                        // ═══ LAYER 2: FREE-SWIMMERS — trail-based slithering ═══
+            val MAX_TRAIL = 120
+            val maxSwimmers = if (lowPower) 2 else (3 + (e * 5f).roundToInt()).coerceIn(3, 8)
+            if (swimmers == null) {
+                val rng = Random(88); val pool = mutableListOf<SwimmerSeed>()
+                for (i in 0 until 8) {
+                    val sx = rng.nextFloat() * w; val sy = rng.nextFloat() * h; val sa = rng.nextFloat() * 6.28f
+                    val sSpeed = 0.15f + rng.nextFloat() * 0.25f; val sBodyLen = 50f + rng.nextFloat() * 20f
+                    val tr = mutableListOf<Offset>()
+                    for (j in 0 until MAX_TRAIL) {
+                        tr.add(Offset(
+                            sx - cos(sa) * j.toFloat() * (sSpeed * 60f / MAX_TRAIL),
+                            sy - sin(sa) * j.toFloat() * (sSpeed * 60f / MAX_TRAIL),
+                        ))
+                    }
+                    val hueOff = rng.nextFloat()
+                    pool.add(SwimmerSeed(
+                        x = sx, y = sy, angle = sa,
+                        phase = rng.nextFloat() * 6.28f, driftPhase = rng.nextFloat() * 6.28f,
+                        size = 0.7f + rng.nextFloat() * 0.6f, speed = sSpeed, swimFreq = 2f + rng.nextFloat() * 3f,
+                        bodyLen = sBodyLen, hueOff = hueOff,
+                        colorIdx = (hueOff * 6f).toInt().coerceIn(0, 5),
+                        targetX = rng.nextFloat() * w, targetY = rng.nextFloat() * h,
                         turnTimer = 2f + rng.nextFloat() * 4f,
-                    )
-                }.also { swimmers = it }
+                        age = 0f, lifeSpan = 15f + rng.nextFloat() * 15f, fadeAlpha = 1f,
+                        trail = tr,
+                    ))
+                }
+                swimmers = pool
             }
-            val swimCount = if (lowPower) localSwimmers.size.coerceAtMost(2) else localSwimmers.size
 
-            // Update swimmers
+            val localSwimmers = swimmers!!
+            val swimCount = maxSwimmers.coerceAtMost(localSwimmers.size)
+
+            // Update — lifecycle, navigation, trail
             for (i in 0 until swimCount) {
                 val cr = localSwimmers[i]
-                val tdx = cr.targetX - cr.x
-                val tdy = cr.targetY - cr.y
+                cr.age += dt
+                cr.fadeAlpha = 1f
+                if (cr.age < 2f) cr.fadeAlpha = cr.age / 2f
+                val lifeRemaining = cr.lifeSpan - cr.age
+                if (lifeRemaining < 3f && lifeRemaining > 0f) cr.fadeAlpha = lifeRemaining / 3f
+                if (lifeRemaining <= 0f) {
+                    val rng2 = Random((t * 1000 + i * 7).toInt())
+                    cr.x = rng2.nextFloat() * w; cr.y = rng2.nextFloat() * h
+                    cr.angle = rng2.nextFloat() * 6.28f
+                    cr.targetX = rng2.nextFloat() * w; cr.targetY = rng2.nextFloat() * h
+                    cr.age = 0f; cr.lifeSpan = 15f + rng2.nextFloat() * 15f; cr.fadeAlpha = 0f
+                    cr.hueOff = rng2.nextFloat(); cr.colorIdx = (cr.hueOff * 6f).toInt().coerceIn(0, 5)
+                    cr.trail.clear()
+                    for (j in 0 until MAX_TRAIL) {
+                        cr.trail.add(Offset(
+                            cr.x - cos(cr.angle) * j.toFloat() * (cr.speed * 60f / MAX_TRAIL),
+                            cr.y - sin(cr.angle) * j.toFloat() * (cr.speed * 60f / MAX_TRAIL),
+                        ))
+                    }
+                    continue
+                }
+                val tdx = cr.targetX - cr.x; val tdy = cr.targetY - cr.y
                 val tDist = hypot(tdx, tdy)
                 cr.turnTimer -= dt
                 if (cr.turnTimer <= 0f || tDist < 40f) {
@@ -312,23 +345,20 @@ object BioluminescentPack : VisualizationPack {
                 var angleDiff = tAngle - cr.angle
                 while (angleDiff > 3.14159f) angleDiff -= 6.28318f
                 while (angleDiff < -3.14159f) angleDiff += 6.28318f
-                val turnRate = (1.8f + e * 1.5f) * dt
+                val turnRate = (1.8f + e * 2f) * dt
                 cr.angle += angleDiff.coerceIn(-turnRate, turnRate)
-
                 val speedMul = if (lowPower) 0.4f else lerp(0.6f, 1.8f, e)
                 cr.x += cos(cr.angle) * cr.speed * speedMul * dt * 60f
                 cr.y += sin(cr.angle) * cr.speed * speedMul * dt * 60f
                 cr.driftPhase += dt * 0.3f
-
-                // Wrap at edges
                 val m = cr.bodyLen * 0.5f
-                if (cr.x < -m) cr.x = w + m
-                if (cr.x > w + m) cr.x = -m
-                if (cr.y < -m) cr.y = h + m
-                if (cr.y > h + m) cr.y = -m
+                if (cr.x < -m) cr.x = w + m; if (cr.x > w + m) cr.x = -m
+                if (cr.y < -m) cr.y = h + m; if (cr.y > h + m) cr.y = -m
+                cr.trail.add(0, Offset(cr.x, cr.y))
+                if (cr.trail.size > MAX_TRAIL) cr.trail.removeAt(cr.trail.lastIndex)
             }
 
-            // Swimmer-swimmer interaction glow
+            // Interaction: stronger proximity glow + mutual steering
             for (i in 0 until swimCount) {
                 for (j in i + 1 until swimCount) {
                     val a = localSwimmers[i]; val b = localSwimmers[j]
@@ -336,63 +366,89 @@ object BioluminescentPack : VisualizationPack {
                     val dist = hypot(dx, dy)
                     if (dist < 140f) {
                         val prox = 1f - dist / 140f
-                        val nearGlow = prox * 0.12f * glowMod * (0.5f + 0.5f * e)
-                        // Connection glow line
-                        val connPath = Path().apply {
-                            moveTo(a.x, a.y); lineTo(b.x, b.y)
-                        }
+                        val nearGlow = prox * (0.12f + prox * 0.2f) * glowMod * (0.5f + 0.5f * e)
+                        val connPath = Path().apply { moveTo(a.x, a.y); lineTo(b.x, b.y) }
                         drawPath(connPath, pal.accent.copy(alpha = nearGlow * 0.3f),
-                            style = Stroke(width = 1.5f + prox * 2f))
-                        // Midpoint glow blob
-                        val midX = (a.x + b.x) / 2f; val midY = (a.y + b.y) / 2f
+                            style = Stroke(width = 1.5f + prox * 3f))
+                        val amidX = (a.x + b.x) / 2f; val amidY = (a.y + b.y) / 2f
+                        val connR = 20f + prox * 20f
                         drawCircle(
                             brush = Brush.radialGradient(
                                 listOf(pal.accent.copy(alpha = nearGlow), pal.accent.copy(alpha = 0f)),
-                                center = Offset(midX, midY),
-                                radius = 20f + prox * 15f,
-                            ),
-                            radius = 20f + prox * 15f,
-                            center = Offset(midX, midY),
+                                center = Offset(amidX, amidY), radius = connR,
+                            ), radius = connR, center = Offset(amidX, amidY),
                         )
-                        // Gentle mutual steering
                         val steerA = kotlin.math.atan2(b.y - a.y, b.x - a.x)
                         var diffA = steerA - a.angle
                         while (diffA > 3.14159f) diffA -= 6.28318f
                         while (diffA < -3.14159f) diffA += 6.28318f
-                        a.angle += diffA * dt * 0.4f * prox
+                        a.angle += diffA * dt * 0.7f * prox
                         val steerB = kotlin.math.atan2(a.y - b.y, a.x - b.x)
                         var diffB = steerB - b.angle
                         while (diffB > 3.14159f) diffB -= 6.28318f
                         while (diffB < -3.14159f) diffB += 6.28318f
-                        b.angle += diffB * dt * 0.4f * prox
+                        b.angle += diffB * dt * 0.7f * prox
                     }
                 }
             }
 
-            // Render swimmers as sinuous glowing bodies
+            // Swimmer colors — wider palette (blues, violets, pinks under heavy load)
+            val swimmerColors = arrayOf(
+                listOf(Color(0xFF38F8C8), Color(0xFF60F0FF)),
+                listOf(Color(0xFF22E9A8), Color(0xFFFFE066)),
+                listOf(Color(0xFF30B8FF), Color(0xFF80D0FF)),
+                listOf(Color(0xFF7864FF), Color(0xFFB090FF)),
+                listOf(Color(0xFFB060FF), Color(0xFFD090FF)),
+                listOf(Color(0xFFFF70C0), Color(0xFFFFA0D8)),
+            )
+            val numColors = if (e > 0.5f) 6 else 3
+
+            // Render swimmers as trail-following sinuous bodies
             for (i in 0 until swimCount) {
                 val cr = localSwimmers[i]
-                val npX = cos(cr.angle + 1.5708f)
-                val npY = sin(cr.angle + 1.5708f)
+                val fade = cr.fadeAlpha
+                val trail = cr.trail
+                val trailLen = trail.size
+                if (trailLen < 3) continue
+
+                val colIdx = cr.colorIdx % numColors
+                val baseCol = swimmerColors[colIdx][0]; val accentCol = swimmerColors[colIdx][1]
+                val activityCol = blend(baseCol, accentCol, e * 0.4f)
+                val vibrancy = if (e > 0.5f) ((e - 0.5f) * 2f).coerceIn(0f, 1f) else 0f
+                val vividCol = if (vibrancy > 0.01f) {
+                    val flashCol = blend(Color(0xFFFF80FF), Color(0xFFFF6080),
+                        (sin(cr.phase + t * 0.3f) * 0.5f + 0.5f))
+                    blend(activityCol, flashCol, vibrancy * 0.4f)
+                } else activityCol
+
+                // Build body from trail samples (path-following, no mechanical pivot)
                 val segs = 20
                 val pts = mutableListOf<Offset>()
-
-                for (j in 0 until segs) {
-                    val f = j.toFloat() / (segs - 1)
-                    val waveT = cr.driftPhase * 3f + f * 4.5f
-                    val waveAmp = 7f * (1f - f * 0.25f) * cr.size * (0.5f + 0.5f * e)
-                    val wave = sin(waveT) * waveAmp
-                    val drift = sin(f * 2f + cr.phase + t * 0.2f) * 4f * cr.size
-                    val bodyX = cr.x - cos(cr.angle) * f * cr.bodyLen
-                    val bodyY = cr.y - sin(cr.angle) * f * cr.bodyLen
-                    pts.add(Offset(bodyX + npX * (wave + drift), bodyY + npY * (wave + drift)))
+                val step = maxOf(1, (trailLen - 1) / (segs - 1))
+                for (si in 0 until segs) {
+                    val idx = (si * step).toFloat().roundToInt().coerceAtMost(trailLen - 1)
+                    val pt = trail[idx]
+                    val prevIdx = maxOf(0, idx - 1); val nextIdx = minOf(trailLen - 1, idx + 1)
+                    val dirX = trail[nextIdx].x - trail[prevIdx].x
+                    val dirY = trail[nextIdx].y - trail[prevIdx].y
+                    val dirLen = maxOf(hypot(dirX, dirY), 0.001f)
+                    val perpX = -dirY / dirLen; val perpY = dirX / dirLen
+                    val waveAmp = cr.size * 5f * cr.speed * (si.toFloat() / (segs - 1))
+                    val wave = sin(t * cr.swimFreq * 3f - si * 0.7f + cr.phase + cr.driftPhase * 2f) * waveAmp
+                    pts.add(Offset(pt.x + perpX * wave, pt.y + perpY * wave))
                 }
 
-                val activity = if (state.isProcessing) (1f + e * 0.5f) else 1f
-                val bodyCol = blend(pal.primary, pal.accent, cr.hueOff + 0.2f * sin(t * 0.5f + cr.phase))
-                val bodyAlpha = lerp(0.5f, 0.9f, e) * glowMod * (0.6f + 0.4f * (1f - e * state.inferenceLoad))
+                // Wake (fading trail glow)
+                val wakeStep = maxOf(1, trailLen / 30)
+                for (wi in (trailLen - 1) downTo 0 step wakeStep) {
+                    val f = wi.toFloat() / trailLen
+                    val wakeA = fade * (1f - f) * 0.04f * (0.5f + 0.5f * e)
+                    if (wakeA < 0.001f) continue
+                    val wakeR = cr.size * lerp(0.5f, 1.5f, f) * (0.5f + 0.5f * e)
+                    drawCircle(Color(vividCol.red, vividCol.green, vividCol.blue, wakeA), wakeR, trail[wi])
+                }
 
-                // Build smooth bezier path through points
+                // Body: smooth bezier path
                 val bodyPath = Path().apply {
                     moveTo(pts[0].x, pts[0].y)
                     for (k in 1 until pts.size) {
@@ -401,35 +457,27 @@ object BioluminescentPack : VisualizationPack {
                     }
                     lineTo(pts.last().x, pts.last().y)
                 }
-
-                // Outer glow
-                drawPath(bodyPath, bodyCol.copy(alpha = bodyAlpha * 0.1f),
+                val bodyAlpha = fade * lerp(0.5f, 0.9f, e) * (0.6f + 0.4f * (1f - e * state.inferenceLoad))
+                val activity = if (state.isProcessing) (1f + e * 0.5f) else 1f
+                drawPath(bodyPath, vividCol.copy(alpha = bodyAlpha * 0.1f),
                     style = Stroke(width = cr.size * 10f * activity, cap = StrokeCap.Round, join = StrokeJoin.Round))
-                // Medium glow
-                drawPath(bodyPath, bodyCol.copy(alpha = bodyAlpha * 0.25f),
+                drawPath(bodyPath, vividCol.copy(alpha = bodyAlpha * 0.25f),
                     style = Stroke(width = cr.size * 5f * activity, cap = StrokeCap.Round, join = StrokeJoin.Round))
-                // Core
-                drawPath(bodyPath, blend(bodyCol, Color.White, 0.25f).copy(alpha = bodyAlpha * 0.85f),
+                drawPath(bodyPath, blend(vividCol, Color.White, 0.25f).copy(alpha = bodyAlpha * 0.85f),
                     style = Stroke(width = (cr.size * 2.2f * activity).coerceAtLeast(1.2f), cap = StrokeCap.Round, join = StrokeJoin.Round))
-
-                // Head glow
                 val headSz = 3.5f * cr.size * activity
+                val headR = headSz * 4f
                 drawCircle(
                     brush = Brush.radialGradient(
                         listOf(
-                            blend(pal.accent, Color.White, 0.5f).copy(alpha = bodyAlpha * 0.9f),
-                            pal.accent.copy(alpha = bodyAlpha * 0.2f),
+                            blend(pal.accent, Color.White, 0.5f).copy(alpha = bodyAlpha * 0.9f * fade),
+                            pal.accent.copy(alpha = bodyAlpha * 0.2f * fade),
                             pal.accent.copy(alpha = 0f),
                         ),
-                        center = pts[0],
-                        radius = headSz * 4f,
-                    ),
-                    radius = headSz * 4f,
-                    center = pts[0],
+                        center = pts[0], radius = headR,
+                    ), radius = headR, center = pts[0],
                 )
-            }
-
-            // ═══ LAYER 3: PLANKTON (nano + micro) ═══
+            }// ═══ LAYER 3: PLANKTON (nano + micro) ═══
             val localPlankton = plankton ?: run {
                 val rng = Random(42)
                 val p = mutableListOf<PlanktonSeed>()
