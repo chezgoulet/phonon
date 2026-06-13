@@ -1349,22 +1349,22 @@ const CyberHud = {
 const BioluminescentDreamscape = {
  id: "bioluminescent",
  name: "Bioluminescent Dreamscape",
- description: "An abyssal tidepool: kelp fronds sway in a deep current, caustic light filters through the depths, plankton classes drift and pulse, and bioluminescent ripples respond to the device — all within a living, submerged ecosystem.",
+ description: "Free-swimming bioluminescent organisms drift through the abyss, their luminous bodies tracing sinuous paths in the dark. Caustic light shimmers across the depths, shifting with each pulse of device activity.",
 
  _energy: 0,
- _pulses: [],
+ _shimmers: [],
  _blooms: [],
- _lastPulse: 0,
+ _lastShimmer: 0,
  _lastCascade: 0,
  _plankton: null,
- _kelp: null,
+ _swimmers: null,
  _caustics: null,
  _depthDust: null,
 
  reset() {
- this._energy = 0; this._pulses = []; this._blooms = [];
- this._lastPulse = 0; this._lastCascade = 0;
- this._plankton = null; this._kelp = null;
+ this._energy = 0; this._shimmers = []; this._blooms = [];
+ this._lastShimmer = 0; this._lastCascade = 0;
+ this._plankton = null; this._swimmers = null;
  this._caustics = null; this._depthDust = null;
  },
 
@@ -1424,7 +1424,7 @@ const BioluminescentDreamscape = {
  const pal = this._palette(E, s.isHealthy, s.isCharging, s.batteryLevel, s.batteryTemperature);
 
  // ═══════════════ LAYER 1: THE ABYSS ═══════════════
- // Deep gradient + drifting caustic light patches + surface shimmer + depth dust
+ // Deep gradient + caustic light patches + surface shimmer + depth dust
 
  // 1a. Deep abyss gradient
  const bg = ctx.createRadialGradient(cx, cy * 0.9, 0, cx, cy * 1.1, rMax * 0.8);
@@ -1434,7 +1434,7 @@ const BioluminescentDreamscape = {
  bg.addColorStop(1, rgba({ r: 0, g: 0, b: 0 }, 1));
  ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H);
 
- // 1b. Surface shimmer band (warmer, brighter at top — like light from above)
+ // 1b. Surface shimmer band
  if (!lowPower) {
  const surf = ctx.createLinearGradient(0, 0, 0, H * 0.3);
  surf.addColorStop(0, rgba(lerpRgb(pal.primary, { r: 130, g: 255, b: 240 }, 0.3), 0.03 + 0.03 * (0.5 + 0.5 * Math.sin(t * 0.7))));
@@ -1443,26 +1443,35 @@ const BioluminescentDreamscape = {
  ctx.fillStyle = surf; ctx.fillRect(0, 0, W, H * 0.35);
  }
 
- // 1c. Caustic light patches (very large, very soft blobs drifting slowly)
+ // 1c. Enhanced caustic light patches (12 drifting, more prominent)
  if (!this._caustics) {
  const rng = mulberry32(133);
- this._caustics = Array.from({ length: 6 }, () => ({
- x: rng() * W, y: 0.1 + rng() * 0.6 * H,
+ this._caustics = Array.from({ length: 12 }, () => ({
+ x: rng() * W, y: 0.1 + rng() * 0.7 * H,
  phase: rng() * 6.28,
  speed: 0.3 + rng() * 0.5,
- sz: 0.2 + rng() * 0.3, // fraction of rMax
+ sz: 0.15 + rng() * 0.25,
+ driftAngle: rng() * 6.28,
+ driftSpeed: 0.2 + rng() * 0.4,
  wobble: rng() * 6.28,
  wobbleSpeed: 0.2 + rng() * 0.4,
  }));
  }
  if (!lowPower) {
  for (const c of this._caustics) {
- const cx2 = c.x + Math.sin(t * c.speed * 0.15 + c.phase) * W * 0.15;
- const cy2 = c.y + Math.sin(t * c.speed * 0.1 + c.phase * 1.3) * H * 0.1;
- const r = rMax * c.sz * (1 + 0.1 * Math.sin(t * c.wobbleSpeed + c.wobble));
+ c.x += Math.cos(c.driftAngle) * c.driftSpeed * 60 * dt;
+ c.y += Math.sin(c.driftAngle) * c.driftSpeed * 60 * dt;
+ const margin = W * 0.2;
+ if (c.x < -margin) c.x = W + margin;
+ if (c.x > W + margin) c.x = -margin;
+ if (c.y < -margin) c.y = H + margin;
+ if (c.y > H + margin) c.y = -margin;
+ const cx2 = c.x + Math.sin(t * c.speed * 0.15 + c.phase) * W * 0.1;
+ const cy2 = c.y + Math.sin(t * c.speed * 0.1 + c.phase * 1.3) * H * 0.08;
+ const r = rMax * c.sz * (1 + 0.12 * Math.sin(t * c.wobbleSpeed + c.wobble));
  const caust = ctx.createRadialGradient(cx2, cy2, 0, cx2, cy2, r);
- caust.addColorStop(0, rgba(lerpRgb(pal.primary, { r: 200, g: 255, b: 255 }, 0.5), 0.03 * glowMod));
- caust.addColorStop(0.6, rgba(pal.primary, 0.015 * glowMod));
+ caust.addColorStop(0, rgba(lerpRgb(pal.primary, { r: 200, g: 255, b: 255 }, 0.5), 0.045 * glowMod * (0.5 + 0.5 * E)));
+ caust.addColorStop(0.5, rgba(pal.primary, 0.025 * glowMod * (0.5 + 0.5 * E)));
  caust.addColorStop(1, rgba(pal.primary, 0));
  ctx.fillStyle = caust; ctx.beginPath(); ctx.arc(cx2, cy2, r, 0, 7); ctx.fill();
  }
@@ -1475,7 +1484,7 @@ const BioluminescentDreamscape = {
  x: rng() * W, y: rng() * H,
  phase: rng() * 6.28,
  sz: 0.6 + rng() * 1.3,
- depth: rng(), // 0 = far, 1 = near-ish
+ depth: rng(),
  dx: rng() * W * 0.08,
  dy: rng() * H * 0.06,
  }));
@@ -1488,188 +1497,168 @@ const BioluminescentDreamscape = {
  ctx.beginPath(); ctx.arc(dx, dy, d.sz, 0, 7); ctx.fill();
  }
 
- // ═══════════════ LAYER 2: RIPPLES (soft pulse waves) ═══════════════
- if (!lowPower) {
- const emitGap = E > 0.7 ? lerp(0.6, 0.3, pulseFreq)
- : E > 0.3 ? lerp(3, 1.5, (E - 0.3) / 0.4) / pulseFreq
- : s.isProcessing ? lerp(5, 3, E * 3) / pulseFreq
- : 8;
- if (t - this._lastPulse > emitGap) {
- const px = 0.15 + Math.random() * 0.7;
- const py = 0.1 + Math.random() * 0.5;
- this._pulses.push({ born: t, x: px * W, y: py * H, hot: E });
- this._lastPulse = t;
- if (E > 0.6 && t - this._lastCascade > 0.5) {
- this._pulses.push({ born: t, x: (0.15 + Math.random() * 0.7) * W, y: (0.1 + Math.random() * 0.5) * H, hot: E * 0.7 });
- this._lastCascade = t;
+ // ═══════════════ LAYER 2: FREE-SWIMMERS ═══════════════
+ // Sinuous creatures that swim freely around the screen, interacting with each other
+ if (!this._swimmers) {
+ const rng = mulberry32(88);
+ const count = lowPower ? 2 : clamp(parseInt(s.cfg?.tendril_count ?? "5") || 5, 2, 7);
+ this._swimmers = Array.from({ length: count }, () => ({
+ x: rng() * W, y: rng() * H,
+ angle: rng() * 6.28,
+ phase: rng() * 6.28,
+ driftPhase: rng() * 6.28,
+ size: 0.7 + rng() * 0.6,
+ speed: 0.15 + rng() * 0.25,
+ swimFreq: 2 + rng() * 3,
+ bodyLen: 50 + rng() * 20,
+ hueOff: (rng() - 0.5) * 0.15,
+ targetX: rng() * W,
+ targetY: rng() * H,
+ turnTimer: 2 + rng() * 4,
+ }));
  }
+ const swimCount = lowPower ? Math.min(2, this._swimmers.length) : this._swimmers.length;
+
+ // Update swimmers
+ for (let i = 0; i < swimCount; i++) {
+ const cr = this._swimmers[i];
+ // Wander toward target
+ const tdx = cr.targetX - cr.x;
+ const tdy = cr.targetY - cr.y;
+ const tDist = Math.hypot(tdx, tdy);
+ cr.turnTimer -= dt;
+ if (cr.turnTimer <= 0 || tDist < 40) {
+ cr.targetX = cx + (Math.random() * 2 - 1) * W * 0.38;
+ cr.targetY = cy + (Math.random() * 2 - 1) * H * 0.38;
+ cr.turnTimer = 2.5 + Math.random() * 3;
  }
- this._pulses = this._pulses.filter(p => t - p.born < 1.8);
- for (const p of this._pulses) {
- const age = (t - p.born) / 1.8;
- const rad = lerp(W * 0.02, W * 0.4, age);
- const alpha = (1 - age) * (0.2 + 0.25 * p.hot) * glowMod;
- const col = lerpRgb(pal.primary, pal.accent, p.hot);
- // soft gradient ring — multiple layers for blur
- for (let ri = 0; ri < 3; ri++) {
- const rr = rad + ri * W * 0.015;
- const ra = alpha * (1 - ri * 0.3);
- const r0 = Math.max(0, rr - W * 0.025);
- const g = ctx.createRadialGradient(p.x, p.y, r0, p.x, p.y, rr + W * 0.025);
- g.addColorStop(0, rgba(col, 0));
- g.addColorStop(0.4, rgba(col, ra));
- g.addColorStop(0.6, rgba(col, ra));
- g.addColorStop(1, rgba(col, 0));
- ctx.fillStyle = g;
- ctx.beginPath(); ctx.arc(p.x, p.y, rr + W * 0.025, 0, 7); ctx.fill();
- }
- // micro-ripple tail
- if (age > 0.4 && age < 0.9 && p.hot > 0.3) {
- const mAge = (age - 0.4) / 0.5;
- const mRad = rad + W * 0.04;
- const mAlpha = (1 - mAge) * 0.08 * p.hot * glowMod;
- const mr0 = Math.max(0, mRad - W * 0.008);
- const mg = ctx.createRadialGradient(p.x, p.y, mr0, p.x, p.y, mRad + W * 0.008);
- mg.addColorStop(0, rgba(col, 0));
- mg.addColorStop(0.3, rgba(col, mAlpha));
- mg.addColorStop(0.7, rgba(col, mAlpha));
- mg.addColorStop(1, rgba(col, 0));
- ctx.fillStyle = mg;
- ctx.beginPath(); ctx.arc(p.x, p.y, mRad + W * 0.008, 0, 7); ctx.fill();
- }
- }
- // deep queue: sustained ring
- if (s.queueDepth > 10) {
- const qbAlpha = clamp(s.queueDepth / 20, 0, 1) * 0.08 * glowMod;
- const qbRad = W * 0.22;
- const qg = ctx.createRadialGradient(cx, cy, Math.max(0, qbRad - W * 0.02), cx, cy, qbRad + W * 0.02);
- qg.addColorStop(0, rgba(pal.accent, 0));
- qg.addColorStop(0.3, rgba(pal.accent, qbAlpha));
- qg.addColorStop(0.7, rgba(pal.accent, qbAlpha));
- qg.addColorStop(1, rgba(pal.accent, 0));
- ctx.fillStyle = qg;
- ctx.beginPath(); ctx.arc(cx, cy, qbRad + W * 0.02, 0, 7); ctx.fill();
- }
+ // Steer toward target
+ const tAngle = Math.atan2(tdy, tdx);
+ let angleDiff = tAngle - cr.angle;
+ while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+ while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+ const turnRate = (1.8 + E * 1.5) * dt;
+ cr.angle += clamp(angleDiff, -turnRate, turnRate);
+
+ // Move forward
+ const speedMul = lowPower ? 0.4 : lerp(0.6, 1.8, E);
+ cr.x += Math.cos(cr.angle) * cr.speed * speedMul * dt * 60;
+ cr.y += Math.sin(cr.angle) * cr.speed * speedMul * dt * 60;
+ // Accumulate swim phase for body undulation
+ cr.driftPhase += dt * 0.3;
+
+ // Wrap at edges
+ const margin = cr.bodyLen * 0.5;
+ if (cr.x < -margin) cr.x = W + margin;
+ if (cr.x > W + margin) cr.x = -margin;
+ if (cr.y < -margin) cr.y = H + margin;
+ if (cr.y > H + margin) cr.y = -margin;
  }
 
- // ═══════════════ LAYER 3: KELP FRONDS ═══════════════
- // Organic bezier curves with branches, complex multi-harmonic sway, and attached spore glows
- if (!this._kelp) {
- const rng = mulberry32(77);
- const count = lowPower ? 1 : clamp(parseInt(s.cfg?.tendril_count ?? "6") || 6, 1, 8);
- this._kelp = Array.from({ length: count }, (_, i) => {
- const sk = rng() * 6.28;
- const branchH = 0.35 + rng() * 0.2; // where branch sprouts (fraction of height)
- return {
- anchorX: 0.06 + (i + 0.5) / count * 0.88,
- phase: rng() * 6.28,
- restTipX: (rng() - 0.5) * 0.12, // natural S-curve rest offset
- restMidX: (rng() - 0.5) * 0.08,
- freq1: 0.5 + rng() * 0.3, freq2: 0.8 + rng() * 0.4, freq3: 1.2 + rng() * 0.6,
- amp1: 1, amp2: 0.5 + rng() * 0.3, amp3: 0.2 + rng() * 0.2,
- phase1: rng() * 6.28, phase2: rng() * 6.28, phase3: rng() * 6.28,
- hasBranch: rng() > 0.3, branchSide: rng() > 0.5 ? 1 : -1,
- branchH: branchH, branchLen: 0.15 + rng() * 0.2,
- // spore clusters (bioluminescent bacteria on the frond)
- sporeCount: 3 + Math.floor(rng() * 4),
- sporeH: Array.from({ length: 3 + Math.floor(rng() * 4) }, () => 0.1 + rng() * 0.75),
- };
+ // Swimmer-swimmer interactions (proximity glow)
+ ctx.save();
+ for (let i = 0; i < swimCount; i++) {
+ for (let j = i + 1; j < swimCount; j++) {
+ const a = this._swimmers[i], b = this._swimmers[j];
+ const dx = a.x - b.x, dy = a.y - b.y;
+ const dist = Math.hypot(dx, dy);
+ if (dist < 140) {
+ const prox = 1 - dist / 140;
+ const nearGlow = prox * 0.12 * glowMod * (0.5 + 0.5 * E);
+ // Connection glow line
+ ctx.strokeStyle = rgba(pal.accent, nearGlow * 0.3);
+ ctx.lineWidth = 1.5 + prox * 2;
+ ctx.beginPath();
+ ctx.moveTo(a.x, a.y);
+ ctx.lineTo(b.x, b.y);
+ ctx.stroke();
+ // Glow blob at midpoint
+ const midX = (a.x + b.x) / 2, midY = (a.y + b.y) / 2;
+ const ig = ctx.createRadialGradient(midX, midY, 0, midX, midY, 20 + prox * 15);
+ ig.addColorStop(0, rgba(pal.accent, nearGlow));
+ ig.addColorStop(1, rgba(pal.accent, 0));
+ ctx.fillStyle = ig;
+ ctx.beginPath(); ctx.arc(midX, midY, 20 + prox * 15, 0, 7); ctx.fill();
+ // Gentle mutual steering
+ const steerA = Math.atan2(b.y - a.y, b.x - a.x);
+ let diffA = steerA - a.angle;
+ while (diffA > Math.PI) diffA -= Math.PI * 2;
+ while (diffA < -Math.PI) diffA += Math.PI * 2;
+ a.angle += diffA * dt * 0.4 * prox;
+ const steerB = Math.atan2(a.y - b.y, a.x - b.x);
+ let diffB = steerB - b.angle;
+ while (diffB > Math.PI) diffB -= Math.PI * 2;
+ while (diffB < -Math.PI) diffB += Math.PI * 2;
+ b.angle += diffB * dt * 0.4 * prox;
+ }
+ }
+ }
+ ctx.restore();
+
+ // Render swimmers
+ ctx.save();
+ ctx.lineCap = "round"; ctx.lineJoin = "round";
+ for (let i = 0; i < swimCount; i++) {
+ const cr = this._swimmers[i];
+ const np = { x: Math.cos(cr.angle + Math.PI / 2), y: Math.sin(cr.angle + Math.PI / 2) };
+ const segs = 20;
+ const pts = [];
+ for (let j = 0; j < segs; j++) {
+ const f = j / (segs - 1);
+ const waveT = cr.driftPhase * 3 + f * 4.5;
+ const waveAmp = 7 * (1 - f * 0.25) * cr.size * (0.5 + 0.5 * E);
+ const wave = Math.sin(waveT) * waveAmp;
+ const drift = Math.sin(f * 2 + cr.phase + t * 0.2) * 4 * cr.size;
+ const bodyX = cr.x - Math.cos(cr.angle) * f * cr.bodyLen;
+ const bodyY = cr.y - Math.sin(cr.angle) * f * cr.bodyLen;
+ pts.push({
+ x: bodyX + np.x * (wave + drift),
+ y: bodyY + np.y * (wave + drift),
+ f,
  });
  }
- if (!lowPower) {
- const swaySpeed = lerp(0.5, 2.5, E);
- const swayAmp = lerp(0.03, 0.08, E);
- const frondAlpha = lerp(0.25, 0.6, E) * glowMod;
+ // Draw body: 3-layer glow
+ const activity = s.isProcessing ? (1 + E * 0.5) : 1;
+ const bodyCol = lerpRgb(pal.primary, pal.accent, cr.hueOff + 0.2 * Math.sin(t * 0.5 + cr.phase));
+ const bodyAlpha = lerp(0.5, 0.9, E) * glowMod * (0.6 + 0.4 * (1 - E * s.inferenceLoad));
 
- for (const k of this._kelp) {
- const ax = k.anchorX * W;
- const ay = H + 5;
- const segs = 20;
- const points = [];
-
- // Build bezier points along the frond
- for (let si = 0; si <= segs; si++) {
- const f = si / segs;
- // Height with ease-out for natural kelp taper
- const yy = ay - Math.pow(f, 0.85) * H * 0.72;
- // Multi-frequency sway
- const s1 = Math.sin(t * swaySpeed * k.freq1 + k.phase1 + f * 1.7) * swayAmp * W * k.amp1;
- const s2 = Math.sin(t * swaySpeed * k.freq2 + k.phase2 + f * 3.1) * swayAmp * W * k.amp2;
- const s3 = Math.sin(t * swaySpeed * k.freq3 + k.phase3 + f * 4.7) * swayAmp * W * k.amp3;
- // Rest shape: natural S-curve (tip and mid have rest offsets)
- const restDrift = f < 0.3 ? 0 : lerp(k.restMidX * 0.5, k.restMidX, clamp((f - 0.3) / 0.2, 0, 1)) * W
- + (f > 0.5 ? lerp(0, k.restTipX, clamp((f - 0.5) / 0.3, 0, 1)) * W : 0);
- const xx = ax + restDrift + s1 + s2 + s3;
- points.push({ x: xx, y: yy, f: f });
+ // Helper: smooth bezier path
+ function drawSmoothPath(pts2) {
+ ctx.beginPath();
+ ctx.moveTo(pts2[0].x, pts2[0].y);
+ for (let k = 1; k < pts2.length; k++) {
+ const p0 = pts2[k - 1], p1 = pts2[k];
+ ctx.quadraticCurveTo(p0.x, p0.y, (p0.x + p1.x) / 2, (p0.y + p1.y) / 2);
+ }
+ ctx.lineTo(pts2[pts2.length - 1].x, pts2[pts2.length - 1].y);
  }
 
- // Draw frond body: 3-layer soft rendering
- const path = new Path2D();
- for (let si = 0; si <= segs; si++) {
- const p = points[si];
- si === 0 ? path.moveTo(p.x, p.y) : path.lineTo(p.x, p.y);
- }
- // Outer glow (wide, dim)
- ctx.strokeStyle = rgba(pal.primary, frondAlpha * 0.12);
- ctx.lineWidth = lerp(12, 2, 1) * (1 + E * 0.5);
- ctx.lineCap = "round"; ctx.lineJoin = "round";
- ctx.stroke(path);
+ // Outer glow
+ ctx.strokeStyle = rgba(bodyCol, bodyAlpha * 0.1);
+ ctx.lineWidth = cr.size * 10 * activity;
+ drawSmoothPath(pts); ctx.stroke();
  // Medium glow
- ctx.strokeStyle = rgba(pal.primary, frondAlpha * 0.35);
- ctx.lineWidth = lerp(6, 1.5, 1) * (1 + E * 0.3);
- ctx.stroke(path);
- // Core line (thin, bright)
- ctx.strokeStyle = rgba(lerpRgb(pal.primary, pal.accent, 0.2), frondAlpha * 0.85);
- ctx.lineWidth = lerp(2.5, 0.8, 1) * (1 + E * 0.2);
- ctx.stroke(path);
+ ctx.strokeStyle = rgba(bodyCol, bodyAlpha * 0.25);
+ ctx.lineWidth = cr.size * 5 * activity;
+ drawSmoothPath(pts); ctx.stroke();
+ // Core
+ ctx.strokeStyle = rgba(lerpRgb(bodyCol, { r: 255, g: 255, b: 255 }, 0.25), bodyAlpha * 0.85);
+ ctx.lineWidth = Math.max(1.2, cr.size * 2.2 * activity);
+ drawSmoothPath(pts); ctx.stroke();
 
- // Branch frond
- if (k.hasBranch) {
- const bi = Math.round(k.branchH * segs);
- const bp = points[bi] || points[0];
- const bSegs = 8;
- const branchPath = new Path2D();
- for (let si = 0; si <= bSegs; si++) {
- const f = si / bSegs;
- const yy = bp.y - Math.pow(f, 0.8) * k.branchLen * H * 0.6;
- const s1b = Math.sin(t * swaySpeed * k.freq1 * 0.8 + k.phase1 + f * 1.7) * swayAmp * W * k.amp1 * 0.7;
- const s2b = Math.sin(t * swaySpeed * k.freq2 * 1.1 + k.phase2 + f * 2.5) * swayAmp * W * k.amp2 * 0.5;
- const xx = bp.x + k.branchSide * f * W * 0.06 + s1b + s2b;
- si === 0 ? branchPath.moveTo(xx, yy) : branchPath.lineTo(xx, yy);
+ // Head glow (brighter point at front)
+ const headSz = 3.5 * cr.size * activity;
+ const hg = ctx.createRadialGradient(pts[0].x, pts[0].y, 0, pts[0].x, pts[0].y, headSz * 4);
+ hg.addColorStop(0, rgba(lerpRgb(pal.accent, { r: 255, g: 255, b: 255 }, 0.5), bodyAlpha * 0.9));
+ hg.addColorStop(0.4, rgba(pal.accent, bodyAlpha * 0.2));
+ hg.addColorStop(1, rgba(pal.accent, 0));
+ ctx.fillStyle = hg;
+ ctx.beginPath(); ctx.arc(pts[0].x, pts[0].y, headSz * 4, 0, 7); ctx.fill();
  }
- ctx.strokeStyle = rgba(pal.primary, frondAlpha * 0.25);
- ctx.lineWidth = lerp(4, 1, 1) * (1 + E * 0.2);
- ctx.stroke(branchPath);
- ctx.strokeStyle = rgba(pal.primary, frondAlpha * 0.6);
- ctx.lineWidth = lerp(1.5, 0.5, 1);
- ctx.stroke(branchPath);
- }
-
- // Spore glow: tiny bioluminescent dots clustered along the frond
- for (let si = 0; si < k.sporeCount; si++) {
- const sh = k.sporeH[si];
- const pi = Math.round(sh * segs);
- const sp = points[Math.min(pi, segs)] || points[0];
- if (!sp) continue;
- const sPhase = k.phase + si * 2.1;
- const sBreathe = 0.3 + 0.7 * (0.5 + 0.5 * Math.sin(t * 1.8 + sPhase));
- const sGlowR = 3 + 4 * sBreathe;
- const sCol = pal.accent;
- // spore glow
- const sg = ctx.createRadialGradient(sp.x, sp.y, 0, sp.x, sp.y, sGlowR);
- sg.addColorStop(0, rgba(sCol, 0.5 * sBreathe * glowMod));
- sg.addColorStop(1, rgba(sCol, 0));
- ctx.fillStyle = sg;
- ctx.beginPath(); ctx.arc(sp.x, sp.y, sGlowR, 0, 7); ctx.fill();
- // spore core
- ctx.fillStyle = rgba(lerpRgb(sCol, { r: 255, g: 255, b: 255 }, 0.5), 0.7 * sBreathe);
- ctx.beginPath(); ctx.arc(sp.x, sp.y, 0.8 + 0.5 * sBreathe, 0, 7); ctx.fill();
- }
- }
- }
+ ctx.restore();
  ctx.lineCap = "butt"; ctx.lineJoin = "miter";
 
- // ═══════════════ LAYER 4: PLANKTON (three classes) ═══════════════
+ // ═══════════════ LAYER 3: PLANKTON (nano + micro) ═══════════════
  if (!this._plankton) {
  const rng = mulberry32(42);
  this._plankton = [];
@@ -1685,8 +1674,8 @@ const BioluminescentDreamscape = {
  driftY: (rng() - 0.5) * 0.3,
  });
  }
- // Micro (mid): soft glowing dots with trails
- for (let i = 0; i < 14; i++) {
+ // Micro (mid): soft glowing dots with comet trails
+ for (let i = 0; i < 16; i++) {
  this._plankton.push({
  type: "micro",
  ax: rng() * W, ay: rng() * H,
@@ -1698,34 +1687,18 @@ const BioluminescentDreamscape = {
  trailLen: 0.3 + rng() * 0.4,
  });
  }
- // Macro (jellyfish): large complex glows with trailing tentacles
- for (let i = 0; i < 4; i++) {
- this._plankton.push({
- type: "jelly",
- ax: 0.15 + rng() * 0.7 * W, ay: 0.2 + rng() * 0.6 * H,
- phase: rng() * 6.28,
- sz: 6 + rng() * 8,
- depth: 0.5 + rng() * 0.2,
- driftX: (rng() - 0.2) * 0.3,
- driftY: -0.2 - rng() * 0.3, // drift upward
- pulsePhase: rng() * 6.28,
- tentacleCount: 4 + Math.floor(rng() * 3),
- });
- }
  }
 
- const currentDirX = 0.3; // gentle current left-to-right
- const currentDirY = -0.05; // slight upward drift
  const plankSpeed = lowPower ? 0.2 : lerp(0.3, 1.2, E);
+ const currentDirX = 0.3, currentDirY = -0.05;
 
- // Build positions for proximity
- const plankPos = this._plankton.map(p => {
- const cx3 = p.ax + Math.sin(t * plankSpeed * 0.4 + p.phase * 1.3) * p.driftX * W * 0.1
- + t * currentDirX * W * 0.04;
- const cy3 = p.ay + Math.sin(t * plankSpeed * 0.35 + p.phase * 0.9) * p.driftY * H * 0.1
- + t * currentDirY * H * 0.02;
- return { x: cx3, y: cy3 };
- });
+ // Compute positions
+ const plankPos = this._plankton.map(p => ({
+ x: p.ax + Math.sin(t * plankSpeed * 0.4 + p.phase * 1.3) * p.driftX * W * 0.1
+ + t * currentDirX * W * 0.04,
+ y: p.ay + Math.sin(t * plankSpeed * 0.35 + p.phase * 0.9) * p.driftY * H * 0.1
+ + t * currentDirY * H * 0.02,
+ }));
 
  for (let i = 0; i < this._plankton.length; i++) {
  const p = this._plankton[i];
@@ -1741,10 +1714,10 @@ const BioluminescentDreamscape = {
  const ma = clamp(0.4 * breathe * glowMod * (0.4 + E * 0.6), 0, 0.8);
  const szM = p.sz * (1 + E * 0.3);
  const glowR = szM * 3.5 * glowMod;
- // Trailing light (comet tail)
- const tailLen = p.trailLen * 30;
+ // Comet trail
  const tDirX = Math.cos(t * plankSpeed * 0.4 + p.phase * 1.3) * p.driftX;
  const tDirY = Math.cos(t * plankSpeed * 0.35 + p.phase * 0.9) * p.driftY;
+ const tailLen = p.trailLen * 30;
  const tlGrad = ctx.createLinearGradient(pos.x, pos.y, pos.x - tDirX * tailLen * 5, pos.y - tDirY * tailLen * 5);
  tlGrad.addColorStop(0, rgba(pal.primary, ma * 0.3));
  tlGrad.addColorStop(1, rgba(pal.primary, 0));
@@ -1759,73 +1732,75 @@ const BioluminescentDreamscape = {
  // Core
  ctx.fillStyle = rgba(lerpRgb(pal.primary, { r: 200, g: 255, b: 240 }, 0.3), ma * 0.8);
  ctx.beginPath(); ctx.arc(pos.x, pos.y, szM, 0, 7); ctx.fill();
-
- } else if (p.type === "jelly" && !lowPower) {
- const pulse = 1 + 0.15 * Math.sin(t * 2.5 + p.pulsePhase);
- const ja = clamp(0.3 * breathe * glowMod * (0.3 + E * 0.7), 0, 0.6);
- const szJ = p.sz * pulse;
- // Jellyfish body: large soft gradient
- const jg = ctx.createRadialGradient(pos.x, pos.y, 0, pos.x, pos.y, szJ * 2);
- jg.addColorStop(0, rgba(pal.primary, ja * 0.3));
- jg.addColorStop(0.3, rgba(pal.accent, ja * 0.12));
- jg.addColorStop(1, rgba(pal.accent, 0));
- ctx.fillStyle = jg;
- ctx.beginPath(); ctx.arc(pos.x, pos.y, szJ * 2, 0, 7); ctx.fill();
- // Body core (dome shape)
- const jBody = ctx.createRadialGradient(pos.x, pos.y - szJ * 0.2, 0, pos.x, pos.y, szJ);
- jBody.addColorStop(0, rgba(lerpRgb(pal.primary, { r: 255, g: 255, b: 255 }, 0.4), ja * 0.5));
- jBody.addColorStop(0.7, rgba(pal.primary, ja * 0.15));
- jBody.addColorStop(1, rgba(pal.primary, 0));
- ctx.fillStyle = jBody;
- ctx.beginPath(); ctx.arc(pos.x, pos.y, szJ, 0, 7); ctx.fill();
- // Trailing tentacles
- const tentLen = szJ * (2 + 0.5 * Math.sin(t * 1.8 + p.pulsePhase));
- ctx.strokeStyle = rgba(pal.primary, ja * 0.2);
- ctx.lineWidth = 0.8;
- ctx.lineCap = "round";
- for (let ti = 0; ti < p.tentacleCount; ti++) {
- const ta = (ti / p.tentacleCount) * Math.PI * 2 + Math.sin(t * 0.6 + p.phase + ti) * 0.5;
- const tx = Math.cos(ta) * szJ * 0.5;
- const ty = Math.sin(ta) * szJ * 0.5;
- const tSegs = 6;
- ctx.beginPath();
- for (let tsi = 0; tsi <= tSegs; tsi++) {
- const f = tsi / tSegs;
- const yt = pos.y + Math.abs(ty) + f * tentLen;
- const xt = pos.x + tx + Math.sin(t * 2 + p.phase + ti + f * 2.5) * szJ * 0.15 * (1 - f);
- tsi === 0 ? ctx.moveTo(xt, pos.y + Math.abs(ty)) : ctx.lineTo(xt, yt);
- }
- ctx.stroke();
- }
- ctx.lineCap = "butt";
  }
  }
 
- // Proximity glow enhancement (nano + micro only — too expensive for all)
- if (E > 0.2 && !lowPower) {
- const microIndices = this._plankton.reduce((acc, p, i) => {
- if (p.type === "micro" || p.type === "jelly") acc.push(i);
- return acc;
- }, []);
- for (let mi = 0; mi < microIndices.length; mi++) {
- for (let mj = mi + 1; mj < microIndices.length; mj++) {
- const ii = microIndices[mi], jj = microIndices[mj];
- const dist = Math.hypot(plankPos[ii].x - plankPos[jj].x, plankPos[ii].y - plankPos[jj].y);
- if (dist < W * 0.15) {
- const bAlpha = (1 - dist / (W * 0.15)) * 0.15 * glowMod;
- const midX = (plankPos[ii].x + plankPos[jj].x) / 2;
- const midY = (plankPos[ii].y + plankPos[jj].y) / 2;
- const bg = ctx.createRadialGradient(midX, midY, 0, midX, midY, W * 0.04);
- bg.addColorStop(0, rgba(pal.accent, bAlpha));
- bg.addColorStop(1, rgba(pal.accent, 0));
- ctx.fillStyle = bg;
- ctx.beginPath(); ctx.arc(midX, midY, W * 0.04, 0, 7); ctx.fill();
+ // ═══════════════ LAYER 4: CAUSTIC SHIMMER (soft light bursts ═══════════════
+ // replaces ripple pulses — like light through water on the ocean floor)
+ if (!lowPower) {
+ const emitGap = E > 0.7 ? lerp(0.6, 0.3, pulseFreq)
+ : E > 0.3 ? lerp(3, 1.5, (E - 0.3) / 0.4) / pulseFreq
+ : s.isProcessing ? lerp(5, 3, E * 3) / pulseFreq
+ : 8;
+ if (t - this._lastShimmer > emitGap) {
+ const burstCount = 2 + Math.round(E * 3);
+ for (let i = 0; i < burstCount; i++) {
+ this._shimmers.push({
+ born: t,
+ x: (0.1 + Math.random() * 0.8) * W,
+ y: (0.1 + Math.random() * 0.7) * H,
+ hot: E * (0.6 + Math.random() * 0.4),
+ phase: Math.random() * 6.28,
+ });
+ }
+ this._lastShimmer = t;
+ if (E > 0.6 && t - this._lastCascade > 0.5) {
+ for (let i = 0; i < 2; i++) {
+ this._shimmers.push({
+ born: t,
+ x: (0.1 + Math.random() * 0.8) * W,
+ y: (0.1 + Math.random() * 0.5) * H,
+ hot: E * 0.5,
+ phase: Math.random() * 6.28,
+ });
+ }
+ this._lastCascade = t;
  }
  }
+ this._shimmers = this._shimmers.filter(s => t - s.born < 1.2);
+ for (const s of this._shimmers) {
+ const age = (t - s.born) / 1.2;
+ const rad = lerp(W * 0.03, W * 0.25, age) * (0.7 + s.hot * 0.3);
+ const alpha = (1 - age) * 0.15 * s.hot * glowMod;
+ // Soft caustic patch (filled glow, not a ring)
+ const g = ctx.createRadialGradient(s.x, s.y, 0, s.x, s.y, rad);
+ g.addColorStop(0, rgba(lerpRgb(pal.accent, { r: 255, g: 255, b: 240 }, 0.5), alpha));
+ g.addColorStop(0.5, rgba(pal.primary, alpha * 0.4));
+ g.addColorStop(1, rgba(pal.primary, 0));
+ ctx.fillStyle = g;
+ ctx.beginPath(); ctx.arc(s.x, s.y, rad, 0, 7); ctx.fill();
+ // Secondary shifted glow (caustic shimmer — like light breaking through a lens)
+ const offX = Math.cos(s.phase + t * 0.6) * rad * 0.25;
+ const offY = Math.sin(s.phase + t * 1.2) * rad * 0.2;
+ const g2 = ctx.createRadialGradient(s.x + offX, s.y + offY, 0, s.x + offX, s.y + offY, rad * 0.4);
+ g2.addColorStop(0, rgba(pal.accent, alpha * 0.35));
+ g2.addColorStop(1, rgba(pal.accent, 0));
+ ctx.fillStyle = g2;
+ ctx.beginPath(); ctx.arc(s.x + offX, s.y + offY, rad * 0.4, 0, 7); ctx.fill();
+ }
+
+ // Deep queue: sustained shimmer field
+ if (s.queueDepth > 10) {
+ const qbAlpha = clamp(s.queueDepth / 20, 0, 1) * 0.06 * glowMod;
+ const qG = ctx.createRadialGradient(cx, cy, 0, cx, cy, rMax * 0.35);
+ qG.addColorStop(0, rgba(pal.accent, qbAlpha));
+ qG.addColorStop(1, rgba(pal.accent, 0));
+ ctx.fillStyle = qG;
+ ctx.beginPath(); ctx.arc(cx, cy, rMax * 0.35, 0, 7); ctx.fill();
  }
  }
 
- // ═══════════════ LAYER 5: CORE BLOOM (jellyfish flash) ═══════════════
+ // ═══════════════ LAYER 5: CORE BLOOM ═══════════════
  if (E > 0.6 && s.isProcessing && !lowPower) {
  if (this._blooms.length === 0 || t - this._blooms[this._blooms.length - 1].born > 0.8) {
  this._blooms.push({ born: t, seed: Math.random() * 100 });
@@ -1843,7 +1818,8 @@ const BioluminescentDreamscape = {
  bg.addColorStop(1, rgba(pal.accent, 0));
  ctx.fillStyle = bg;
  ctx.beginPath(); ctx.arc(cx, cy, br, 0, 7); ctx.fill();
- // Radiating tentacle rays
+ // Radiating rays
+ ctx.save();
  ctx.strokeStyle = rgba(pal.accent, (1 - age) * 0.06 * glowMod);
  ctx.lineWidth = 0.6;
  for (let ri = 0; ri < 10; ri++) {
@@ -1853,6 +1829,7 @@ const BioluminescentDreamscape = {
  ctx.lineTo(cx + Math.cos(ra) * br * (0.5 + 0.5 * Math.sin(t * 3 + ri)), cy + Math.sin(ra) * br * (0.5 + 0.5 * Math.sin(t * 3 + ri)));
  ctx.stroke();
  }
+ ctx.restore();
  // Core dot
  ctx.fillStyle = rgba({ r: 255, g: 255, b: 255 }, (1 - age) * 0.6);
  ctx.beginPath(); ctx.arc(cx, cy, lerp(4, br * 0.2, age), 0, 7); ctx.fill();
@@ -1876,6 +1853,9 @@ const BioluminescentDreamscape = {
  }
  },
 };
+
+
+
 
 function drawGauge(ctx, x, y, w, h, fill, color, frame, label) {
   ctx.strokeStyle = rgba(frame, 0.25); ctx.lineWidth = 0.8;

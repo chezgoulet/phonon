@@ -20,83 +20,66 @@ import kotlin.random.Random
 /**
  * Bioluminescent Dreamscape — organic underwater ecosystem visualization pack.
  *
- * An abyssal tidepool: kelp fronds sway in a deep current, caustic light filters
- * through the depths, three classes of plankton drift and pulse, and bioluminescent
- * ripples respond to device activity — all within a living, submerged ecosystem.
+ * Free-swimming bioluminescent organisms drift through the abyss, their luminous
+ * bodies tracing sinuous paths in the dark. Caustic light shimmers across the
+ * depths, shifting with each pulse of device activity.
  *
- * Three plankton tiers: nano (distant tiny dots), micro (soft glowing motes with
- * trailing light), and jellyfish (large complex glows with trailing tentacles).
- * Each has different drift behavior and rendering depth.
- *
- * Kelp fronds use bezier-approximated paths with multi-frequency sway, side branches,
- * and bioluminescent spore glows clustered along the frond for an organic, "alive" feel.
- *
- * Pulse ripples use gradient-based soft rings instead of hard stroke arcs, with
- * trailing micro-ripples for a liquid, blurry effect.
- *
- * Low power mode: background + dim nano plankton + 1 faint kelp frond.
+ * Three layers: abyss (background + caustic patches + depth dust), free-swimmers
+ * (sinuous creatures that wander and interact), and plankton (nano + micro motes
+ * with comet trails). Caustic shimmer bursts replace traditional ripple pulses.
  */
 object BioluminescentPack : VisualizationPack {
 
     override val id = "bioluminescent"
     override val name = "Bioluminescent Dreamscape"
-    override val description = "An abyssal tidepool responding to device activity — organic and submerged"
+    override val description = "Free-swimming organisms trace sinuous paths through the abyss — organic and submerged"
     override val author = "chezgoulet"
-    override val version = "0.2.0"
+    override val version = "0.3.0"
 
     override val defaultConfig = mapOf(
-        "tendril_count" to "6",
+        "tendril_count" to "5",
         "glow_intensity" to "1.0",
         "pulse_frequency" to "1.0",
     )
 
     // ── Mutable scene state (object-scoped; pack is a singleton) ──
     private var energy = 0f
-    private val pulses = ArrayDeque<Pulse>()
+    private val shimmers = ArrayDeque<Shimmer>()
     private val blooms = ArrayDeque<Bloom>()
-    private var lastPulse = 0f
+    private var lastShimmer = 0f
     private var lastCascade = 0f
     private var plankton: List<PlanktonSeed>? = null
-    private var kelp: List<KelpSeed>? = null
+    private var swimmers: List<SwimmerSeed>? = null
     private var caustics: List<CausticSeed>? = null
     private var depthDust: List<DustSeed>? = null
 
-    private data class Pulse(val born: Float, val x: Float, val y: Float, val hot: Float)
+    private data class Shimmer(val born: Float, val x: Float, val y: Float, val hot: Float, val phase: Float)
     private data class Bloom(val born: Float)
-    private data class CausticSeed(val x: Float, val y: Float, val phase: Float, val speed: Float, val sz: Float, val wobble: Float, val wobbleSpeed: Float)
-    private data class DustSeed(val x: Float, val y: Float, val phase: Float, val sz: Float, val depth: Float, val dx: Float, val dy: Float)
+    private data class CausticSeed(
+        var x: Float, var y: Float,
+        val phase: Float, val speed: Float, val sz: Float,
+        val driftAngle: Float, val driftSpeed: Float,
+        val wobble: Float, val wobbleSpeed: Float,
+    )
+    private data class DustSeed(
+        val x: Float, val y: Float, val phase: Float, val sz: Float, val depth: Float,
+        val dx: Float, val dy: Float,
+    )
     private data class PlanktonSeed(
         val type: String,
-        val ax: Float,
-        val ay: Float,
-        val phase: Float,
-        val sz: Float,
-        val depth: Float,
-        val driftX: Float,
-        val driftY: Float,
+        val ax: Float, val ay: Float,
+        val phase: Float, val sz: Float, val depth: Float,
+        val driftX: Float, val driftY: Float,
         val trailLen: Float = 0f,
-        val pulsePhase: Float = 0f,
-        val tentacleCount: Int = 0,
     )
-    private data class KelpSeed(
-        val anchorX: Float,
-        val phase: Float,
-        val restTipX: Float,
-        val restMidX: Float,
-        val freq1: Float,
-        val freq2: Float,
-        val freq3: Float,
-        val amp1: Float,
-        val amp2: Float,
-        val amp3: Float,
-        val phase1: Float,
-        val phase2: Float,
-        val phase3: Float,
-        val hasBranch: Boolean,
-        val branchSide: Int,
-        val branchH: Float,
-        val branchLen: Float,
-        val sporeH: List<Float>,
+    private data class SwimmerSeed(
+        var x: Float, var y: Float,
+        var angle: Float,
+        val phase: Float, var driftPhase: Float,
+        val size: Float, val speed: Float, val swimFreq: Float,
+        val bodyLen: Float, val hueOff: Float,
+        var targetX: Float, var targetY: Float,
+        var turnTimer: Float,
     )
 
     private data class Palette(
@@ -108,13 +91,13 @@ object BioluminescentPack : VisualizationPack {
 
     override fun onActivate() {
         energy = 0f
-        pulses.clear()
+        shimmers.clear()
         blooms.clear()
         plankton = null
-        kelp = null
+        swimmers = null
         caustics = null
         depthDust = null
-        lastPulse = 0f
+        lastShimmer = 0f
         lastCascade = 0f
     }
 
@@ -162,7 +145,7 @@ object BioluminescentPack : VisualizationPack {
 
     @Composable
     override fun Render(state: VizState, modifier: Modifier) {
-        val tendrilCount = (state.themeConfig["tendril_count"] ?: "6").toFloatOrNull()?.toInt()?.coerceIn(1, 8) ?: 6
+        val tendrilCount = (state.themeConfig["tendril_count"] ?: "5").toFloatOrNull()?.toInt()?.coerceIn(2, 7) ?: 5
         val glowMod = (state.themeConfig["glow_intensity"] ?: "1.0").toFloatOrNull() ?: 1.0f
         val pulseFreq = (state.themeConfig["pulse_frequency"] ?: "1.0").toFloatOrNull() ?: 1.0f
         val lowPower = state.lowPowerMode
@@ -212,7 +195,7 @@ object BioluminescentPack : VisualizationPack {
                 )
             )
 
-            // 1b. Surface shimmer
+            // 1b. Surface shimmer band
             if (!lowPower) {
                 val sf = listOf(
                     blend(pal.primary, Color(0xFF82FFF0), 0.3f).copy(alpha = 0.03f + 0.03f * (0.5f + 0.5f * sin(t * 0.7f))),
@@ -222,28 +205,41 @@ object BioluminescentPack : VisualizationPack {
                 drawRect(brush = Brush.verticalGradient(sf), topLeft = Offset.Zero, size = size.copy(height = h * 0.35f))
             }
 
-            // 1c. Caustic patches
+            // 1c. Enhanced caustic patches (12 drifting, more prominent)
             val localCaustics = caustics ?: run {
                 val rng = Random(133)
-                List(6) {
+                List(12) {
                     CausticSeed(
-                        rng.nextFloat() * w, 0.1f + rng.nextFloat() * 0.6f * h,
-                        rng.nextFloat() * 6.28f, 0.3f + rng.nextFloat() * 0.5f,
-                        0.2f + rng.nextFloat() * 0.3f,
-                        rng.nextFloat() * 6.28f, 0.2f + rng.nextFloat() * 0.4f,
+                        x = rng.nextFloat() * w,
+                        y = 0.1f + rng.nextFloat() * 0.7f * h,
+                        phase = rng.nextFloat() * 6.28f,
+                        speed = 0.3f + rng.nextFloat() * 0.5f,
+                        sz = 0.15f + rng.nextFloat() * 0.25f,
+                        driftAngle = rng.nextFloat() * 6.28f,
+                        driftSpeed = 0.2f + rng.nextFloat() * 0.4f,
+                        wobble = rng.nextFloat() * 6.28f,
+                        wobbleSpeed = 0.2f + rng.nextFloat() * 0.4f,
                     )
                 }.also { caustics = it }
             }
             if (!lowPower) {
+                val margin = w * 0.2f
                 for (c in localCaustics) {
-                    val cx2 = c.x + sin(t * c.speed * 0.15f + c.phase) * w * 0.15f
-                    val cy2 = c.y + sin(t * c.speed * 0.1f + c.phase * 1.3f) * h * 0.1f
-                    val r = rMax * c.sz * (1f + 0.1f * sin(t * c.wobbleSpeed + c.wobble))
+                    c.x += cos(c.driftAngle) * c.driftSpeed * 60f * dt
+                    c.y += sin(c.driftAngle) * c.driftSpeed * 60f * dt
+                    if (c.x < -margin) c.x = w + margin
+                    if (c.x > w + margin) c.x = -margin
+                    if (c.y < -margin) c.y = h + margin
+                    if (c.y > h + margin) c.y = -margin
+
+                    val cx2 = c.x + sin(t * c.speed * 0.15f + c.phase) * w * 0.1f
+                    val cy2 = c.y + sin(t * c.speed * 0.1f + c.phase * 1.3f) * h * 0.08f
+                    val r = rMax * c.sz * (1f + 0.12f * sin(t * c.wobbleSpeed + c.wobble))
                     drawCircle(
                         brush = Brush.radialGradient(
                             listOf(
-                                blend(pal.primary, Color(0xFFC8FFFF), 0.5f).copy(alpha = 0.03f * glowMod),
-                                pal.primary.copy(alpha = 0.015f * glowMod),
+                                blend(pal.primary, Color(0xFFC8FFFF), 0.5f).copy(alpha = 0.045f * glowMod * (0.5f + 0.5f * e)),
+                                pal.primary.copy(alpha = 0.025f * glowMod * (0.5f + 0.5f * e)),
                                 pal.primary.copy(alpha = 0f),
                             ),
                             center = Offset(cx2, cy2),
@@ -276,222 +272,195 @@ object BioluminescentPack : VisualizationPack {
                 drawCircle(pal.primary.copy(alpha = dustAlpha), d.sz, Offset(dx, dy))
             }
 
-            // ═══ LAYER 2: RIPPLES (soft pulse waves) ═══
-            if (!lowPower) {
-                val emitGap = when {
-                    e > 0.7f -> lerp(0.6f, 0.3f, pulseFreq)
-                    e > 0.3f -> lerp(3f, 1.5f, (e - 0.3f) / 0.4f) / pulseFreq
-                    state.isProcessing -> lerp(5f, 3f, e * 3f) / pulseFreq
-                    else -> 8f
-                }
-                if (t - lastPulse > emitGap) {
-                    val px = 0.15f + Random.nextFloat() * 0.7f
-                    val py = 0.1f + Random.nextFloat() * 0.5f
-                    pulses.addLast(Pulse(t, px * w, py * h, e))
-                    lastPulse = t
-                    if (e > 0.6f && t - lastCascade > 0.5f) {
-                        pulses.addLast(
-                            Pulse(
-                                t, (0.15f + Random.nextFloat() * 0.7f) * w,
-                                (0.1f + Random.nextFloat() * 0.5f) * h, e * 0.7f
-                            )
-                        )
-                        lastCascade = t
-                    }
-                }
-                while (pulses.isNotEmpty() && t - pulses.first().born >= 1.8f) pulses.removeFirst()
-                for (p in pulses) {
-                    val age = (t - p.born) / 1.8f
-                    val rad = lerp(w * 0.02f, w * 0.4f, age)
-                    val a = (1f - age) * (0.2f + 0.25f * p.hot) * glowMod
-                    val col = blend(pal.primary, pal.accent, p.hot)
-                    // 3-layer gradient ring for blur
-                    for (ri in 0..2) {
-                        val rr = rad + ri * w * 0.015f
-                        val ra = a * (1f - ri * 0.3f)
-                        drawCircle(
-                            brush = Brush.radialGradient(
-                                listOf(col.copy(alpha = 0f), col.copy(alpha = ra), col.copy(alpha = ra), col.copy(alpha = 0f)),
-                                center = Offset(p.x, p.y),
-                                radius = rr + w * 0.025f,
-                            ),
-                            radius = rr + w * 0.025f,
-                            center = Offset(p.x, p.y),
-                        )
-                    }
-                    // Micro-ripple tail
-                    if (age > 0.4f && age < 0.9f && p.hot > 0.3f) {
-                        val mAge = (age - 0.4f) / 0.5f
-                        val mRad = rad + w * 0.04f
-                        val mAlpha = (1f - mAge) * 0.08f * p.hot * glowMod
-                        drawCircle(
-                            brush = Brush.radialGradient(
-                                listOf(col.copy(alpha = 0f), col.copy(alpha = mAlpha), col.copy(alpha = mAlpha), col.copy(alpha = 0f)),
-                                center = Offset(p.x, p.y),
-                                radius = mRad + w * 0.008f,
-                            ),
-                            radius = mRad + w * 0.008f,
-                            center = Offset(p.x, p.y),
-                        )
-                    }
-                }
-                // Deep queue sustained bloom ring
-                if (state.queueDepth > 10) {
-                    val qbAlpha = (state.queueDepth / 20f).coerceIn(0f, 1f) * 0.08f * glowMod
-                    val qbRad = w * 0.22f
-                    drawCircle(
-                        brush = Brush.radialGradient(
-                            listOf(pal.accent.copy(alpha = 0f), pal.accent.copy(alpha = qbAlpha), pal.accent.copy(alpha = qbAlpha), pal.accent.copy(alpha = 0f)),
-                            center = Offset(cx, cy),
-                            radius = qbRad + w * 0.02f,
-                        ),
-                        radius = qbRad + w * 0.02f,
-                        center = Offset(cx, cy),
-                    )
-                }
-            }
-
-            // ═══ LAYER 3: KELP FRONDS ═══
-            val localKelp = kelp ?: run {
-                val rng = Random(77)
-                val count = if (lowPower) 1 else tendrilCount
+            // ═══ LAYER 2: FREE-SWIMMERS ═══
+            // Sinuous creatures swimming freely, interacting with each other
+            val localSwimmers = swimmers ?: run {
+                val rng = Random(88)
+                val count = if (lowPower) 2 else tendrilCount
                 List(count) {
-                    KelpSeed(
-                        anchorX = 0.06f + (it + 0.5f) / count * 0.88f,
+                    SwimmerSeed(
+                        x = rng.nextFloat() * w, y = rng.nextFloat() * h,
+                        angle = rng.nextFloat() * 6.28f,
                         phase = rng.nextFloat() * 6.28f,
-                        restTipX = (rng.nextFloat() - 0.5f) * 0.12f,
-                        restMidX = (rng.nextFloat() - 0.5f) * 0.08f,
-                        freq1 = 0.5f + rng.nextFloat() * 0.3f,
-                        freq2 = 0.8f + rng.nextFloat() * 0.4f,
-                        freq3 = 1.2f + rng.nextFloat() * 0.6f,
-                        amp1 = 1f,
-                        amp2 = 0.5f + rng.nextFloat() * 0.3f,
-                        amp3 = 0.2f + rng.nextFloat() * 0.2f,
-                        phase1 = rng.nextFloat() * 6.28f,
-                        phase2 = rng.nextFloat() * 6.28f,
-                        phase3 = rng.nextFloat() * 6.28f,
-                        hasBranch = rng.nextFloat() > 0.3f,
-                        branchSide = if (rng.nextFloat() > 0.5f) 1 else -1,
-                        branchH = 0.35f + rng.nextFloat() * 0.2f,
-                        branchLen = 0.15f + rng.nextFloat() * 0.2f,
-                        sporeH = List(3 + rng.nextInt(4)) { 0.1f + rng.nextFloat() * 0.75f },
+                        driftPhase = rng.nextFloat() * 6.28f,
+                        size = 0.7f + rng.nextFloat() * 0.6f,
+                        speed = 0.15f + rng.nextFloat() * 0.25f,
+                        swimFreq = 2f + rng.nextFloat() * 3f,
+                        bodyLen = 50f + rng.nextFloat() * 20f,
+                        hueOff = (rng.nextFloat() - 0.5f) * 0.15f,
+                        targetX = rng.nextFloat() * w,
+                        targetY = rng.nextFloat() * h,
+                        turnTimer = 2f + rng.nextFloat() * 4f,
                     )
-                }.also { kelp = it }
+                }.also { swimmers = it }
             }
-            if (!lowPower) {
-                val swaySpeed = lerp(0.5f, 2.5f, e)
-                val swayAmp = lerp(0.03f, 0.08f, e)
-                val frondAlpha = lerp(0.25f, 0.6f, e) * glowMod
-                val segs = 20
+            val swimCount = if (lowPower) localSwimmers.size.coerceAtMost(2) else localSwimmers.size
 
-                for (k in localKelp) {
-                    val ax = k.anchorX * w
-                    val ay = h + 5f
-                    val points = mutableListOf<Offset>()
+            // Update swimmers
+            for (i in 0 until swimCount) {
+                val cr = localSwimmers[i]
+                val tdx = cr.targetX - cr.x
+                val tdy = cr.targetY - cr.y
+                val tDist = hypot(tdx, tdy)
+                cr.turnTimer -= dt
+                if (cr.turnTimer <= 0f || tDist < 40f) {
+                    cr.targetX = cx + (Random.nextFloat() * 2f - 1f) * w * 0.38f
+                    cr.targetY = cy + (Random.nextFloat() * 2f - 1f) * h * 0.38f
+                    cr.turnTimer = 2.5f + Random.nextFloat() * 3f
+                }
+                val tAngle = kotlin.math.atan2(tdy, tdx)
+                var angleDiff = tAngle - cr.angle
+                while (angleDiff > 3.14159f) angleDiff -= 6.28318f
+                while (angleDiff < -3.14159f) angleDiff += 6.28318f
+                val turnRate = (1.8f + e * 1.5f) * dt
+                cr.angle += angleDiff.coerceIn(-turnRate, turnRate)
 
-                    for (si in 0..segs) {
-                        val f = si / segs.toFloat()
-                        val yy = ay - f.pow(0.85f) * h * 0.72f
-                        val s1 = sin(t * swaySpeed * k.freq1 + k.phase1 + f * 1.7f) * swayAmp * w * k.amp1
-                        val s2 = sin(t * swaySpeed * k.freq2 + k.phase2 + f * 3.1f) * swayAmp * w * k.amp2
-                        val s3 = sin(t * swaySpeed * k.freq3 + k.phase3 + f * 4.7f) * swayAmp * w * k.amp3
-                        val restDrift = if (f < 0.3f) 0f else
-                            lerp(0f, k.restMidX, ((f - 0.3f) / 0.2f).coerceIn(0f, 1f)) * w +
-                                if (f > 0.5f) lerp(0f, k.restTipX, ((f - 0.5f) / 0.3f).coerceIn(0f, 1f)) * w else 0f
-                        val xx = ax + restDrift + s1 + s2 + s3
-                        points.add(Offset(xx, yy))
-                    }
+                val speedMul = if (lowPower) 0.4f else lerp(0.6f, 1.8f, e)
+                cr.x += cos(cr.angle) * cr.speed * speedMul * dt * 60f
+                cr.y += sin(cr.angle) * cr.speed * speedMul * dt * 60f
+                cr.driftPhase += dt * 0.3f
 
-                    // 3-layer soft rendering
-                    val path = Path().apply {
-                        for (pi in points.indices) {
-                            if (pi == 0) moveTo(points[pi].x, points[pi].y)
-                            else lineTo(points[pi].x, points[pi].y)
+                // Wrap at edges
+                val m = cr.bodyLen * 0.5f
+                if (cr.x < -m) cr.x = w + m
+                if (cr.x > w + m) cr.x = -m
+                if (cr.y < -m) cr.y = h + m
+                if (cr.y > h + m) cr.y = -m
+            }
+
+            // Swimmer-swimmer interaction glow
+            for (i in 0 until swimCount) {
+                for (j in i + 1 until swimCount) {
+                    val a = localSwimmers[i]; val b = localSwimmers[j]
+                    val dx = a.x - b.x; val dy = a.y - b.y
+                    val dist = hypot(dx, dy)
+                    if (dist < 140f) {
+                        val prox = 1f - dist / 140f
+                        val nearGlow = prox * 0.12f * glowMod * (0.5f + 0.5f * e)
+                        // Connection glow line
+                        val connPath = Path().apply {
+                            moveTo(a.x, a.y); lineTo(b.x, b.y)
                         }
-                    }
-                    val baseW = lerp(12f, 2f, 1f) * (1f + e * 0.5f)
-                    drawPath(path, pal.primary.copy(alpha = frondAlpha * 0.12f),
-                        style = Stroke(width = baseW, cap = StrokeCap.Round, join = StrokeJoin.Round))
-                    drawPath(path, pal.primary.copy(alpha = frondAlpha * 0.35f),
-                        style = Stroke(width = lerp(6f, 1.5f, 1f) * (1f + e * 0.3f), cap = StrokeCap.Round, join = StrokeJoin.Round))
-                    drawPath(path, blend(pal.primary, pal.accent, 0.2f).copy(alpha = frondAlpha * 0.85f),
-                        style = Stroke(width = lerp(2.5f, 0.8f, 1f) * (1f + e * 0.2f), cap = StrokeCap.Round, join = StrokeJoin.Round))
-
-                    // Branch frond
-                    if (k.hasBranch && points.isNotEmpty()) {
-                        val bi = (k.branchH * segs).toInt().coerceAtMost(points.lastIndex)
-                        val bp = points[bi]
-                        val bSegs = 8
-                        val branchPath = Path()
-                        for (si in 0..bSegs) {
-                            val f = si / bSegs.toFloat()
-                            val yy = bp.y - f.pow(0.8f) * k.branchLen * h * 0.6f
-                            val s1b = sin(t * swaySpeed * k.freq1 * 0.8f + k.phase1 + f * 1.7f) * swayAmp * w * k.amp1 * 0.7f
-                            val s2b = sin(t * swaySpeed * k.freq2 * 1.1f + k.phase2 + f * 2.5f) * swayAmp * w * k.amp2 * 0.5f
-                            val xx = bp.x + k.branchSide * f * w * 0.06f + s1b + s2b
-                            if (si == 0) branchPath.moveTo(xx, yy) else branchPath.lineTo(xx, yy)
-                        }
-                        drawPath(branchPath, pal.primary.copy(alpha = frondAlpha * 0.25f),
-                            style = Stroke(width = lerp(4f, 1f, 1f) * (1f + e * 0.2f)))
-                        drawPath(branchPath, pal.primary.copy(alpha = frondAlpha * 0.6f),
-                            style = Stroke(width = lerp(1.5f, 0.5f, 1f)))
-                    }
-
-                    // Spore glow clusters along the frond
-                    for (sh in k.sporeH) {
-                        val pi = (sh * segs).toInt().coerceAtMost(points.lastIndex)
-                        val sp = points[pi]
-                        val sBreathe = 0.3f + 0.7f * (0.5f + 0.5f * sin(t * 1.8f + k.phase + sp.y * 0.1f))
-                        val sGlowR = 3f + 4f * sBreathe
+                        drawPath(connPath, pal.accent.copy(alpha = nearGlow * 0.3f),
+                            style = Stroke(width = 1.5f + prox * 2f))
+                        // Midpoint glow blob
+                        val midX = (a.x + b.x) / 2f; val midY = (a.y + b.y) / 2f
                         drawCircle(
                             brush = Brush.radialGradient(
-                                listOf(pal.accent.copy(alpha = 0.5f * sBreathe * glowMod), pal.accent.copy(alpha = 0f)),
-                                center = Offset(sp.x, sp.y),
-                                radius = sGlowR,
+                                listOf(pal.accent.copy(alpha = nearGlow), pal.accent.copy(alpha = 0f)),
+                                center = Offset(midX, midY),
+                                radius = 20f + prox * 15f,
                             ),
-                            radius = sGlowR,
-                            center = Offset(sp.x, sp.y),
+                            radius = 20f + prox * 15f,
+                            center = Offset(midX, midY),
                         )
-                        drawCircle(blend(pal.accent, Color.White, 0.5f).copy(alpha = 0.7f * sBreathe),
-                            0.8f + 0.5f * sBreathe, Offset(sp.x, sp.y))
+                        // Gentle mutual steering
+                        val steerA = kotlin.math.atan2(b.y - a.y, b.x - a.x)
+                        var diffA = steerA - a.angle
+                        while (diffA > 3.14159f) diffA -= 6.28318f
+                        while (diffA < -3.14159f) diffA += 6.28318f
+                        a.angle += diffA * dt * 0.4f * prox
+                        val steerB = kotlin.math.atan2(a.y - b.y, a.x - b.x)
+                        var diffB = steerB - b.angle
+                        while (diffB > 3.14159f) diffB -= 6.28318f
+                        while (diffB < -3.14159f) diffB += 6.28318f
+                        b.angle += diffB * dt * 0.4f * prox
                     }
                 }
             }
 
-            // ═══ LAYER 4: PLANKTON (three classes) ═══
+            // Render swimmers as sinuous glowing bodies
+            for (i in 0 until swimCount) {
+                val cr = localSwimmers[i]
+                val npX = cos(cr.angle + 1.5708f)
+                val npY = sin(cr.angle + 1.5708f)
+                val segs = 20
+                val pts = mutableListOf<Offset>()
+
+                for (j in 0 until segs) {
+                    val f = j.toFloat() / (segs - 1)
+                    val waveT = cr.driftPhase * 3f + f * 4.5f
+                    val waveAmp = 7f * (1f - f * 0.25f) * cr.size * (0.5f + 0.5f * e)
+                    val wave = sin(waveT) * waveAmp
+                    val drift = sin(f * 2f + cr.phase + t * 0.2f) * 4f * cr.size
+                    val bodyX = cr.x - cos(cr.angle) * f * cr.bodyLen
+                    val bodyY = cr.y - sin(cr.angle) * f * cr.bodyLen
+                    pts.add(Offset(bodyX + npX * (wave + drift), bodyY + npY * (wave + drift)))
+                }
+
+                val activity = if (state.isProcessing) (1f + e * 0.5f) else 1f
+                val bodyCol = blend(pal.primary, pal.accent, cr.hueOff + 0.2f * sin(t * 0.5f + cr.phase))
+                val bodyAlpha = lerp(0.5f, 0.9f, e) * glowMod * (0.6f + 0.4f * (1f - e * state.inferenceLoad))
+
+                // Build smooth bezier path through points
+                val bodyPath = Path().apply {
+                    moveTo(pts[0].x, pts[0].y)
+                    for (k in 1 until pts.size) {
+                        val p0 = pts[k - 1]; val p1 = pts[k]
+                        quadraticBezierTo(p0.x, p0.y, (p0.x + p1.x) / 2f, (p0.y + p1.y) / 2f)
+                    }
+                    lineTo(pts.last().x, pts.last().y)
+                }
+
+                // Outer glow
+                drawPath(bodyPath, bodyCol.copy(alpha = bodyAlpha * 0.1f),
+                    style = Stroke(width = cr.size * 10f * activity, cap = StrokeCap.Round, join = StrokeJoin.Round))
+                // Medium glow
+                drawPath(bodyPath, bodyCol.copy(alpha = bodyAlpha * 0.25f),
+                    style = Stroke(width = cr.size * 5f * activity, cap = StrokeCap.Round, join = StrokeJoin.Round))
+                // Core
+                drawPath(bodyPath, blend(bodyCol, Color.White, 0.25f).copy(alpha = bodyAlpha * 0.85f),
+                    style = Stroke(width = (cr.size * 2.2f * activity).coerceAtLeast(1.2f), cap = StrokeCap.Round, join = StrokeJoin.Round))
+
+                // Head glow
+                val headSz = 3.5f * cr.size * activity
+                drawCircle(
+                    brush = Brush.radialGradient(
+                        listOf(
+                            blend(pal.accent, Color.White, 0.5f).copy(alpha = bodyAlpha * 0.9f),
+                            pal.accent.copy(alpha = bodyAlpha * 0.2f),
+                            pal.accent.copy(alpha = 0f),
+                        ),
+                        center = pts[0],
+                        radius = headSz * 4f,
+                    ),
+                    radius = headSz * 4f,
+                    center = pts[0],
+                )
+            }
+
+            // ═══ LAYER 3: PLANKTON (nano + micro) ═══
             val localPlankton = plankton ?: run {
                 val rng = Random(42)
                 val p = mutableListOf<PlanktonSeed>()
-                // Nano (distant)
                 for (i in 0 until 25) {
-                    p.add(PlanktonSeed("nano", rng.nextFloat() * w, rng.nextFloat() * h,
-                        rng.nextFloat() * 6.28f, 0.7f + rng.nextFloat() * 1f,
+                    p.add(PlanktonSeed(
+                        type = "nano",
+                        ax = rng.nextFloat() * w, ay = rng.nextFloat() * h,
+                        phase = rng.nextFloat() * 6.28f,
+                        sz = 0.7f + rng.nextFloat() * 1f,
                         depth = 0.1f + rng.nextFloat() * 0.2f,
-                        driftX = (rng.nextFloat() - 0.5f) * 0.4f, driftY = (rng.nextFloat() - 0.5f) * 0.3f))
+                        driftX = (rng.nextFloat() - 0.5f) * 0.4f,
+                        driftY = (rng.nextFloat() - 0.5f) * 0.3f,
+                    ))
                 }
-                // Micro (mid)
-                for (i in 0 until 14) {
-                    p.add(PlanktonSeed("micro", rng.nextFloat() * w, rng.nextFloat() * h,
-                        rng.nextFloat() * 6.28f, 1.5f + rng.nextFloat() * 2.5f,
+                for (i in 0 until 16) {
+                    p.add(PlanktonSeed(
+                        type = "micro",
+                        ax = rng.nextFloat() * w, ay = rng.nextFloat() * h,
+                        phase = rng.nextFloat() * 6.28f,
+                        sz = 1.5f + rng.nextFloat() * 2.5f,
                         depth = 0.3f + rng.nextFloat() * 0.3f,
-                        driftX = (rng.nextFloat() - 0.3f) * 0.5f, driftY = (rng.nextFloat() - 0.5f) * 0.4f,
-                        trailLen = 0.3f + rng.nextFloat() * 0.4f))
-                }
-                // Macro (jellyfish)
-                for (i in 0 until 4) {
-                    p.add(PlanktonSeed("jelly", 0.15f + rng.nextFloat() * 0.7f * w, 0.2f + rng.nextFloat() * 0.6f * h,
-                        rng.nextFloat() * 6.28f, 6f + rng.nextFloat() * 8f,
-                        depth = 0.5f + rng.nextFloat() * 0.2f,
-                        driftX = (rng.nextFloat() - 0.2f) * 0.3f, driftY = -0.2f - rng.nextFloat() * 0.3f,
-                        pulsePhase = rng.nextFloat() * 6.28f,
-                        tentacleCount = 4 + rng.nextInt(3)))
+                        driftX = (rng.nextFloat() - 0.3f) * 0.5f,
+                        driftY = (rng.nextFloat() - 0.5f) * 0.4f,
+                        trailLen = 0.3f + rng.nextFloat() * 0.4f,
+                    ))
                 }
                 p.also { plankton = it }
             }
 
-            val currentDirX = 0.3f
-            val currentDirY = -0.05f
             val plankSpeed = if (lowPower) 0.2f else lerp(0.3f, 1.2f, e)
+            val currentDirX = 0.3f; val currentDirY = -0.05f
 
             val plankPos = localPlankton.map { p ->
                 Offset(
@@ -514,19 +483,23 @@ object BioluminescentPack : VisualizationPack {
                         val ma = (0.4f * breathe * glowMod * (0.4f + e * 0.6f)).coerceIn(0f, 0.8f)
                         val szM = p.sz * (1f + e * 0.3f)
                         val glowR = szM * 3.5f * glowMod
-                        // Trailing light
                         val tDirX = cos(t * plankSpeed * 0.4f + p.phase * 1.3f) * p.driftX
                         val tDirY = cos(t * plankSpeed * 0.35f + p.phase * 0.9f) * p.driftY
+                        val tailLen = p.trailLen * 30f
+                        // Comet trail
                         drawCircle(
                             brush = Brush.radialGradient(
-                                listOf(pal.primary.copy(alpha = ma * 0.3f), pal.primary.copy(alpha = 0f)),
-                                center = pos - Offset(tDirX * p.trailLen * 60f, tDirY * p.trailLen * 60f),
+                                listOf(
+                                    pal.primary.copy(alpha = ma * 0.3f),
+                                    pal.primary.copy(alpha = 0f),
+                                ),
+                                center = pos - Offset(tDirX * tailLen * 2f, tDirY * tailLen * 2f),
                                 radius = szM * 0.8f,
                             ),
                             radius = szM * 0.8f,
-                            center = pos - Offset(tDirX * p.trailLen * 60f, tDirY * p.trailLen * 60f),
+                            center = pos - Offset(tDirX * tailLen * 2f, tDirY * tailLen * 2f),
                         )
-                        // Soft glow
+                        // Outer glow
                         drawCircle(
                             brush = Brush.radialGradient(
                                 listOf(pal.primary.copy(alpha = ma * 0.25f), pal.primary.copy(alpha = 0f)),
@@ -542,81 +515,91 @@ object BioluminescentPack : VisualizationPack {
                             szM, pos,
                         )
                     }
-                    "jelly" -> if (!lowPower) {
-                        val pulse = 1f + 0.15f * sin(t * 2.5f + p.pulsePhase)
-                        val ja = (0.3f * breathe * glowMod * (0.3f + e * 0.7f)).coerceIn(0f, 0.6f)
-                        val szJ = p.sz * pulse
-                        // Outer glow
-                        drawCircle(
-                            brush = Brush.radialGradient(
-                                listOf(pal.primary.copy(alpha = ja * 0.3f), pal.accent.copy(alpha = ja * 0.12f), pal.accent.copy(alpha = 0f)),
-                                center = pos,
-                                radius = szJ * 2f,
-                            ),
-                            radius = szJ * 2f,
-                            center = pos,
-                        )
-                        // Body dome
-                        drawCircle(
-                            brush = Brush.radialGradient(
-                                listOf(
-                                    blend(pal.primary, Color.White, 0.4f).copy(alpha = ja * 0.5f),
-                                    pal.primary.copy(alpha = ja * 0.15f),
-                                    pal.primary.copy(alpha = 0f),
-                                ),
-                                center = pos - Offset(0f, szJ * 0.2f),
-                                radius = szJ,
-                            ),
-                            radius = szJ,
-                            center = pos,
-                        )
-                        // Tentacles
-                        val tentLen = szJ * (2f + 0.5f * sin(t * 1.8f + p.pulsePhase))
-                        for (ti in 0 until p.tentacleCount) {
-                            val ta = (ti.toFloat() / p.tentacleCount) * 6.28f + sin(t * 0.6f + p.phase + ti) * 0.5f
-                            val tx = cos(ta) * szJ * 0.5f
-                            val ty = sin(ta) * szJ * 0.5f
-                            val tentPath = Path()
-                            for (tsi in 0..6) {
-                                val f = tsi / 6f
-                                val yt = pos.y + kotlin.math.abs(ty) + f * tentLen
-                                val xt = pos.x + tx + sin(t * 2f + p.phase + ti + f * 2.5f) * szJ * 0.15f * (1f - f)
-                                if (tsi == 0) tentPath.moveTo(xt, pos.y + kotlin.math.abs(ty))
-                                else tentPath.lineTo(xt, yt)
-                            }
-                            drawPath(tentPath, pal.primary.copy(alpha = ja * 0.2f),
-                                style = Stroke(width = 0.8f, cap = StrokeCap.Round))
-                        }
-                    }
                 }
             }
 
-            // Proximity glow enhancement
-            if (e > 0.2f && !lowPower) {
-                val microIndices = localPlankton.indices.filter { localPlankton[it].type != "nano" }
-                for (mi in microIndices.indices) {
-                    for (mj in mi + 1 until microIndices.size) {
-                        val ii = microIndices[mi]; val jj = microIndices[mj]
-                        val dist = hypot(plankPos[ii].x - plankPos[jj].x, plankPos[ii].y - plankPos[jj].y)
-                        if (dist < w * 0.15f) {
-                            val bAlpha = (1f - dist / (w * 0.15f)) * 0.15f * glowMod
-                            val midX = (plankPos[ii].x + plankPos[jj].x) / 2f
-                            val midY = (plankPos[ii].y + plankPos[jj].y) / 2f
-                            drawCircle(
-                                brush = Brush.radialGradient(
-                                    listOf(pal.accent.copy(alpha = bAlpha), pal.accent.copy(alpha = 0f)),
-                                    center = Offset(midX, midY),
-                                    radius = w * 0.04f,
-                                ),
-                                radius = w * 0.04f,
-                                center = Offset(midX, midY),
-                            )
-                        }
+            // ═══ LAYER 4: CAUSTIC SHIMMER BURST (replaces ripple pulses) ═══
+            if (!lowPower) {
+                val emitGap = when {
+                    e > 0.7f -> lerp(0.6f, 0.3f, pulseFreq)
+                    e > 0.3f -> lerp(3f, 1.5f, (e - 0.3f) / 0.4f) / pulseFreq
+                    state.isProcessing -> lerp(5f, 3f, e * 3f) / pulseFreq
+                    else -> 8f
+                }
+                if (t - lastShimmer > emitGap) {
+                    val burstCount = 2 + (e * 3f).toInt()
+                    for (i in 0 until burstCount) {
+                        shimmers.addLast(Shimmer(
+                            born = t,
+                            x = (0.1f + Random.nextFloat() * 0.8f) * w,
+                            y = (0.1f + Random.nextFloat() * 0.7f) * h,
+                            hot = e * (0.6f + Random.nextFloat() * 0.4f),
+                            phase = Random.nextFloat() * 6.28f,
+                        ))
                     }
+                    lastShimmer = t
+                    if (e > 0.6f && t - lastCascade > 0.5f) {
+                        for (i in 0 until 2) {
+                            shimmers.addLast(Shimmer(
+                                born = t,
+                                x = (0.1f + Random.nextFloat() * 0.8f) * w,
+                                y = (0.1f + Random.nextFloat() * 0.5f) * h,
+                                hot = e * 0.5f,
+                                phase = Random.nextFloat() * 6.28f,
+                            ))
+                        }
+                        lastCascade = t
+                    }
+                }
+                while (shimmers.isNotEmpty() && t - shimmers.first().born >= 1.2f) shimmers.removeFirst()
+                for (s in shimmers) {
+                    val age = (t - s.born) / 1.2f
+                    val rad = lerp(w * 0.03f, w * 0.25f, age) * (0.7f + s.hot * 0.3f)
+                    val alpha = (1f - age) * 0.15f * s.hot * glowMod
+                    // Soft caustic patch (filled glow, not a ring)
+                    drawCircle(
+                        brush = Brush.radialGradient(
+                            listOf(
+                                blend(pal.accent, Color(0xFFFFF8F0), 0.5f).copy(alpha = alpha),
+                                pal.primary.copy(alpha = alpha * 0.4f),
+                                pal.primary.copy(alpha = 0f),
+                            ),
+                            center = Offset(s.x, s.y),
+                            radius = rad,
+                        ),
+                        radius = rad,
+                        center = Offset(s.x, s.y),
+                    )
+                    // Secondary shifted glow (caustic shimmer)
+                    val offX = cos(s.phase + t * 0.6f) * rad * 0.25f
+                    val offY = sin(s.phase + t * 1.2f) * rad * 0.2f
+                    drawCircle(
+                        brush = Brush.radialGradient(
+                            listOf(pal.accent.copy(alpha = alpha * 0.35f), pal.accent.copy(alpha = 0f)),
+                            center = Offset(s.x + offX, s.y + offY),
+                            radius = rad * 0.4f,
+                        ),
+                        radius = rad * 0.4f,
+                        center = Offset(s.x + offX, s.y + offY),
+                    )
+                }
+
+                // Deep queue: sustained shimmer field
+                if (state.queueDepth > 10) {
+                    val qbAlpha = (state.queueDepth / 20f).coerceIn(0f, 1f) * 0.06f * glowMod
+                    drawCircle(
+                        brush = Brush.radialGradient(
+                            listOf(pal.accent.copy(alpha = qbAlpha), pal.accent.copy(alpha = 0f)),
+                            center = Offset(cx, cy),
+                            radius = rMax * 0.35f,
+                        ),
+                        radius = rMax * 0.35f,
+                        center = Offset(cx, cy),
+                    )
                 }
             }
 
-            // ═══ LAYER 5: CORE BLOOM (jellyfish flash) ═══
+            // ═══ LAYER 5: CORE BLOOM ═══
             if (e > 0.6f && state.isProcessing && !lowPower) {
                 if (blooms.isEmpty() || t - blooms.last().born > 0.8f) {
                     blooms.addLast(Bloom(t))
@@ -627,6 +610,7 @@ object BioluminescentPack : VisualizationPack {
                 val age = (t - bl.born) / 0.6f
                 if (age > 1f) continue
                 val br = w * 0.08f + w * 0.22f * age
+                // Soft burst
                 drawCircle(
                     brush = Brush.radialGradient(
                         listOf(
@@ -640,9 +624,9 @@ object BioluminescentPack : VisualizationPack {
                     radius = br,
                     center = Offset(cx, cy),
                 )
-                // Radiating tentacle rays
+                // Radiating rays
                 for (ri in 0 until 10) {
-                    val ra = (ri / 10f) * 6.28f + sin(bl.born * 3f + ri * 0.7f) * 0.3f
+                    val ra = (ri / 10f) * 6.28318f + sin(bl.born * 3f + ri * 0.7f) * 0.3f
                     val rayPath = Path().apply {
                         moveTo(cx + cos(ra) * w * 0.01f, cy + sin(ra) * h * 0.01f)
                         lineTo(
@@ -658,7 +642,6 @@ object BioluminescentPack : VisualizationPack {
             }
 
             // ═══ LAYER 6: OVERLAYS ═══
-            // Charging
             if (state.isCharging && !lowPower) {
                 val chgAlpha = 0.04f + 0.06f * (0.5f + 0.5f * sin(t * 2f))
                 drawRect(
@@ -669,7 +652,6 @@ object BioluminescentPack : VisualizationPack {
                     ),
                 )
             }
-            // Unhealthy
             if (!state.isHealthy) {
                 val pulseAlpha = 0.08f + 0.12f * (0.5f + 0.5f * sin(t * 3f))
                 drawRect(Color(0xFFFF4646).copy(alpha = pulseAlpha))
