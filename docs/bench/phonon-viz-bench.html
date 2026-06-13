@@ -1378,14 +1378,12 @@ const BioluminescentDreamscape = {
   this._caustics = null; this._depthDust = null;
  },
 
- render(ctx, W, H, frame, state) {
-  const t = frame / 60;
-  const dt = 1 / 60;
-  const lowPower = state.lowPowerMode;
+ render(ctx, W, H, s, t, dt) {
+      const lowPower = s.lowPowerMode;
   const target = lowPower ? 0 : (
-   (state.isProcessing ? 0.35 : 0) +
-   state.inferenceLoad * 0.55 +
-   clamp(state.queueDepth / 15, 0, 1) * 0.2
+   (s.isProcessing ? 0.35 : 0) +
+   s.inferenceLoad * 0.55 +
+   clamp(s.queueDepth / 15, 0, 1) * 0.2
   );
   const k = 1 - Math.pow(0.001, Math.min(dt, 0.05));
   this._energy += (target - this._energy) * k;
@@ -1393,8 +1391,8 @@ const BioluminescentDreamscape = {
   const cx = W / 2, cy = H / 2, rMax = Math.hypot(W, H);
 
   // ── Palette ──
-  const pal = this._palette(e, state.isHealthy, state.isCharging,
-   state.batteryLevel, state.batteryTemperature);
+  const pal = this._palette(e, s.isHealthy, s.isCharging,
+   s.batteryLevel, s.batteryTemperature);
 
   // ═══ LAYER 1: THE ABYSS ═══
   const bgGrad = ctx.createRadialGradient(cx, cy * 0.9, 0, cx, cy * 0.9, rMax * 0.8);
@@ -1641,8 +1639,8 @@ const BioluminescentDreamscape = {
     ctx.quadraticCurveTo(p0.x, p0.y, (p0.x + p1.x) / 2, (p0.y + p1.y) / 2);
    }
    ctx.lineTo(pts[pts.length - 1].x, pts[pts.length - 1].y);
-   const bodyAlpha = fade * lerp(0.5, 0.9, e) * (0.6 + 0.4 * (1 - e * state.inferenceLoad));
-   const activity = state.isProcessing ? (1 + e * 0.5) : 1;
+   const bodyAlpha = fade * lerp(0.5, 0.9, e) * (0.6 + 0.4 * (1 - e * s.inferenceLoad));
+   const activity = s.isProcessing ? (1 + e * 0.5) : 1;
 
    // 3-layer glow body
    ctx.save(); ctx.strokeStyle = rgba(vividCol, bodyAlpha * 0.1);
@@ -1717,7 +1715,7 @@ const BioluminescentDreamscape = {
   if (!lowPower) {
    const emitGap = e > 0.7 ? lerp(0.6, 0.3, 1) :
     e > 0.3 ? lerp(3, 1.5, (e - 0.3) / 0.4) :
-    state.isProcessing ? lerp(5, 3, e * 3) : 8;
+    s.isProcessing ? lerp(5, 3, e * 3) : 8;
    if (t - this._lastShimmer > emitGap) {
     const burstCount = 2 + Math.round(e * 3);
     for (let i = 0; i < burstCount; i++) {
@@ -1755,8 +1753,8 @@ const BioluminescentDreamscape = {
     ctx.arc(s.x + offX, s.y + offY, rad * 0.4, 0, Math.PI * 2); ctx.fill();
    }
    // Deep queue shimmer field
-   if (state.queueDepth > 10) {
-    const qbAlpha = clamp(state.queueDepth / 20, 0, 1) * 0.06;
+   if (s.queueDepth > 10) {
+    const qbAlpha = clamp(s.queueDepth / 20, 0, 1) * 0.06;
     const qbGrad = ctx.createRadialGradient(cx, cy, 0, cx, cy, rMax * 0.35);
     qbGrad.addColorStop(0, toRgba(pal.accent, qbAlpha));
     qbGrad.addColorStop(1, 'rgba(0,0,0,0)');
@@ -1765,7 +1763,7 @@ const BioluminescentDreamscape = {
   }
 
   // ═══ LAYER 5: CORE BLOOM ═══
-  if (e > 0.6 && state.isProcessing && !lowPower) {
+  if (e > 0.6 && s.isProcessing && !lowPower) {
    if (this._blooms.length === 0 || t - this._blooms[this._blooms.length - 1].born > 0.8) {
     this._blooms.push({born: t});
    }
@@ -1794,14 +1792,14 @@ const BioluminescentDreamscape = {
   }
 
   // ═══ LAYER 6: OVERLAYS ═══
-  if (state.isCharging && !lowPower) {
+  if (s.isCharging && !lowPower) {
    const chgA = 0.04 + 0.06 * (0.5 + 0.5 * Math.sin(t * 2));
    const chgGrad = ctx.createRadialGradient(cx, cy, 0, cx, cy, rMax * 0.9);
    chgGrad.addColorStop(0, 'rgba(34,197,94,0)');
    chgGrad.addColorStop(1, rgba({r:0x22,g:0xC5,b:0x5E}, chgA));
    ctx.fillStyle = chgGrad; ctx.fillRect(0, 0, W, H);
   }
-  if (!state.isHealthy) {
+  if (!s.isHealthy) {
    const pulseAlpha = 0.08 + 0.12 * (0.5 + 0.5 * Math.sin(t * 3));
    ctx.fillStyle = rgba({ r: 255, g: 70, b: 70 }, pulseAlpha);
    ctx.fillRect(0, 0, W, H);
@@ -1830,7 +1828,7 @@ const BioluminescentDreamscape = {
   return { primary: lerpRgb(battP, hotP, e), accent: lerpRgb(battA, hotA, e),
    bgCenter: lerpRgb(battBgC, hotBgC, e), bg: battBg };
  },
-};
+}
 
 
 
