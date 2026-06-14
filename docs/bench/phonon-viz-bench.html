@@ -2129,9 +2129,9 @@ const Lcars = {
     } else {
       ctx.moveTo(x, y);
       ctx.lineTo(x + w, y);
-      ctx.lineTo(x + w, y + h - outerR);
-      ctx.quadraticCurveTo(x + w, y + h, x + w - outerR, y + h);
-      ctx.lineTo(x, y + h);
+      ctx.lineTo(x + w, y + h);
+      ctx.lineTo(x + outerR, y + h);
+      ctx.quadraticCurveTo(x, y + h, x, y + h - outerR);
     }
     ctx.closePath();
     ctx.fillStyle = fill;
@@ -2146,11 +2146,12 @@ const Lcars = {
       ctx.lineTo(x + barT, y + barT + innerR);
       ctx.quadraticCurveTo(x + barT, y + barT, x + barT + innerR, y + barT);
     } else {
-      ctx.moveTo(x + barT, y - 2);
+      ctx.moveTo(x + barT + innerR, y + h - barT);
+      ctx.lineTo(x + w + 2, y + h - barT);
       ctx.lineTo(x + w + 2, y - 2);
-      ctx.lineTo(x + w + 2, y + h - barT - innerR);
-      ctx.quadraticCurveTo(x + w + 2, y + h - barT, x + w + 2 - innerR, y + h - barT);
-      ctx.lineTo(x + barT, y + h - barT);
+      ctx.lineTo(x + barT, y - 2);
+      ctx.lineTo(x + barT, y + h - barT - innerR);
+      ctx.quadraticCurveTo(x + barT, y + h - barT, x + barT + innerR, y + h - barT);
     }
     ctx.closePath();
     ctx.fillStyle = bg;
