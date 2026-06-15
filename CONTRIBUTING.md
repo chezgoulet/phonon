@@ -1,8 +1,15 @@
 # Contributing to Phonon
 
-Phonon orchestrates a cluster of Android phones into a unified, OpenAI-compatible
-inference backend. It ships as two components: a Go coordinator (single static
-binary, cross-compiled to ARM64) and a Kotlin Android sidecar (foreground service
+Thanks for being here. Phonon is an open-source project that turns old
+Android phones into private AI inference infrastructure. It's a young
+project in active development, and every contribution — code, testing,
+docs, bugs reports, hardware donations, or just spreading the word —
+moves it closer to something solid and useful.
+
+All contributors are expected to follow our [Code of Conduct](./CODE_OF_CONDUCT.md).
+
+Phonon ships as two components: a Go coordinator (single static binary,
+cross-compiled to ARM64) and a Kotlin Android sidecar (foreground service
 APK), plus an embedded React web UI.
 
 This document defines the code quality standard for all three layers. It is
@@ -416,11 +423,6 @@ All three must pass green before a PR can merge.
 
 ## Code of Conduct
 
-Be excellent to each other. Phonon is a project about making capable AI
-infrastructure accessible to individuals. It exists because we believe
-powerful tools should not require cloud accounts. Contributions are
-welcome from anyone who shares that belief, regardless of background or
-experience level.
-
-No racism, no bigotry, no chauvinism, no platform-bashing, no harassment.
-If someone reports a violation, maintainers will review and act.
+All contributors and participants in Phonon's community are expected to
+follow our [Code of Conduct](./CODE_OF_CONDUCT.md). Please read it before
+contributing — it applies to all project spaces.

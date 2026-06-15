@@ -409,7 +409,7 @@ automatically.
 
 ## License
 
-AGPL-3.0 — see [LICENSE](LICENSE).
+MIT — see [LICENSE](LICENSE). Code of Conduct in [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
 
 **Phonon** — *Because phones are plentiful, inference should be private, and
 the best hardware is the hardware you already own.*
