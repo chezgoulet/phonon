@@ -106,6 +106,8 @@ object VeilPack : VisualizationPack {
         eyeHue=0f; eyeFlash=0f; scan=0f; twitch=0f; twitchT=0f; vomitAmt=0f
     }
 
+    override fun onDeactivate() { onActivate() }
+
     @Composable
     override fun Render(state: VizState, modifier: Modifier) {
         val lowP = state.lowPowerMode
