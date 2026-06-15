@@ -22,6 +22,7 @@ import com.chezgoulet.phonon.ui.packs.LcarsPack
 import com.chezgoulet.phonon.ui.packs.MacSystem7Pack
 import com.chezgoulet.phonon.ui.packs.MatrixRainPack
 import com.chezgoulet.phonon.ui.packs.NeonRingPack
+import com.chezgoulet.phonon.ui.packs.SynthwavePack
 
 /**
  * Singleton engine that manages the active visualization pack, arrangement
@@ -120,9 +121,11 @@ object ThemeEngine {
         registerPack(LcarsPack)
 
 
+
         registerPack(MacSystem7Pack)
         registerPack(EInkPack)
         registerPack(MorphPack)
+        registerPack(SynthwavePack)
     }
 
     /**
