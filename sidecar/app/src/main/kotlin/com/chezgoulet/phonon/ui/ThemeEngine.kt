@@ -16,6 +16,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.chezgoulet.phonon.ui.packs.BioluminescentPack
 import com.chezgoulet.phonon.ui.packs.CyberHudPack
+import com.chezgoulet.phonon.ui.packs.MorphPack
 import com.chezgoulet.phonon.ui.packs.LcarsPack
 import com.chezgoulet.phonon.ui.packs.MatrixRainPack
 import com.chezgoulet.phonon.ui.packs.NeonRingPack
@@ -115,6 +116,7 @@ object ThemeEngine {
         registerPack(CyberHudPack)
         registerPack(BioluminescentPack)
         registerPack(LcarsPack)
+        registerPack(MorphPack)
     }
 
     /**
