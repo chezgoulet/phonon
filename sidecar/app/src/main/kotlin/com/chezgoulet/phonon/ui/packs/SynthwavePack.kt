@@ -135,7 +135,7 @@ object SynthwavePack : VisualizationPack {
             }
 
             // 7. Border glow
-            drawBorderGlow(w, h, isProcessing, degraded)
+            drawBorderGlow(w, h, isProcessing, degraded, t)
         }
     }
 
@@ -269,9 +269,9 @@ object SynthwavePack : VisualizationPack {
         }
     }
 
-    private fun DrawScope.drawBorderGlow(w: Float, h: Float, isProcessing: Boolean, degraded: Boolean) {
+    private fun DrawScope.drawBorderGlow(w: Float, h: Float, isProcessing: Boolean, degraded: Boolean, t: Float) {
         val bracketLen = 40f; val thickness = 8f; val baseAlpha = 0.35f
-        val pulseAlpha = if (isProcessing) (0.5f + sin((tSec * 3.33).toDouble()).toFloat() * 0.3f) else 0.0f
+        val pulseAlpha = if (isProcessing) (0.5f + sin((t * 3.33).toDouble()).toFloat() * 0.3f) else 0.0f
         val alpha = (baseAlpha + pulseAlpha * 0.5f).coerceIn(0f, 1f); val color = borderPurple.copy(alpha = alpha)
         // Top-left
         drawLine(color, Offset(0f, bracketLen), Offset(0f, thickness / 2), thickness)
