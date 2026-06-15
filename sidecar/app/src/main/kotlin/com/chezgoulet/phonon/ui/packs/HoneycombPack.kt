@@ -146,7 +146,7 @@ object HoneycombPack : VisualizationPack {
     private var melt = 0f
 
     override fun onActivate() { reset() }
-    override fun onDeactivate() {}
+    override fun onDeactivate() { reset() }
 
     private fun reset() {
         cells.clear(); bees.clear(); guards.clear()
