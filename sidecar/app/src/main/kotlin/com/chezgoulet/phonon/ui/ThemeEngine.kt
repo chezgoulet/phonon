@@ -23,7 +23,9 @@ import com.chezgoulet.phonon.ui.packs.MacSystem7Pack
 import com.chezgoulet.phonon.ui.packs.MatrixRainPack
 import com.chezgoulet.phonon.ui.packs.HoneycombPack
 import com.chezgoulet.phonon.ui.packs.NeonRingPack
+
 import com.chezgoulet.phonon.ui.packs.SynthwavePack
+import com.chezgoulet.phonon.ui.packs.VeilPack
 
 /**
  * Singleton engine that manages the active visualization pack, arrangement
@@ -124,11 +126,13 @@ object ThemeEngine {
 
 
 
+
         registerPack(MacSystem7Pack)
         registerPack(EInkPack)
         registerPack(MorphPack)
         registerPack(SynthwavePack)
         registerPack(HoneycombPack)
+        registerPack(VeilPack)
     }
 
     /**
