@@ -61,6 +61,11 @@ object EInkPack : VisualizationPack {
         lastState = null  // reset refresh-flash trigger
     }
 
+    override fun onDeactivate() {
+        noisePixels = null
+        lastState = null
+    }
+
     // ── State tracking for refresh flash ─────────────────────────────
     private var lastState: String? = null
 
