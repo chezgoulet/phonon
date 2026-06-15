@@ -19,6 +19,7 @@ import com.chezgoulet.phonon.ui.packs.CyberHudPack
 import com.chezgoulet.phonon.ui.packs.LcarsPack
 import com.chezgoulet.phonon.ui.packs.MatrixRainPack
 import com.chezgoulet.phonon.ui.packs.NeonRingPack
+import com.chezgoulet.phonon.ui.packs.VeilPack
 
 /**
  * Singleton engine that manages the active visualization pack, arrangement
@@ -115,6 +116,7 @@ object ThemeEngine {
         registerPack(CyberHudPack)
         registerPack(BioluminescentPack)
         registerPack(LcarsPack)
+        registerPack(VeilPack)
     }
 
     /**
