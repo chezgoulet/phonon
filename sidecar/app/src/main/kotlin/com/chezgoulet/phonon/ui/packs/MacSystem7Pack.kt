@@ -99,6 +99,8 @@ object MacSystem7Pack : VisualizationPack {
         noiseMap = null  // re-generate for new layout dimensions
     }
 
+    override fun onDeactivate() { noiseMap = null }
+
     // ── Composable entry point ──────────────────────────────────────
 
     @Composable

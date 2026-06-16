@@ -1,5 +1,6 @@
 package com.chezgoulet.phonon.ui.packs
 
+import androidx.compose.animation.core.withFrameNanos
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.*
@@ -81,12 +82,29 @@ object SynthwavePack : VisualizationPack {
         stars = null  // re-generate star field for new session dimensions
     }
 
+    override fun onDeactivate() { stars = null }
+
     @Composable
     override fun Render(state: VizState, modifier: Modifier) {
+        var tSec by remember { mutableStateOf(0f) }
+        var lastFrame by remember { mutableStateOf(0f) }
+        var dtSec by remember { mutableStateOf(0.016f) }
+        LaunchedEffect(Unit) {
+            val start = withFrameNanos { it }
+            while (true) {
+                val now = withFrameNanos { it }
+                val tn = (now - start) / 1_000_000_000f
+                dtSec = (tn - lastFrame).coerceIn(0f, 0.05f)
+                lastFrame = tn
+                tSec = tn
+            }
+        }
+
         Canvas(modifier = modifier.fillMaxSize()) {
             val w = size.width
             val h = size.height
-            val time = System.currentTimeMillis() / 1000.0
+            val t = tSec
+            val time = t.toDouble()
             val degraded = state.lowPowerMode
             val isProcessing = state.isProcessing
 
@@ -117,7 +135,7 @@ object SynthwavePack : VisualizationPack {
             }
 
             // 7. Border glow
-            drawBorderGlow(w, h, isProcessing, degraded)
+            drawBorderGlow(w, h, isProcessing, degraded, t)
         }
     }
 
@@ -251,9 +269,9 @@ object SynthwavePack : VisualizationPack {
         }
     }
 
-    private fun DrawScope.drawBorderGlow(w: Float, h: Float, isProcessing: Boolean, degraded: Boolean) {
+    private fun DrawScope.drawBorderGlow(w: Float, h: Float, isProcessing: Boolean, degraded: Boolean, t: Float) {
         val bracketLen = 40f; val thickness = 8f; val baseAlpha = 0.35f
-        val pulseAlpha = if (isProcessing) (0.5f + sin(System.currentTimeMillis() / 300.0).toFloat() * 0.3f) else 0.0f
+        val pulseAlpha = if (isProcessing) (0.5f + sin((t * 3.33).toDouble()).toFloat() * 0.3f) else 0.0f
         val alpha = (baseAlpha + pulseAlpha * 0.5f).coerceIn(0f, 1f); val color = borderPurple.copy(alpha = alpha)
         // Top-left
         drawLine(color, Offset(0f, bracketLen), Offset(0f, thickness / 2), thickness)
