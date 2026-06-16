@@ -1,9 +1,9 @@
 name: CI
 
 on:
-  push:
-    branches: [main, testing]
   pull_request:
+    branches: [main, testing]
+  push:
     branches: [main, testing]
 
 concurrency:
@@ -11,28 +11,38 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  coordinator:
-    name: Coordinator (Go)
+  # ─── Web UI (React) ────────────────────────────────────────────────
+  react:
+    name: Web UI
     runs-on: ubuntu-24.04
     defaults:
       run:
-        working-directory: .
+        working-directory: ui
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-node@v4
         with:
-          go-version: "1.23.0"
-          cache: true
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
 
-      - name: Build
-        run: go build -v ./...
+      - name: Install
+        run: npm ci
 
-      - name: Test
-        run: go test -race -count=1 -timeout=90s ./...
+      - name: Build (tsc + vite)
+        run: npm run build
 
+      - name: Upload dist
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-dist
+          path: ui/dist/
+          if-no-files-found: error
+
+  # ─── Sidecar (Kotlin / Android / LiteRT-LM) ───────────────────────
   sidecar:
-    name: Sidecar (Android)
+    name: Sidecar
     runs-on: ubuntu-24.04
     defaults:
       run:
@@ -43,17 +53,63 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: 17
+          java-version: "17"
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Assemble debug APK
-        run: ./gradlew assembleDebug --build-cache --no-daemon --console=plain
+      - name: Ensure Android SDK platform available
+        run: |
+          SDKMANAGER="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          if [ -x "$SDKMANAGER" ]; then
+            yes | "$SDKMANAGER" --install "platforms;android-35" "build-tools;35.0.0" > /dev/null 2>&1 || true
+          fi
 
-      - name: Upload APK
+      - name: Run unit tests
+        run: ./gradlew test --no-daemon --console=plain
+
+      - name: Build debug APK
+        run: ./gradlew assembleDebug --no-daemon --console=plain
+
+      - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: phonon-sidecar-debug
+          name: sidecar-apk-debug
           path: sidecar/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: warn
+          retention-days: 7
+
+  # ─── Coordinator (Go) ─────────────────────────────────────────────
+  coordinator:
+    name: Coordinator
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23.0"
+          cache: true
+
+      - name: Download UI dist (if available)
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: ui-dist
+          path: cmd/phonon-coordinator/static/
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test -race -count=1 -timeout=90s ./...
+
+      - name: Build (linux/amd64)
+        run: CGO_ENABLED=0 go build -ldflags="-s -w" -o phonon-coordinator-linux-amd64 ./cmd/phonon-coordinator
+
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: coordinator-binary
+          path: phonon-coordinator-linux-amd64
           retention-days: 7
