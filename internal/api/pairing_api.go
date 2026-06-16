@@ -317,14 +317,21 @@ type unpairResponse struct {
 }
 
 func (h *PairingHandler) handleUnpair(w http.ResponseWriter, r *http.Request) {
-	deviceID := r.URL.Query().Get("device_id")
-	if deviceID == "" {
-		writeError(w, http.StatusBadRequest, "device_id query parameter required")
+	var req struct {
+		DeviceID string `json:"device_id"`
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 16<<10)
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.DeviceID == "" {
+		writeError(w, http.StatusBadRequest, "device_id is required")
 		return
 	}
 
-	h.pm.RemovePaired(deviceID)
-	h.log.Info("device unpaired", "device_id", deviceID)
+	h.pm.RemovePaired(req.DeviceID)
+	h.log.Info("device unpaired", "device_id", req.DeviceID)
 	writeJSON(w, http.StatusOK, unpairResponse{Status: "unpaired"})
 }
 
