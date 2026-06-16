@@ -14,6 +14,21 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+const (
+	// wsReadLimit is the maximum WebSocket message size in bytes.
+	// Sidecar acks are tiny by design (< 1 KB), including model_push
+	// orchestration messages that carry a URL + checksum.
+	wsReadLimit = 64 * 1024
+
+	// wsPongWait is how long the coordinator waits for a pong before
+	// considering the connection dead.
+	wsPongWait = 30 * time.Second
+
+	// wsWriteTimeout is applied to each WriteJSON call to prevent a slow
+	// consumer from stalling the handler while holding mu.
+	wsWriteTimeout = 10 * time.Second
+)
+
 // Command types sent from coordinator to sidecar.
 const (
 	CmdModelPush      = "model_push"
@@ -215,6 +230,17 @@ func (h *WSHandler) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	dc := &deviceConn{conn: conn, deviceID: deviceID}
 
+	// Enforce read limits and deadline — no anonymous pong handler needed
+	// because the gorilla/websocket library fires pongs automatically for
+	// every received pong frame; we just need to reset the deadline.
+	conn.SetReadLimit(wsReadLimit)
+	conn.SetPongHandler(func(string) error {
+		return conn.SetReadDeadline(time.Now().Add(wsPongWait))
+	})
+	if err := conn.SetReadDeadline(time.Now().Add(wsPongWait)); err != nil {
+		h.log.Warn("failed to set ws read deadline", "device_id", deviceID, "error", err)
+	}
+
 	h.mu.Lock()
 	// Close any stale connection for this device
 	if existing, ok := h.devices[deviceID]; ok {
@@ -316,6 +342,10 @@ func (h *WSHandler) SendCommand(deviceID, cmdType string, payload any) (string, 
 
 	// Send immediately if connected (hold mu to prevent concurrent write)
 	if dc != nil {
+		if err := dc.conn.SetWriteDeadline(time.Now().Add(wsWriteTimeout)); err != nil {
+			h.mu.Unlock()
+			return cmd.CommandID, err
+		}
 		if err := dc.conn.WriteJSON(cmd); err != nil {
 			h.mu.Unlock()
 			h.log.Error("failed to send command", "device_id", deviceID, "command_id", cmd.CommandID, "error", err)
@@ -465,6 +495,10 @@ func (h *WSHandler) resendPending(deviceID string) {
 	}
 
 	for _, pc := range toResend {
+		if err := dc.conn.SetWriteDeadline(time.Now().Add(wsWriteTimeout)); err != nil {
+			h.log.Error("failed to set ws write deadline during resend", "device_id", deviceID, "error", err)
+			return
+		}
 		if err := dc.conn.WriteJSON(pc.cmd); err != nil {
 			h.log.Error("failed to resend command", "device_id", deviceID, "command_id", pc.cmdID, "error", err)
 			return
