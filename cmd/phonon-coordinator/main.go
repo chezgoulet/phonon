@@ -26,7 +26,6 @@ import (
 	"github.com/chezgoulet/phonon/internal/model"
 	"github.com/chezgoulet/phonon/internal/pair"
 	"github.com/chezgoulet/phonon/internal/registry"
-	"gopkg.in/yaml.v3"
 )
 
 // uiFS is declared in ui_embed.go (this package)
@@ -47,7 +46,7 @@ func main() {
 		cfgPath = p
 	}
 
-	cfg, cfgErr := loadConfig(cfgPath)
+	cfg, vr, cfgErr := config.LoadFile(cfgPath)
 	if cfgErr != nil {
 		// Only fall back to defaults when the file simply doesn't exist.
 		// A present-but-broken config must not silently fail open to
@@ -62,6 +61,10 @@ func main() {
 			Cluster: config.ClusterConfig{
 				Auth: config.AuthConfig{Mode: "none"},
 			},
+		}
+	} else if vr != nil && len(vr.Warnings) > 0 {
+		for _, w := range vr.Warnings {
+			logger.Warn("config validation", "warning", w)
 		}
 	}
 
@@ -490,16 +493,4 @@ func serveUI(mux *http.ServeMux, log *slog.Logger) {
 	log.Info("UI served at /ui/")
 }
 
-func loadConfig(path string) (*config.Config, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, fmt.Errorf("open config: %w", err)
-	}
-	defer f.Close()
 
-	var cfg config.Config
-	if err := yaml.NewDecoder(f).Decode(&cfg); err != nil {
-		return nil, fmt.Errorf("parse config: %w", err)
-	}
-	return &cfg, nil
-}
