@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"log/slog"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -86,7 +87,10 @@ func (h *SidecarHandler) handleRegister(w http.ResponseWriter, r *http.Request) 
 	modelShort := strings.ReplaceAll(strings.ToLower(req.DeviceModel), " ", "-")
 	autoName := modelShort + "-" + shortID
 
-	err := h.reg.Register(req.DeviceID, autoName, req.IPAddress)
+	// Derive IP from RemoteAddr — ignore the body's ip_address field
+	// (a malicious LAN device could use it to register a different target).
+	clientIP := deriveClientIP(r.RemoteAddr)
+	err := h.reg.Register(req.DeviceID, autoName, clientIP)
 	if err != nil {
 		// Already registered — return the existing node name
 		if node, ok := h.reg.Get(req.DeviceID); ok {
@@ -269,4 +273,14 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 
 func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
+}
+
+// deriveClientIP extracts the client IP from http.Request.RemoteAddr,
+// stripping the port. Returns the raw value if parsing fails.
+func deriveClientIP(remoteAddr string) string {
+	host, _, err := net.SplitHostPort(remoteAddr)
+	if err != nil {
+		return remoteAddr
+	}
+	return host
 }
