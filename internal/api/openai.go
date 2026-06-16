@@ -234,6 +234,7 @@ func (h *OpenAIHandler) handleListModels(w http.ResponseWriter, _ *http.Request)
 
 func (h *OpenAIHandler) handleChatCompletion(w http.ResponseWriter, r *http.Request) {
 	var req ChatCompletionRequest
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{
 			"error": map[string]string{

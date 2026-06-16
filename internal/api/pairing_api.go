@@ -59,6 +59,7 @@ type pairRequestResponse struct {
 // handlePairRequest initiates a pairing request from the sidecar.
 func (h *PairingHandler) handlePairRequest(w http.ResponseWriter, r *http.Request) {
 	var req pairRequestJSON
+	r.Body = http.MaxBytesReader(w, r.Body, 16<<10)
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
@@ -186,6 +187,7 @@ type confirmResponse struct {
 
 func (h *PairingHandler) handleConfirmPairing(w http.ResponseWriter, r *http.Request) {
 	var req confirmRequest
+	r.Body = http.MaxBytesReader(w, r.Body, 16<<10)
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
