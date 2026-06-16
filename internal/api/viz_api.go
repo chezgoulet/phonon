@@ -118,6 +118,7 @@ func (h *VizHandler) handleDeviceSwitch(w http.ResponseWriter, r *http.Request) 
 	}
 
 	var req switchRequest
+	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
@@ -144,6 +145,7 @@ func (h *VizHandler) handleDeviceSwitch(w http.ResponseWriter, r *http.Request) 
 
 func (h *VizHandler) handleBroadcastSwitch(w http.ResponseWriter, r *http.Request) {
 	var req switchRequest
+	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
@@ -175,6 +177,7 @@ func (h *VizHandler) handleDeviceConfig(w http.ResponseWriter, r *http.Request) 
 	}
 
 	var req configRequest
+	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
@@ -204,6 +207,7 @@ type arrangementRequest struct {
 
 func (h *VizHandler) handleSetArrangement(w http.ResponseWriter, r *http.Request) {
 	var req arrangementRequest
+	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
@@ -241,6 +245,7 @@ type showNumbersRequest struct {
 
 func (h *VizHandler) handleShowNumbers(w http.ResponseWriter, r *http.Request) {
 	var req showNumbersRequest
+	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return

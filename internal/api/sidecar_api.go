@@ -70,6 +70,7 @@ type registerResponse struct {
 
 func (h *SidecarHandler) handleRegister(w http.ResponseWriter, r *http.Request) {
 	var req registerRequest
+	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
@@ -167,6 +168,7 @@ type heartbeatRequest struct {
 
 func (h *SidecarHandler) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
 	var req heartbeatRequest
+	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
@@ -217,6 +219,7 @@ type modelStatusRequest struct {
 
 func (h *SidecarHandler) handleModelStatus(w http.ResponseWriter, r *http.Request) {
 	var req modelStatusRequest
+	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
