@@ -88,7 +88,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.23.0"
+          go-version: "1.23"
           cache: true
 
       - name: Download UI dist (if available)
