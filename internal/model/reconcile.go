@@ -15,7 +15,7 @@ import (
 // The WSHandler in internal/api implements this.
 type CommandIssuer interface {
 	SendModelPush(deviceID, model, url, checksum string, sizeBytes int64) (string, error)
-	SendModelLoad(deviceID, model, backend string) (string, error)
+	SendModelLoad(deviceID, model, backend, checksum string) (string, error)
 	SendModelUnload(deviceID string) (string, error)
 	HasConnection(deviceID string) bool
 }
@@ -278,7 +278,7 @@ func (r *Reconciler) executeStep(step *ReconcilerStep) {
 
 	case ActionLoad:
 		r.log.Info("loading model", "device_id", step.DeviceID, "model", step.ModelName, "backend", step.Backend)
-		if _, err := r.issuer.SendModelLoad(step.DeviceID, step.ModelName, step.Backend); err != nil {
+		if _, err := r.issuer.SendModelLoad(step.DeviceID, step.ModelName, step.Backend, step.SHA256); err != nil {
 			r.log.Error("load command failed", "device_id", step.DeviceID, "error", err)
 		}
 

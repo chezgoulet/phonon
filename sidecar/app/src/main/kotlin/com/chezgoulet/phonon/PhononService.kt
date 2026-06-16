@@ -238,11 +238,11 @@ class PhononService : Service() {
                 if (status != "pairing") pairingCode = null
                 updateNotification()
             },
-            onModelLoad = { modelName, modelUrl, engine, backend ->
+            onModelLoad = { modelName, modelUrl, engine, backend, checksum ->
                 scope.launch {
                     loadedModel = modelName
                     updateNotification()
-                    modelManager.loadModel(modelName, modelUrl, backend)
+                    modelManager.loadModel(modelName, modelUrl, backend, checksum)
                 }
             },
             onModelUnload = {
