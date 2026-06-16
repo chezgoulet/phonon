@@ -6,17 +6,50 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/chezgoulet/phonon/internal/pair"
 	"github.com/chezgoulet/phonon/internal/registry"
 )
 
+// memStore is an in-memory Store implementation for tests.
+type memStore struct {
+	mu      sync.Mutex
+	devices map[string]*pair.PairedDevice
+}
+
+func (s *memStore) SavePaired(d *pair.PairedDevice) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.devices[d.DeviceID] = d
+	return nil
+}
+
+func (s *memStore) LoadPaired() ([]*pair.PairedDevice, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	result := make([]*pair.PairedDevice, 0, len(s.devices))
+	for _, d := range s.devices {
+		result = append(result, d)
+	}
+	return result, nil
+}
+
+func (s *memStore) RemovePaired(deviceID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.devices, deviceID)
+	return nil
+}
+
+func (s *memStore) Close() error { return nil }
+
 // setupPairingTest creates a reg + pairing handler + mux with operator routes.
 func setupPairingTest(t *testing.T) (*registry.Registry, *pair.Manager, *http.ServeMux) {
 	t.Helper()
 	reg := registry.New()
-	pm, err := pair.NewManager("", "")
+	pm, err := pair.NewManager("", &memStore{devices: make(map[string]*pair.PairedDevice)})
 	if err != nil {
 		t.Fatalf("pair.NewManager: %v", err)
 	}

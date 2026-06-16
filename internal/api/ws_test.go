@@ -111,7 +111,7 @@ func TestWS_AllCommandTypes(t *testing.T) {
 		send    func() (string, error)
 	}{
 		{"model_push", "model_push", func() (string, error) { return ws.SendModelPush("TEST-001", "m", "u", "c", 1) }},
-		{"model_load", "model_load", func() (string, error) { return ws.SendModelLoad("TEST-001", "gemma-4-E2B-it") }},
+		{"model_load", "model_load", func() (string, error) { return ws.SendModelLoad("TEST-001", "gemma-4-E2B-it", "auto") }},
 		{"model_unload", "model_unload", func() (string, error) { return ws.SendModelUnload("TEST-001") }},
 		{"mode_change", "mode_change", func() (string, error) { return ws.SendModeChange("TEST-001", "pool", "litert") }},
 		{"standby_promote", "standby_promote", func() (string, error) { return ws.SendStandbyPromote("TEST-001", "g", "u", "c") }},
@@ -146,7 +146,7 @@ func TestWS_CommandLifecycle(t *testing.T) {
 
 	ws.reg.Register("TEST-001", "pixel-test", "")
 
-	cmdID, err := ws.SendModelLoad("TEST-001", "gemma-4-E2B-it")
+	cmdID, err := ws.SendModelLoad("TEST-001", "gemma-4-E2B-it", "auto")
 	if err != nil {
 		t.Fatalf("send error: %v", err)
 	}
@@ -186,7 +186,7 @@ func TestWS_CommandFailed(t *testing.T) {
 
 	ws.reg.Register("TEST-001", "pixel-test", "")
 
-	cmdID, _ := ws.SendModelLoad("TEST-001", "gemma-4-E2B-it")
+	cmdID, _ := ws.SendModelLoad("TEST-001", "gemma-4-E2B-it", "auto")
 	_ = readCommand(t, conn, time.Second)
 
 	sendAck(t, conn, cmdID, "failed")
@@ -251,7 +251,7 @@ func TestWS_SendToOfflineDevice(t *testing.T) {
 	defer server.Close()
 
 	ws.reg.Register("OFFLINE-001", "offline", "")
-	cmdID, err := ws.SendModelLoad("OFFLINE-001", "gemma-4-E2B-it")
+	cmdID, err := ws.SendModelLoad("OFFLINE-001", "gemma-4-E2B-it", "auto")
 	if err != nil {
 		t.Fatalf("send to offline device should not error: %v", err)
 	}
@@ -271,7 +271,7 @@ func TestWS_ReconnectResendsPending(t *testing.T) {
 	ws.reg.Register("TEST-001", "pixel-test", "")
 
 	// Send a command
-	_, err := ws.SendModelLoad("TEST-001", "gemma-4-E2B-it")
+	_, err := ws.SendModelLoad("TEST-001", "gemma-4-E2B-it", "auto")
 	if err != nil {
 		t.Fatalf("send error: %v", err)
 	}
@@ -325,7 +325,7 @@ func TestWS_ReconnectMultiplePending(t *testing.T) {
 	ws.reg.Register("TEST-001", "pixel-test", "")
 
 	// Send two commands
-	ws.SendModelLoad("TEST-001", "gemma-4-E2B-it")
+	ws.SendModelLoad("TEST-001", "gemma-4-E2B-it", "auto")
 	ws.SendModeChange("TEST-001", "pool", "litert")
 
 	// Read both (don't ack)
