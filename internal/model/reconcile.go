@@ -34,6 +34,9 @@ type Reconciler struct {
 	cancel  context.CancelFunc
 	running bool
 
+	// ctx is set by loop() for use during reconciliation steps.
+	ctx context.Context
+
 	// Track which groups are in the middle of a rolling update.
 	rollingGroups map[string]bool
 }
@@ -61,6 +64,7 @@ func (r *Reconciler) Start(ctx context.Context, groups []config.GroupConfig) err
 		return fmt.Errorf("reconciler already running")
 	}
 
+	r.ctx = ctx
 	ctx, cancel := context.WithCancel(ctx)
 	r.cancel = cancel
 	r.running = true
@@ -122,6 +126,28 @@ func (r *Reconciler) ReconcileGroup(g *config.GroupConfig) []ReconcilerStep {
 
 	modelURL := r.cachedDownloadURL(g.Model)
 	needDownload := modelURL == "" && !r.cache.Has(g.Model)
+
+	// Cold cache: attempt download before giving up.
+	if needDownload {
+		downloadURL := g.DownloadURL
+		if downloadURL == "" {
+			downloadURL = ResolveHuggingFaceURL(g.Model)
+		}
+		if downloadURL != "" {
+			ctx := r.ctx
+			if ctx == nil {
+				ctx = context.Background()
+			}
+			path, err := r.cache.Get(ctx, g.Model, downloadURL, g.Checksum)
+			if err != nil {
+				r.log.Warn("failed to download model", "model", g.Model, "error", err)
+			} else {
+				r.log.Info("downloaded model to cache", "model", g.Model, "path", path)
+				modelURL = URL(r.baseURL, g.Model)
+				needDownload = false
+			}
+		}
+	}
 
 	backend := string(g.Backend)
 	if backend == "" {
