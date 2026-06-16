@@ -28,7 +28,7 @@ func (m *mockIssuer) SendModelPush(deviceID, model, _, _ string, _ int64) (strin
 	return "cmd-" + deviceID, nil
 }
 
-func (m *mockIssuer) SendModelLoad(deviceID, model string) (string, error) {
+func (m *mockIssuer) SendModelLoad(deviceID, model, _ string) (string, error) {
 	m.loadCommands = append(m.loadCommands, deviceID+":"+model)
 	return "cmd-" + deviceID, nil
 }
