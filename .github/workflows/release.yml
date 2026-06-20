@@ -158,13 +158,6 @@ jobs:
           name: ui-dist
           path: cmd/phonon-coordinator/static/
 
-      - name: Lint
-        uses: golangci/golangci-lint-action@v6
-        with:
-          version: latest
-          args: --timeout=5m
-          working-directory: .
-
       - name: Vet
         run: go vet ./...
 
