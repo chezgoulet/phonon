@@ -1,6 +1,5 @@
 package com.chezgoulet.phonon.ui.packs
 
-import androidx.compose.animation.core.withFrameNanos
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.*

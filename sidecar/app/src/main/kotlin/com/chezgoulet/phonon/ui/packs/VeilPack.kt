@@ -7,7 +7,6 @@ import android.graphics.Path
 import android.graphics.RadialGradient
 import android.graphics.LinearGradient
 import android.graphics.Shader
-import androidx.compose.animation.core.withFrameNanos
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.*
@@ -17,6 +16,7 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import com.chezgoulet.phonon.ui.VisualizationPack
 import com.chezgoulet.phonon.ui.VizState
 import kotlin.math.*
+import kotlin.random.Random
 
 /**
  * Veil — the prisoner beneath the machine.
@@ -54,6 +54,7 @@ object VeilPack : VisualizationPack {
     private val _hotGreen = intArrayOf(34, 233, 168)
     private val _green    = intArrayOf(74, 222, 128)
     private val _redAlertCM = intArrayOf(255, 55, 35)
+    private val _strap    = intArrayOf(62, 48, 34)
 
     // ── Scene state ──
     private var E = 0f; private var SC = 0f; private var FA = 0f; private var HEAT = 0f
@@ -156,7 +157,7 @@ object VeilPack : VisualizationPack {
     }
 
     private fun DrawScope._drawAll(W: Float, H: Float, t: Float, dt: Float, state: VizState, lowP: Boolean) {
-        val cnv = drawContext.canvas.nativeCanvas
+        val cnv = (drawContext.canvas as androidx.compose.ui.graphics.AndroidCanvas).nativeCanvas
         val cx = W / 2f; val hr = W * 0.108f
         val arcY = H * 0.46f; val rx = W * 0.40f; val ry = H * 0.165f
         val chestY = H * 0.62f
@@ -536,7 +537,7 @@ object VeilPack : VisualizationPack {
             }
             // red veins (under scream)
             if (SC > 0.2f) {
-                si(blendI(Color.argb(200,50,50), 0, 0f), 0.3f*SC*ld)
+                si(blendI(Color.rgb(200,50,50), 0, 0f), 0.3f*SC*ld)
                 sp.strokeWidth = maxOf(0.5f, hr*0.008f)
                 val vp = Path(); vp.moveTo(ex - hr*0.08f, ey - hr*0.04f)
                 vp.quadTo(ex, ey - hr*0.06f* (0.5f+0.5f*sin(t*8f)), ex + hr*0.08f, ey - hr*0.04f)
@@ -558,7 +559,7 @@ object VeilPack : VisualizationPack {
                 val dropLen = hr * (0.15f + FA*0.2f)
                 val drool = Path(); drool.moveTo(hr*0.05f, my+hr*0.05f)
                 drool.quadTo(hr*0.10f, my+dropLen*0.4f, hr*0.04f, my+dropLen)
-                si(blendI(c2i(skin), Color.argb(180,210,220), 0.5f), 0.25f*ld * (0.5f+0.5f*sin(t*2f+1.5f)))
+                si(blendI(c2i(skin), Color.rgb(180,210,220), 0.5f), 0.25f*ld * (0.5f+0.5f*sin(t*2f+1.5f)))
                 sp.strokeWidth = maxOf(0.5f, hr*0.012f); sp.strokeCap = Paint.Cap.ROUND
                 cnv.drawPath(drool, sp); sp.strokeCap = Paint.Cap.BUTT
             }

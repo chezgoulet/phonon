@@ -1,6 +1,5 @@
 package com.chezgoulet.phonon.ui.packs
 
-import androidx.compose.animation.core.withFrameNanos
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.*
@@ -203,7 +202,7 @@ object HoneycombPack : VisualizationPack {
             val nc = drawContext.canvas.nativeCanvas
 
             // ── Background ──
-            drawRect(nativeColor(0xFF0c0903), Offset.Zero, size)
+            drawRect(Color(0xFF0c0903), Offset.Zero, size)
 
             // ── Update derived cell state ──
             // Cell fill targets
