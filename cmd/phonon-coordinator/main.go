@@ -316,10 +316,6 @@ func main() {
 		if cfg != nil && cfg.Cluster.TLS.Enabled {
 			cert := cfg.Cluster.TLS.CertFile
 			key := cfg.Cluster.TLS.KeyFile
-			if cert == "" || key == "" {
-				logger.Error("TLS enabled but cert_file or key_file not set")
-				os.Exit(1)
-			}
 
 			tlsCfg := &tls.Config{
 				MinVersion: tls.VersionTLS12,
@@ -353,6 +349,62 @@ func main() {
 				tlsCfg.ClientCAs = caPool
 				tlsCfg.ClientAuth = tls.RequireAndVerifyClientCert
 				logger.Info("mTLS enabled — CA derived from coordinator Ed25519 key")
+			}
+
+			// Auto-generate self-signed server cert when cert/key files are not
+			// explicitly provided. Requires self_signed: true in config or an
+			// explicit request (empty cert_file + key_file with SelfSigned).
+			// The cert is signed by the coordinator's CA so mTLS clients that
+			// trust the CA (phones during pairing) can verify the server identity.
+			if (cert == "" || key == "") && cfg.Cluster.TLS.SelfSigned {
+				certPEM, keyPEM, err := pairingMgr.GenerateServerCert()
+				if err != nil {
+					logger.Error("failed to generate self-signed server cert", "error", err)
+					os.Exit(1)
+				}
+
+				// Create temp files so ListenAndServeTLS can read them.
+				// The certs are held in temp files because the standard library
+				// tls.GetCertificate callback needs a tls.Certificate, which
+				// requires parsing PEM — done here once at startup.
+				certFile, err := os.CreateTemp("", "phonon-cert-*.pem")
+				if err != nil {
+					logger.Error("failed to create temp cert file", "error", err)
+					os.Exit(1)
+				}
+				defer os.Remove(certFile.Name())
+				if _, err := certFile.Write(certPEM); err != nil {
+					logger.Error("failed to write temp cert file", "error", err)
+					certFile.Close()
+					os.Exit(1)
+				}
+				certFile.Close()
+
+				keyFile, err := os.CreateTemp("", "phonon-key-*.pem")
+				if err != nil {
+					logger.Error("failed to create temp key file", "error", err)
+					os.Exit(1)
+				}
+				defer os.Remove(keyFile.Name())
+				if _, err := keyFile.Write(keyPEM); err != nil {
+					logger.Error("failed to write temp key file", "error", err)
+					keyFile.Close()
+					os.Exit(1)
+				}
+				keyFile.Close()
+
+				cert = certFile.Name()
+				key = keyFile.Name()
+
+				logger.Info("self-signed TLS enabled — server cert signed by coordinator CA",
+					"ca_fingerprint", pairingMgr.CAFingerprint(),
+				)
+			}
+
+			// Validate cert/key are set — either from config or auto-generation.
+			if cert == "" || key == "" {
+				logger.Error("TLS enabled but cert_file and key_file not set — set self_signed: true or provide explicit paths")
+				os.Exit(1)
 			}
 
 			server.TLSConfig = tlsCfg

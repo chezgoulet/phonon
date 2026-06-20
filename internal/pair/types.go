@@ -25,6 +25,7 @@ package pair
 import (
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/subtle"
 	"crypto/x509"
 	"crypto/x509/pkix"
@@ -33,6 +34,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math/big"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -467,6 +469,113 @@ func (m *Manager) generateCACert() ([]byte, error) {
 	}
 
 	return der, nil
+}
+
+// GenerateServerCert creates a TLS server certificate signed by the
+// coordinator's CA. The cert includes SANs for common addresses
+// (localhost, 127.0.0.1, ::1) so it works for mTLS on LAN or local dev.
+// Returns PEM-encoded cert and key bytes.
+func (m *Manager) GenerateServerCert() (certPEM, keyPEM []byte, err error) {
+	// Ensure CA is loaded/generated
+	_, err = m.TLSClientCA()
+	if err != nil {
+		return nil, nil, fmt.Errorf("ensure CA: %w", err)
+	}
+
+	// CA certificate — use the first CA in the pool (the current key's CA)
+	if len(m.caCerts) == 0 {
+		return nil, nil, fmt.Errorf("no CA certificates available")
+	}
+	caDER := m.caCerts[len(m.caCerts)-1]
+	caCert, err := x509.ParseCertificate(caDER)
+	if err != nil {
+		return nil, nil, fmt.Errorf("parse CA cert: %w", err)
+	}
+
+	// Generate an ephemeral Ed25519 keypair for the server cert
+	serverPub, serverPriv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		return nil, nil, fmt.Errorf("generate server key: %w", err)
+	}
+
+	// Serial number from random
+	serialLimit := new(big.Int).Lsh(big.NewInt(1), 128)
+	serial, err := rand.Int(rand.Reader, serialLimit)
+	if err != nil {
+		return nil, nil, fmt.Errorf("generate serial: %w", err)
+	}
+
+	now := time.Now()
+	tmpl := &x509.Certificate{
+		SerialNumber: serial,
+		Subject: pkix.Name{
+			CommonName:   "Phonon Coordinator",
+			Organization: []string{"chezgoulet"},
+		},
+		NotBefore: now.Add(-1 * time.Hour),
+		NotAfter:  now.Add(365 * 24 * time.Hour), // 1 year
+		KeyUsage:  x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
+		ExtKeyUsage: []x509.ExtKeyUsage{
+			x509.ExtKeyUsageServerAuth,
+			x509.ExtKeyUsageClientAuth,
+		},
+		BasicConstraintsValid: true,
+		IsCA:                  false,
+		DNSNames:              []string{"localhost", "phonon.local"},
+		IPAddresses: []net.IP{
+			net.ParseIP("127.0.0.1"),
+			net.ParseIP("::1"),
+		},
+	}
+
+	// Sign with the CA key
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, caCert, serverPub, m.coordKey)
+	if err != nil {
+		return nil, nil, fmt.Errorf("create server cert: %w", err)
+	}
+
+	// Encode cert as PEM
+	certPEM = pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+
+	// Encode private key as PEM (PKCS8 for Ed25519)
+	keyBytes, err := x509.MarshalPKCS8PrivateKey(serverPriv)
+	if err != nil {
+		return nil, nil, fmt.Errorf("marshal server key: %w", err)
+	}
+	keyPEM = pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyBytes})
+
+	return certPEM, keyPEM, nil
+}
+
+// CAFingerprint returns the SHA-256 fingerprint of the current CA certificate
+// in uppercase colon-separated hex (e.g. "AB:CD:EF:..."), suitable for
+// embedding in the pairing QR code so the phone can verify the coordinator's
+// TLS cert on first connect.
+//
+// Returns an empty string if no CA cert is available.
+func (m *Manager) CAFingerprint() string {
+	// Ensure CA is loaded/generated
+	if _, err := m.TLSClientCA(); err != nil {
+		return ""
+	}
+
+	if len(m.caCerts) == 0 {
+		return ""
+	}
+
+	// Use the most recent CA cert (current key)
+	caDER := m.caCerts[len(m.caCerts)-1]
+
+	h := sha256.New()
+	h.Write(caDER)
+	sum := h.Sum(nil)
+
+	// Format as colon-separated hex: AB:CD:EF:...
+	parts := make([]string, len(sum))
+	for i, b := range sum {
+		parts[i] = fmt.Sprintf("%02X", b)
+	}
+	return strings.Join(parts, ":")
 }
 
 // loadCACerts reads CA certificates from the PEM file on disk (if any)

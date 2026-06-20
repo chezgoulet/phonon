@@ -63,9 +63,12 @@ type TLSConfig struct {
 	CertFile      string `yaml:"cert_file"`      // path to TLS certificate (PEM)
 	KeyFile       string `yaml:"key_file"`       // path to TLS private key (PEM)
 	ClientCAFile  string `yaml:"client_ca_file"` // path to CA cert for mTLS client verification (PEM)
+
+	// SelfSigned enables auto-generation of a self-signed server cert
+	// signed by the coordinator's Ed25519-derived CA. Ignored when
+	// cert_file and key_file are explicitly set.
 	// Self-signed certs are acceptable for LAN deployments.
-	// Generate with: openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
-	//   -keyout phonon.key -out phonon.crt -subj "/CN=phonon.local"
+	SelfSigned bool `yaml:"self_signed"`
 }
 
 // ClusterConfig defines the top-level cluster settings.
