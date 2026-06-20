@@ -13,6 +13,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.nativeCanvas
 import com.chezgoulet.phonon.ui.VisualizationPack
 import com.chezgoulet.phonon.ui.VizState
 import kotlin.math.*
@@ -126,7 +127,7 @@ object VeilPack : VisualizationPack {
         Canvas(modifier = modifier.fillMaxSize()) {
             val t = tSec; val dt = dtSec; val W = size.width; val H = size.height
             drive(state, dt, lowP)
-            _drawAll(this, W, H, t, dt, state, lowP)
+            _drawAll(W, H, t, dt, state, lowP)
         }
     }
 
@@ -157,7 +158,7 @@ object VeilPack : VisualizationPack {
     }
 
     private fun DrawScope._drawAll(W: Float, H: Float, t: Float, dt: Float, state: VizState, lowP: Boolean) {
-        val cnv = (drawContext.canvas as androidx.compose.ui.graphics.AndroidCanvas).nativeCanvas
+        val cnv = drawContext.canvas.nativeCanvas
         val cx = W / 2f; val hr = W * 0.108f
         val arcY = H * 0.46f; val rx = W * 0.40f; val ry = H * 0.165f
         val chestY = H * 0.62f
@@ -233,8 +234,8 @@ object VeilPack : VisualizationPack {
             cnv.save(); cnv.translate(W*px, H*py); cnv.rotate(Math.toDegrees(rot.toDouble()).toFloat())
             val pw=W*0.085f; val ph=W*0.11f
             val bg = RadialGradient(0f,0f,0f,0f,0f,pw*2.4f,
-                Color.argb((0.5f*pg*ld*255f).toInt(), faintC[0], faintC[1], faintC[2]),
-                Color.argb(0, faintC[0], faintC[1], faintC[2]), Shader.TileMode.CLAMP)
+                Color.pack(Color.argb((0.5f*pg*ld*255f).toInt(), faintC[0], faintC[1], faintC[2])),
+                Color.pack(Color.argb(0, faintC[0], faintC[1], faintC[2])), Shader.TileMode.CLAMP)
             fp.shader = bg; cnv.drawCircle(0f, 0f, pw*2.4f, fp); fp.shader = null
             f(blend(faintD, faintC, pg), (0.6f+0.4f*glow)*ld)
             cnv.drawRect(-pw/2f, -ph/2f, pw, ph, fp); cnv.restore()
@@ -259,9 +260,9 @@ object VeilPack : VisualizationPack {
         val localSl = sl * maxOf(0.08f, 1f-FA*0.75f*rp)
         // haze
         val hz = RadialGradient(cx, arcY, 0f, cx, arcY, ry*3f,
-            Color.argb((0.16f*glow*ld*255f).toInt(), fc[0], fc[1], fc[2]),
-            Color.argb((0.05f*glow*ld*255f).toInt(), fc[0], fc[1], fc[2]),
-            Color.argb(0, fc[0], fc[1], fc[2]), Shader.TileMode.CLAMP)
+            longArrayOf(Color.pack(Color.argb((0.16f*glow*ld*255f).toInt(), fc[0], fc[1], fc[2])),
+                Color.pack(Color.argb((0.05f*glow*ld*255f).toInt(), fc[0], fc[1], fc[2])),
+                Color.pack(Color.argb(0, fc[0], fc[1], fc[2]))), null, Shader.TileMode.CLAMP)
         fp.shader = hz; cnv.drawRect(0f, 0f, W, H, fp); fp.shader = null
         // cone
         val ch = H*0.60f*(0.7f+0.3f*localSl)
@@ -632,13 +633,13 @@ object VeilPack : VisualizationPack {
         if (Color.alpha(dark) > 0) { fp.color = Color.argb(Color.alpha(dark), 0,0,0); cnv.drawRect(0f, 0f, W, H, fp) }
         // bottom shadow
         val vg = RadialGradient(W/2f, H*1.2f, 0f, W/2f, H*1.2f, H*1.5f,
-            Color.argb((0.5f*ld*255f).toInt(), 0, 0, 0), Color.argb(0, 0,0,0), Shader.TileMode.CLAMP)
+            Color.pack(Color.argb((0.5f*ld*255f).toInt(), 0, 0, 0)), Color.pack(Color.argb(0, 0,0,0)), Shader.TileMode.CLAMP)
         fp.shader = vg; cnv.drawRect(0f, 0f, W, H, fp); fp.shader = null
         // heat haze at bottom
         if (heat > 0.15f) {
             val hh = RadialGradient(W/2f, H*0.85f, 0f, W/2f, H*0.85f, W*0.20f,
-                Color.argb((0.12f*heat*(0.5f+0.5f*sin(t*3f))*ld*255f).toInt(), 180,50,30),
-                Color.argb(0, 0,0,0), Shader.TileMode.CLAMP)
+                Color.pack(Color.argb((0.12f*heat*(0.5f+0.5f*sin(t*3f))*ld*255f).toInt(), 180,50,30)),
+                Color.pack(Color.argb(0, 0,0,0)), Shader.TileMode.CLAMP)
             fp.shader = hh; cnv.drawRect(0f, 0f, W, H, fp); fp.shader = null
         }
     }
