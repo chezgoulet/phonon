@@ -5,6 +5,8 @@ on:
     branches: [main, testing]
   push:
     branches: [main, testing]
+    tags: ['v*']
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
