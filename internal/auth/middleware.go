@@ -239,6 +239,9 @@ func (m *Middleware) handlePSK(w http.ResponseWriter, r *http.Request, next http
 // ClaimsFromContext retrieves the JWT claims JSON previously stored in the
 // request context by the auth middleware. Returns empty string if not present.
 func ClaimsFromContext(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
 	if v := ctx.Value(claimsKey); v != nil {
 		return v.(string)
 	}

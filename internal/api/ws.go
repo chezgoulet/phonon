@@ -143,13 +143,9 @@ func checkOrigin(r *http.Request) bool {
 		return false
 	}
 
-	// Normalize: strip default ports so https://example.com:443 matches
-	// ws://example.com and vice versa.
-	oHost, oPort, _ := net.SplitHostPort(u.Host)
-	if oHost == "" {
-		oHost = u.Host // no port in origin
-		oPort = ""
-	}
+	// Normalize: use Hostname()/Port() which handle IPv6 correctly.
+	oHost := u.Hostname()
+	oPort := u.Port()
 	rHostName, rPort, _ := net.SplitHostPort(rHost)
 	if rHostName == "" {
 		rHostName = rHost

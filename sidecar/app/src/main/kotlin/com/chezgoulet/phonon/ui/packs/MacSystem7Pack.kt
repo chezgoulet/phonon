@@ -196,7 +196,7 @@ object MacSystem7Pack : VisualizationPack {
 
         val menus = listOf('F' to "File", 'E' to "Edit", 'V' to "View", 'S' to "Special")
         var x = 28f
-        for ((i, (ch, _)) in menus.withIndex()) {
+        for ((i, (ch, _unused)) in menus.withIndex()) {
             val hl = processing && t.toInt() % 6 == i
             if (hl) drawRect(macBlue, Offset(x, 0f), Size(28f, bh))
             val fg = if (hl) Color.White else textBlack
