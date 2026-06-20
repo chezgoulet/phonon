@@ -267,7 +267,7 @@ func main() {
 	wsHandler.RegisterRoutes(sidecarMux)
 	sidecarHandler.RegisterRoutes(sidecarMux)
 	pairingHandler.RegisterSidecarRoutes(sidecarMux)
-	mux.Handle("/api/v1/sidecar/", sidecarMux)
+	mux.Handle("/api/v1/sidecar/", api.BodyLimit(api.SidecarBodyLimit)(sidecarMux))
 
 	// Protected routes — wrapped with auth middleware
 	protectedMux := http.NewServeMux()
@@ -290,7 +290,8 @@ func main() {
 	vizHandler := api.NewVizHandler(wsHandler)
 	vizHandler.RegisterRoutes(protectedMux)
 
-	mux.Handle("/api/v1/", authMiddleware.Handler(protectedMux))
+	// Body limit wraps auth middleware: oversized requests rejected before auth step
+	mux.Handle("/api/v1/", api.BodyLimit(api.DefaultBodyLimit)(authMiddleware.Handler(protectedMux)))
 
 	// Metrics — public, served from the health monitor's private Prometheus registry
 	mux.Handle("GET /metrics", healthMetrics.Handler())
