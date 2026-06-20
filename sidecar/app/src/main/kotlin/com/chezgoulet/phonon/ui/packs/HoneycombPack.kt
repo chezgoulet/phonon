@@ -344,7 +344,7 @@ object HoneycombPack : VisualizationPack {
                             val glowR = gridR * 1.1f
                             val huesh = android.graphics.RadialGradient(
                                 cx, cy, 0f, cx, cy, glowR,
-                                longArrayOf(android.graphics.Color.pack(rgba(honeyCol, 0.12f * fill * sig.batt).toArgb()), android.graphics.Color.pack(android.graphics.Color.Transparent.toArgb())),
+                                longArrayOf(android.graphics.Color.pack(rgba(honeyCol, 0.12f * fill * sig.batt).toArgb()), android.graphics.Color.pack(android.graphics.Color.TRANSPARENT.toArgb())),
                                 floatArrayOf(0f, 1f),
                                 android.graphics.Shader.TileMode.CLAMP,
                             )
@@ -926,7 +926,7 @@ object HoneycombPack : VisualizationPack {
             val pr = beeR * (1.3f + 0.6f * pollen)
             val pg = android.graphics.RadialGradient(
                 0f, 0f, 0f, 0f, 0f, pr,
-                longArrayOf(android.graphics.Color.pack(rgba(wax, bright * pollen * batt).toArgb()), android.graphics.Color.pack(android.graphics.Color.Transparent.toArgb())),
+                longArrayOf(android.graphics.Color.pack(rgba(wax, bright * pollen * batt).toArgb()), android.graphics.Color.pack(android.graphics.Color.TRANSPARENT.toArgb())),
                 floatArrayOf(0f, 1f), android.graphics.Shader.TileMode.CLAMP,
             )
             nc.drawCircle(0f, 0f, pr, android.graphics.Paint().apply { shader = pg; isAntiAlias = true })
@@ -984,7 +984,7 @@ object HoneycombPack : VisualizationPack {
             gx, gy, 0f, gx, gy, r * 0.9f,
             longArrayOf(
                 android.graphics.Color.pack(rgba(glowCol, (heatGlow * sig.batt).coerceIn(0f, 0.95f)).toArgb()),
-                android.graphics.Color.pack(android.graphics.Color.Transparent.toArgb()),
+                android.graphics.Color.pack(android.graphics.Color.TRANSPARENT.toArgb()),
             ),
             floatArrayOf(0f, 1f), android.graphics.Shader.TileMode.CLAMP,
         )
@@ -1115,7 +1115,7 @@ object HoneycombPack : VisualizationPack {
         // Halo
         val halo = android.graphics.RadialGradient(
             0f, 0f, 0f, 0f, 0f, r * 2.3f,
-            longArrayOf(android.graphics.Color.pack(rgba(wax, 0.16f * batt).toArgb()), android.graphics.Color.pack(android.graphics.Color.Transparent.toArgb())),
+            longArrayOf(android.graphics.Color.pack(rgba(wax, 0.16f * batt).toArgb()), android.graphics.Color.pack(android.graphics.Color.TRANSPARENT.toArgb())),
             floatArrayOf(0f, 1f), android.graphics.Shader.TileMode.CLAMP,
         )
         nc.drawCircle(0f, 0f, r * 2.3f, android.graphics.Paint().apply { shader = halo; isAntiAlias = true })
