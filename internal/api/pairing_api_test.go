@@ -321,7 +321,7 @@ func TestUnpair(t *testing.T) {
 	}
 
 	w := httptest.NewRecorder()
-	req := httptest.NewRequest("POST", "/api/v1/pair/unpair?device_id=TEST-PHONE", strings.NewReader("{}"))
+	req := httptest.NewRequest("POST", "/api/v1/pair/unpair", strings.NewReader(`{"device_id":"TEST-PHONE"}`))
 	req.Header.Set("Content-Type", "application/json")
 	mux.ServeHTTP(w, req)
 

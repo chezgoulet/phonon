@@ -10,7 +10,9 @@ func TestLoadExampleConfig(t *testing.T) {
 cluster:
   name: "homelab-inference"
   auth:
-    mode: none
+    mode: psk
+    psk: testpsk
+  bind: "127.0.0.1:8080"
   networking:
     prefer: ethernet
 
@@ -21,9 +23,9 @@ groups:
     runtime: litert
     phones: [pixel-7a-01, pixel-7a-02]
   - name: reasoning
-    mode: shard
+    mode: pool
     model: gemma-4-27b-q4
-    runtime: prima
+    runtime: litert
     phones: [pixel-9-01, pixel-9-02]
     standby: [pixel-8-01]
 `
@@ -180,6 +182,10 @@ groups:
 func TestValidate_UnknownModelWarning(t *testing.T) {
 	yaml := `cluster:
   name: test
+  auth:
+    mode: psk
+    psk: testpsk
+  bind: "127.0.0.1:8080"
 groups:
   - name: custom
     mode: pool
@@ -201,6 +207,10 @@ groups:
 func TestValidate_UnknownModelWithDownloadURL(t *testing.T) {
 	yaml := `cluster:
   name: test
+  auth:
+    mode: psk
+    psk: testpsk
+  bind: "127.0.0.1:8080"
 groups:
   - name: custom
     mode: pool

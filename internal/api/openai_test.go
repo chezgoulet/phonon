@@ -502,7 +502,7 @@ func TestDefaultInferenceProxy(t *testing.T) {
 
 	reg := registry.New()
 	h := NewOpenAIHandler(reg)
-	resp, err := h.defaultInferenceProxy(phoneSrv.URL, PhoneInferenceRequest{
+	resp, err := h.defaultInferenceProxy(phoneSrv.URL+"/v1/chat/completions", PhoneInferenceRequest{
 		Model: "test", Messages: []Message{{Role: "user", Content: "hi"}},
 	})
 	if err != nil {

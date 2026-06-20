@@ -142,7 +142,7 @@ func TestHandlerPSK(t *testing.T) {
 	req3 := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
 	req3.Header.Set("Authorization", "Bearer wrongkey")
 	w3 := httptest.NewRecorder()
-	handler.ServeHTTP(w, req3)
+	handler.ServeHTTP(w3, req3)
 	if w3.Code != http.StatusUnauthorized {
 		t.Errorf("expected 401 for wrong PSK, got %d", w3.Code)
 	}
@@ -265,7 +265,7 @@ func TestDoubleStart(t *testing.T) {
 }
 
 func TestClaimsFromContext(t *testing.T) {
-	ctx := context.WithValue(nil, claimsKey, `{"sub":"test"}`)
+	ctx := context.WithValue(context.Background(), claimsKey, `{"sub":"test"}`)
 	got := ClaimsFromContext(ctx)
 	if got != `{"sub":"test"}` {
 		t.Errorf("expected claims, got %q", got)
