@@ -306,7 +306,7 @@ func main() {
 
 	server := &http.Server{
 		Addr:    addr,
-		Handler: corsMiddleware(mux),
+		Handler: corsMiddleware(mux, cfg.Cluster.Networking.CORSOrigins, logger),
 	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -477,13 +477,44 @@ func main() {
 }
 
 // serveUI serves the Vite-built React app from /ui/ and redirects / → /ui/.
-// corsMiddleware adds CORS headers to all responses and handles OPTIONS preflight.
-func corsMiddleware(next http.Handler) http.Handler {
+// corsMiddleware wraps an HTTP handler with CORS headers.
+// origins is an explicit allowlist. If empty, defaults to insecure "*" with a warning.
+func corsMiddleware(next http.Handler, origins []string, log *slog.Logger) http.Handler {
+	// Default to wildcard if no origins configured.
+	allowAll := false
+	allowed := make(map[string]bool, len(origins))
+	if len(origins) == 0 {
+		allowAll = true
+		log.Warn("CORS: no cors_origins configured — defaulting to '*'. Set cluster.networking.cors_origins in phonon.yaml")
+	} else {
+		for _, o := range origins {
+			if o == "*" {
+				allowAll = true
+			} else {
+				allowed[o] = true
+			}
+		}
+	}
+
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
+		origin := r.Header.Get("Origin")
+
+		if origin == "" {
+			// No Origin header — browser wouldn't send one for same-origin requests.
+			// Set Vary so proxies don't cache without it.
+			w.Header().Set("Vary", "Origin")
+		} else if allowAll || allowed[origin] {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+		} else {
+			// Origin not allowed — reject by omitting ACAO header.
+			// The browser will block the response.
+			log.Warn("CORS: origin not allowed", "origin", origin, "remote", r.RemoteAddr)
+		}
+
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Phonon-Device")
 		w.Header().Set("Access-Control-Max-Age", "86400")
+		w.Header().Set("Vary", "Origin")
 
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)

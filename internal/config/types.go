@@ -95,7 +95,19 @@ type AuthConfig struct {
 
 // NetworkingConfig controls how phones connect to the coordinator.
 type NetworkingConfig struct {
-	Prefer string `yaml:"prefer"` // "ethernet" or "wifi"
+	Prefer string   `yaml:"prefer"` // "ethernet" or "wifi"
+
+	// CORSOrigins is an explicit allowlist for Access-Control-Allow-Origin.
+	// When set, only requests whose Origin matches an entry are allowed.
+	// Wildcards are not supported except as a single explicit "*" entry
+	// (which restores the insecure default). When empty, defaults to "*"
+	// with a startup warning.
+	//
+	// Examples:
+	//   cors_origins:
+	//     - https://phonon.example.com
+	//     - http://localhost:5173
+	CORSOrigins []string `yaml:"cors_origins"`
 }
 
 // GroupMode represents the inference mode: pool or shard.
