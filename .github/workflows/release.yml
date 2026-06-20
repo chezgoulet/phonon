@@ -189,11 +189,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download artifacts
+      - name: Download sidecar APKs
         uses: actions/download-artifact@v4
         with:
-          pattern: sidecar-apks, coordinator-binaries
-          merge-multiple: false
+          name: sidecar-apks
+          path: sidecar-apks/
+
+      - name: Download coordinator binaries
+        uses: actions/download-artifact@v4
+        with:
+          name: coordinator-binaries
+          path: coordinator-binaries/
 
       - name: Create release
         uses: softprops/action-gh-release@v2
