@@ -128,15 +128,24 @@ func checkOrigin(r *http.Request) bool {
 		return false
 	}
 
+	// Reject origins with credentials (user:pass@host) — these can only
+	// come from attacker-controlled pages.
+	if u.User != nil {
+		return false
+	}
+
 	rHost := r.Host
 
-	// Normalize: strip default ports so https://example.com:443 matches
-	// ws://example.com and vice versa.
-	oHost, oPort, _ := net.SplitHostPort(u.Host)
-	if oHost == "" {
-		oHost = u.Host // no port in origin
-		oPort = ""
+	// Compare schemes: require origin scheme to match the request scheme.
+	// Prevents attacks that rely on scheme confusion (e.g. http vs https
+	// with same host:port).
+	if normalizeScheme(u.Scheme) != normalizeScheme(schemeForRequest(r)) {
+		return false
 	}
+
+	// Normalize: use Hostname()/Port() which handle IPv6 correctly.
+	oHost := u.Hostname()
+	oPort := u.Port()
 	rHostName, rPort, _ := net.SplitHostPort(rHost)
 	if rHostName == "" {
 		rHostName = rHost
@@ -170,9 +179,27 @@ func portForScheme(scheme string) string {
 	}
 }
 
+// normalizeScheme maps WebSocket schemes to their HTTP equivalents.
+func normalizeScheme(scheme string) string {
+	switch scheme {
+	case "ws":
+		return "http"
+	case "wss":
+		return "https"
+	default:
+		return scheme
+	}
+}
+
 // schemeForRequest infers a scheme from the request.
 func schemeForRequest(r *http.Request) string {
 	if r.TLS != nil {
+		return "https"
+	}
+	// Detect reverse-proxy scenarios where TLS terminates upstream
+	// but the request still arrives on the HTTPS default port.
+	_, rPort, _ := net.SplitHostPort(r.Host)
+	if rPort == "443" {
 		return "https"
 	}
 	return "http"

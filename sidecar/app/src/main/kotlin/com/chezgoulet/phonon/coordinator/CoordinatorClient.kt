@@ -321,7 +321,7 @@ class CoordinatorClient(
 
                 CommandType.VizShowNumbers -> {
                     sendCommandAck(msg, AckStatus.Accepted)
-                    val visible = msg.payload?.optBoolean("visible", false)
+                    val visible = msg.payload?.optBoolean("visible", false) ?: false
                     ThemeEngine.setShowNumbers(visible)
                     Log.i(tag, "Show numbers: $visible")
                     sendCommandAck(msg, AckStatus.Completed)

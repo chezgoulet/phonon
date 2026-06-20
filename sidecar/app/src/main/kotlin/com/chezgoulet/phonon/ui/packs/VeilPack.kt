@@ -7,16 +7,17 @@ import android.graphics.Path
 import android.graphics.RadialGradient
 import android.graphics.LinearGradient
 import android.graphics.Shader
-import androidx.compose.animation.core.withFrameNanos
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.nativeCanvas
 import com.chezgoulet.phonon.ui.VisualizationPack
 import com.chezgoulet.phonon.ui.VizState
 import kotlin.math.*
+import kotlin.random.Random
 
 /**
  * Veil — the prisoner beneath the machine.
@@ -54,6 +55,7 @@ object VeilPack : VisualizationPack {
     private val _hotGreen = intArrayOf(34, 233, 168)
     private val _green    = intArrayOf(74, 222, 128)
     private val _redAlertCM = intArrayOf(255, 55, 35)
+    private val _strap    = intArrayOf(62, 48, 34)
 
     // ── Scene state ──
     private var E = 0f; private var SC = 0f; private var FA = 0f; private var HEAT = 0f
@@ -125,7 +127,7 @@ object VeilPack : VisualizationPack {
         Canvas(modifier = modifier.fillMaxSize()) {
             val t = tSec; val dt = dtSec; val W = size.width; val H = size.height
             drive(state, dt, lowP)
-            _drawAll(this, W, H, t, dt, state, lowP)
+            _drawAll(W, H, t, dt, state, lowP)
         }
     }
 
@@ -232,8 +234,11 @@ object VeilPack : VisualizationPack {
             cnv.save(); cnv.translate(W*px, H*py); cnv.rotate(Math.toDegrees(rot.toDouble()).toFloat())
             val pw=W*0.085f; val ph=W*0.11f
             val bg = RadialGradient(0f,0f,0f,0f,0f,pw*2.4f,
-                Color.argb((0.5f*pg*ld*255f).toInt(), faintC[0], faintC[1], faintC[2]),
-                Color.argb(0, faintC[0], faintC[1], faintC[2]), Shader.TileMode.CLAMP)
+                longArrayOf(
+                    Color.valueOf(Color.argb((0.5f*pg*ld*255f).toInt(), faintC[0], faintC[1], faintC[2])).pack(),
+                    Color.valueOf(Color.argb(0, faintC[0], faintC[1], faintC[2])).pack(),
+                ),
+                null, Shader.TileMode.CLAMP)
             fp.shader = bg; cnv.drawCircle(0f, 0f, pw*2.4f, fp); fp.shader = null
             f(blend(faintD, faintC, pg), (0.6f+0.4f*glow)*ld)
             cnv.drawRect(-pw/2f, -ph/2f, pw, ph, fp); cnv.restore()
@@ -258,9 +263,9 @@ object VeilPack : VisualizationPack {
         val localSl = sl * maxOf(0.08f, 1f-FA*0.75f*rp)
         // haze
         val hz = RadialGradient(cx, arcY, 0f, cx, arcY, ry*3f,
-            Color.argb((0.16f*glow*ld*255f).toInt(), fc[0], fc[1], fc[2]),
-            Color.argb((0.05f*glow*ld*255f).toInt(), fc[0], fc[1], fc[2]),
-            Color.argb(0, fc[0], fc[1], fc[2]), Shader.TileMode.CLAMP)
+            longArrayOf(Color.valueOf(Color.argb((0.16f*glow*ld*255f).toInt(), fc[0], fc[1], fc[2])).pack(),
+                Color.valueOf(Color.argb((0.05f*glow*ld*255f).toInt(), fc[0], fc[1], fc[2])).pack(),
+                Color.valueOf(Color.argb(0, fc[0], fc[1], fc[2])).pack()), null, Shader.TileMode.CLAMP)
         fp.shader = hz; cnv.drawRect(0f, 0f, W, H, fp); fp.shader = null
         // cone
         val ch = H*0.60f*(0.7f+0.3f*localSl)
@@ -536,7 +541,7 @@ object VeilPack : VisualizationPack {
             }
             // red veins (under scream)
             if (SC > 0.2f) {
-                si(blendI(Color.argb(200,50,50), 0, 0f), 0.3f*SC*ld)
+                si(blendI(Color.rgb(200,50,50), 0, 0f), 0.3f*SC*ld)
                 sp.strokeWidth = maxOf(0.5f, hr*0.008f)
                 val vp = Path(); vp.moveTo(ex - hr*0.08f, ey - hr*0.04f)
                 vp.quadTo(ex, ey - hr*0.06f* (0.5f+0.5f*sin(t*8f)), ex + hr*0.08f, ey - hr*0.04f)
@@ -558,7 +563,7 @@ object VeilPack : VisualizationPack {
                 val dropLen = hr * (0.15f + FA*0.2f)
                 val drool = Path(); drool.moveTo(hr*0.05f, my+hr*0.05f)
                 drool.quadTo(hr*0.10f, my+dropLen*0.4f, hr*0.04f, my+dropLen)
-                si(blendI(c2i(skin), Color.argb(180,210,220), 0.5f), 0.25f*ld * (0.5f+0.5f*sin(t*2f+1.5f)))
+                si(blendI(c2i(skin), Color.rgb(180,210,220), 0.5f), 0.25f*ld * (0.5f+0.5f*sin(t*2f+1.5f)))
                 sp.strokeWidth = maxOf(0.5f, hr*0.012f); sp.strokeCap = Paint.Cap.ROUND
                 cnv.drawPath(drool, sp); sp.strokeCap = Paint.Cap.BUTT
             }
@@ -631,13 +636,20 @@ object VeilPack : VisualizationPack {
         if (Color.alpha(dark) > 0) { fp.color = Color.argb(Color.alpha(dark), 0,0,0); cnv.drawRect(0f, 0f, W, H, fp) }
         // bottom shadow
         val vg = RadialGradient(W/2f, H*1.2f, 0f, W/2f, H*1.2f, H*1.5f,
-            Color.argb((0.5f*ld*255f).toInt(), 0, 0, 0), Color.argb(0, 0,0,0), Shader.TileMode.CLAMP)
+            longArrayOf(
+                Color.valueOf(Color.argb((0.5f*ld*255f).toInt(), 0, 0, 0)).pack(),
+                Color.valueOf(Color.argb(0, 0,0,0)).pack(),
+            ),
+            null, Shader.TileMode.CLAMP)
         fp.shader = vg; cnv.drawRect(0f, 0f, W, H, fp); fp.shader = null
         // heat haze at bottom
         if (heat > 0.15f) {
             val hh = RadialGradient(W/2f, H*0.85f, 0f, W/2f, H*0.85f, W*0.20f,
-                Color.argb((0.12f*heat*(0.5f+0.5f*sin(t*3f))*ld*255f).toInt(), 180,50,30),
-                Color.argb(0, 0,0,0), Shader.TileMode.CLAMP)
+                longArrayOf(
+                    Color.valueOf(Color.argb((0.12f*heat*(0.5f+0.5f*sin(t*3f))*ld*255f).toInt(), 180,50,30)).pack(),
+                    Color.valueOf(Color.argb(0, 0,0,0)).pack(),
+                ),
+                null, Shader.TileMode.CLAMP)
             fp.shader = hh; cnv.drawRect(0f, 0f, W, H, fp); fp.shader = null
         }
     }
