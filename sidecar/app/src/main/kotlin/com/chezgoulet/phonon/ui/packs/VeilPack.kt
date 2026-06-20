@@ -235,8 +235,8 @@ object VeilPack : VisualizationPack {
             val pw=W*0.085f; val ph=W*0.11f
             val bg = RadialGradient(0f,0f,0f,0f,0f,pw*2.4f,
                 longArrayOf(
-                    Color.pack(Color.argb((0.5f*pg*ld*255f).toInt(), faintC[0], faintC[1], faintC[2])),
-                    Color.pack(Color.argb(0, faintC[0], faintC[1], faintC[2])),
+                    Color.valueOf(Color.argb((0.5f*pg*ld*255f).toInt(), faintC[0], faintC[1], faintC[2])).pack(),
+                    Color.valueOf(Color.argb(0, faintC[0], faintC[1], faintC[2])).pack(),
                 ),
                 null, Shader.TileMode.CLAMP)
             fp.shader = bg; cnv.drawCircle(0f, 0f, pw*2.4f, fp); fp.shader = null
@@ -263,9 +263,9 @@ object VeilPack : VisualizationPack {
         val localSl = sl * maxOf(0.08f, 1f-FA*0.75f*rp)
         // haze
         val hz = RadialGradient(cx, arcY, 0f, cx, arcY, ry*3f,
-            longArrayOf(Color.pack(Color.argb((0.16f*glow*ld*255f).toInt(), fc[0], fc[1], fc[2])),
-                Color.pack(Color.argb((0.05f*glow*ld*255f).toInt(), fc[0], fc[1], fc[2])),
-                Color.pack(Color.argb(0, fc[0], fc[1], fc[2]))), null, Shader.TileMode.CLAMP)
+            longArrayOf(Color.valueOf(Color.argb((0.16f*glow*ld*255f).toInt(), fc[0], fc[1], fc[2])).pack(),
+                Color.valueOf(Color.argb((0.05f*glow*ld*255f).toInt(), fc[0], fc[1], fc[2])).pack(),
+                Color.valueOf(Color.argb(0, fc[0], fc[1], fc[2])).pack()), null, Shader.TileMode.CLAMP)
         fp.shader = hz; cnv.drawRect(0f, 0f, W, H, fp); fp.shader = null
         // cone
         val ch = H*0.60f*(0.7f+0.3f*localSl)
@@ -637,8 +637,8 @@ object VeilPack : VisualizationPack {
         // bottom shadow
         val vg = RadialGradient(W/2f, H*1.2f, 0f, W/2f, H*1.2f, H*1.5f,
             longArrayOf(
-                Color.pack(Color.argb((0.5f*ld*255f).toInt(), 0, 0, 0)),
-                Color.pack(Color.argb(0, 0,0,0)),
+                Color.valueOf(Color.argb((0.5f*ld*255f).toInt(), 0, 0, 0)).pack(),
+                Color.valueOf(Color.argb(0, 0,0,0)).pack(),
             ),
             null, Shader.TileMode.CLAMP)
         fp.shader = vg; cnv.drawRect(0f, 0f, W, H, fp); fp.shader = null
@@ -646,8 +646,8 @@ object VeilPack : VisualizationPack {
         if (heat > 0.15f) {
             val hh = RadialGradient(W/2f, H*0.85f, 0f, W/2f, H*0.85f, W*0.20f,
                 longArrayOf(
-                    Color.pack(Color.argb((0.12f*heat*(0.5f+0.5f*sin(t*3f))*ld*255f).toInt(), 180,50,30)),
-                    Color.pack(Color.argb(0, 0,0,0)),
+                    Color.valueOf(Color.argb((0.12f*heat*(0.5f+0.5f*sin(t*3f))*ld*255f).toInt(), 180,50,30)).pack(),
+                    Color.valueOf(Color.argb(0, 0,0,0)).pack(),
                 ),
                 null, Shader.TileMode.CLAMP)
             fp.shader = hh; cnv.drawRect(0f, 0f, W, H, fp); fp.shader = null
