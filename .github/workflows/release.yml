@@ -192,9 +192,7 @@ jobs:
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
-          pattern: |
-            sidecar-apks
-            coordinator-binaries
+          pattern: sidecar-apks, coordinator-binaries
           merge-multiple: false
 
       - name: Create release
@@ -219,7 +217,7 @@ jobs:
               (multi-arch: linux/amd64 + linux/arm64 — also available on Docker Hub)
           draft: true
           prerelease: false
-          files: |
+          files: |-
             sidecar-apks/app-release.apk
             sidecar-apks/app-debug.apk
             coordinator-binaries/phonon-coordinator-linux-amd64
