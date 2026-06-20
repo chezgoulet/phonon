@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net"
 	"net/http"
@@ -18,7 +19,9 @@ const (
 	// wsReadLimit is the maximum WebSocket message size in bytes.
 	// Sidecar acks are tiny by design (< 1 KB), including model_push
 	// orchestration messages that carry a URL + checksum.
-	wsReadLimit = 64 * 1024
+	// Violations (messages exceeding this limit) cause the library
+	// to send a ClosePolicyViolation (1008) frame and return ErrReadLimit.
+	wsReadLimit = 32 * 1024
 
 	// wsPongWait is how long the coordinator waits for a pong before
 	// considering the connection dead.
@@ -294,7 +297,12 @@ func (h *WSHandler) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	for {
 		_, message, err := conn.ReadMessage()
 		if err != nil {
-			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseNormalClosure) {
+			if errors.Is(err, websocket.ErrReadLimit) {
+				h.log.Warn("websocket read limit exceeded — connection closed with policy violation",
+					"device_id", deviceID,
+					"limit", wsReadLimit,
+				)
+			} else if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseNormalClosure) {
 				h.log.Warn("websocket read error", "device_id", deviceID, "error", err)
 			}
 			return
