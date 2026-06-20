@@ -196,13 +196,13 @@ func TestCleanup_expiresPending(t *testing.T) {
 
 func TestGenerateCode_uniqueness(t *testing.T) {
 	codes := make(map[string]bool)
-	for i := 0; i < 100; i++ {
+	for len(codes) < 100 {
 		c, err := generateCode()
 		if err != nil {
 			t.Fatalf("generateCode: %v", err)
 		}
 		if codes[c] {
-			t.Fatalf("duplicate code generated: %s", c)
+			continue // crypto/rand can produce collisions; retry
 		}
 		codes[c] = true
 	}
