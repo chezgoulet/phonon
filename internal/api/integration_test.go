@@ -262,7 +262,7 @@ func TestIntegration_RegistrationThenWebSocket(t *testing.T) {
 	defer conn.Close()
 
 	// Send a pending command for the offline device first, then connect
-	cmdID, _ := ws.SendModelLoad("PHONE-002", "gemma-4-E2B-it", "auto")
+	cmdID, _ := ws.SendModelLoad("PHONE-002", "gemma-4-E2B-it", "", "")
 	cmd := readWSCommand(t, conn)
 	if cmd.CommandID != cmdID {
 		t.Errorf("expected command_id %q on reconnect, got %q", cmdID, cmd.CommandID)

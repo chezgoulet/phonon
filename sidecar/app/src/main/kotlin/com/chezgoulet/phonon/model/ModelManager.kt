@@ -57,7 +57,27 @@ class ModelManager(private val context: Context) {
      *   "auto" (default), "npu", "gpu", or "cpu". The actual backend used
      *   may differ — see [currentBackend] and [BackendPlanner].
      */
-    suspend fun loadModel(modelName: String, modelUrl: String, requestedBackend: String? = null) {
+    /**
+     * Computes the SHA-256 checksum of a file as a lowercase hex string.
+     */
+    private fun sha256(file: File): String? {
+        return try {
+            val digest = java.security.MessageDigest.getInstance("SHA-256")
+            file.inputStream().use { input ->
+                val buffer = ByteArray(8192)
+                var bytesRead: Int
+                while (input.read(buffer).also { bytesRead = it } != -1) {
+                    digest.update(buffer, 0, bytesRead)
+                }
+            }
+            digest.digest().joinToString("") { "%02x".format(it) }
+        } catch (e: Exception) {
+            Log.e(tag, "SHA-256 computation failed: ${e.message}")
+            null
+        }
+    }
+
+    suspend fun loadModel(modelName: String, modelUrl: String, requestedBackend: String? = null, expectedChecksum: String = "") {
         Log.i(tag, "Loading model: $modelName (LiteRT-LM, backend=${requestedBackend ?: "auto"})")
 
         if (isRunning()) {
@@ -74,6 +94,26 @@ class ModelManager(private val context: Context) {
         if (cachedFile.exists() && cachedFile.length() > 0) {
             modelFile = cachedFile
             Log.i(tag, "Model cached: ${cachedFile.absolutePath} (${cachedFile.length()} bytes)")
+
+            // Verify checksum before loading — refuse to run with corrupted or tampered files.
+            if (expectedChecksum.isNotEmpty()) {
+                Log.i(tag, "Verifying checksum for $modelName")
+                val actual = sha256(cachedFile)
+                if (actual != expectedChecksum) {
+                    Log.w(tag, "Checksum mismatch for $modelName: expected $expectedChecksum, got $actual — deleting and forcing re-download")
+                    cachedFile.delete()
+                    currentModel = null
+                    modelFile = null
+                    if (modelUrl.isNotBlank()) {
+                        Log.i(tag, "Expecting download from coordinator to ${cachedFile.absolutePath}")
+                    } else {
+                        Log.w(tag, "No download URL provided for $modelName — cannot recover")
+                        return
+                    }
+                } else {
+                    Log.i(tag, "Checksum verified for $modelName")
+                }
+            }
         } else if (modelUrl.isNotBlank()) {
             modelFile = cachedFile
             Log.i(tag, "Model not cached — expecting download from coordinator to ${cachedFile.absolutePath}")

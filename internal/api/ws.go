@@ -391,9 +391,13 @@ func (h *WSHandler) SendModelPush(deviceID, model, url, checksum string, sizeByt
 	})
 }
 
-// SendModelLoad sends a model_load command.
-func (h *WSHandler) SendModelLoad(deviceID, model, backend string) (string, error) {
-	return h.SendCommand(deviceID, CmdModelLoad, map[string]string{"model": model, "backend": backend})
+// SendModelLoad sends a model_load command. checksum is optional (empty string to skip).
+func (h *WSHandler) SendModelLoad(deviceID, model, backend, checksum string) (string, error) {
+	payload := map[string]string{"model": model, "backend": backend}
+	if checksum != "" {
+		payload["checksum"] = checksum
+	}
+	return h.SendCommand(deviceID, CmdModelLoad, payload)
 }
 
 // SendModelUnload sends a model_unload command.

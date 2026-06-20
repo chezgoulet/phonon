@@ -41,7 +41,7 @@ class CoordinatorClient(
     private val pairing: PairingClient? = null,
     private val onPairingCode: (String) -> Unit = {},
     private val onStatusChange: (String) -> Unit,
-    private val onModelLoad: (modelName: String, modelUrl: String, engine: String, backend: String) -> Unit,
+    private val onModelLoad: (modelName: String, modelUrl: String, engine: String, backend: String, checksum: String) -> Unit,
     private val onModelUnload: () -> Unit,
     private val onShutdown: () -> Unit
 ) {
@@ -246,11 +246,12 @@ class CoordinatorClient(
                     // Accelerator requested by the coordinator (group config
                     // `backend:`). Absent on older coordinators → "auto".
                     val backend = msg.payload?.optString("backend", "auto")
+                    val checksum = msg.payload?.optString("checksum", "") ?: ""
                     if (modelName.isNullOrEmpty()) {
                         sendCommandAck(msg, AckStatus.Failed, "missing model in load command")
                         return
                     }
-                    onModelLoad(modelName, modelUrl ?: "", engine ?: "prima", backend ?: "auto")
+                    onModelLoad(modelName, modelUrl ?: "", engine ?: "prima", backend ?: "auto", checksum)
                 }
                 CommandType.ModelUnload -> {
                     sendCommandAck(msg, AckStatus.Accepted)
