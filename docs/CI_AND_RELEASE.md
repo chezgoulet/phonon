@@ -8,7 +8,7 @@ defined in `.github/workflows/`:
 | Workflow | Trigger | Purpose |
 |---|---|---|
 | `ci.yml` | PR to `main`, push to `main` | Lint, test, build all layers. Upload artifacts. |
-| `release.yml` | Tag push `v*` | Build coordinator binaries, attach to GitHub Release. |
+| `release.yml` | Tag push `v*` | Build coordinator binaries (Linux, macOS, Windows) + APKs, attach to GitHub Release. |
 | `docker.yml` | Tag push `v*` | Build and push multi-arch Docker image to Docker Hub. |
 
 ## CI Pipeline (`ci.yml`)
@@ -30,7 +30,7 @@ kotlin (parallel, no dependency)
 - Depends on `react` — downloads `ui-dist` artifact
 - Copies UI dist to `cmd/phonon-coordinator/static/` for `go:embed`
 - Runs `golangci-lint`, `go vet`, `go test -race`
-- Cross-compiles for `linux/amd64` and `linux/arm64`
+- Cross-compiles for linux/amd64, linux/arm64, darwin/amd64, darwin/arm64, and windows/amd64
 - Uploads binaries as artifact `coordinator-binaries`
 
 ### Job: `kotlin` (Sidecar)
@@ -112,7 +112,7 @@ cd sidecar && ./gradlew test assembleDebug
                      ┌───────┴───────┐
                      │  go (lint →   │
                      │  vet → test → │
-                     │  build ×2)    │
+                     │  build ×5)    │
                      └───────────────┘
                               │
                      coordinator-binaries artifact

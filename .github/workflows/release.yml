@@ -170,6 +170,15 @@ jobs:
       - name: Build (linux/arm64)
         run: CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o phonon-coordinator-linux-arm64 ./cmd/phonon-coordinator
 
+      - name: Build (darwin/amd64)
+        run: CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w" -o phonon-coordinator-darwin-amd64 ./cmd/phonon-coordinator
+
+      - name: Build (darwin/arm64)
+        run: CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" -o phonon-coordinator-darwin-arm64 ./cmd/phonon-coordinator
+
+      - name: Build (windows/amd64)
+        run: CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -o phonon-coordinator-windows-amd64.exe ./cmd/phonon-coordinator
+
       - name: Upload binaries
         uses: actions/upload-artifact@v4
         with:
@@ -177,6 +186,9 @@ jobs:
           path: |
             phonon-coordinator-linux-amd64
             phonon-coordinator-linux-arm64
+            phonon-coordinator-darwin-amd64
+            phonon-coordinator-darwin-arm64
+            phonon-coordinator-windows-amd64.exe
           if-no-files-found: error
 
   # ─── Release (depends on all build jobs) ───────────────────────────
@@ -214,8 +226,11 @@ jobs:
 
             - **Phone APK** (`sidecar-apks/app-release.apk`) — signed Android APK for the sidecar
             - **Debug APK** (`sidecar-apks/app-debug.apk`) — unsigned debug APK
-            - **Coordinator (amd64)** — Linux x86_64 binary
-            - **Coordinator (arm64)** — Linux ARM64 binary
+            - **Coordinator (Linux amd64)** — x86_64 binary
+            - **Coordinator (Linux arm64)** — ARM64 binary
+            - **Coordinator (macOS amd64)** — Intel Mac binary
+            - **Coordinator (macOS arm64)** — Apple Silicon Mac binary (M-series)
+            - **Coordinator (Windows amd64)** — x86_64 binary
 
             ### Docker Image
 
@@ -228,4 +243,7 @@ jobs:
             sidecar-apks/sidecar/app/build/outputs/apk/debug/app-debug.apk
             coordinator-binaries/phonon-coordinator-linux-amd64
             coordinator-binaries/phonon-coordinator-linux-arm64
+            coordinator-binaries/phonon-coordinator-darwin-amd64
+            coordinator-binaries/phonon-coordinator-darwin-arm64
+            coordinator-binaries/phonon-coordinator-windows-amd64.exe
           fail_on_unmatched_files: false
