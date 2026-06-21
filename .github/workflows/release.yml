@@ -130,14 +130,18 @@ jobs:
           rm "$UNSIGNED_APK"
           echo "✅ Release APK signed and aligned: $SIGNED_APK"
 
+      - name: Collect APKs to dist/
+        run: |
+          mkdir -p dist/
+          cp app/build/outputs/apk/release/app-release.apk dist/phonon-sidecar-release.apk
+          cp app/build/outputs/apk/debug/app-debug.apk dist/phonon-sidecar-debug.apk
+
       - name: Upload APKs
         uses: actions/upload-artifact@v4
         with:
           name: sidecar-apks
-          path: |
-            sidecar/app/build/outputs/apk/debug/*.apk
-            sidecar/app/build/outputs/apk/release/*.apk
-          if-no-files-found: warn
+          path: dist/
+          if-no-files-found: error
 
   # ─── Coordinator (Go) ─────────────────────────────────────────────
   go:
@@ -213,6 +217,13 @@ jobs:
           name: coordinator-binaries
           path: coordinator-binaries/
 
+      - name: Debug — list downloaded artifacts
+        run: |
+          echo '=== sidecar-apks/ ==='
+          ls -laR sidecar-apks/
+          echo '=== coordinator-binaries/ ==='
+          ls -laR coordinator-binaries/
+
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
@@ -224,8 +235,8 @@ jobs:
 
             ### Artifacts
 
-            - **Phone APK** (`sidecar-apks/app-release.apk`) — signed Android APK for the sidecar
-            - **Debug APK** (`sidecar-apks/app-debug.apk`) — unsigned debug APK
+            - **Phone APK** — signed Android APK for the sidecar
+            - **Debug APK** — unsigned debug APK
             - **Coordinator (Linux amd64)** — x86_64 binary
             - **Coordinator (Linux arm64)** — ARM64 binary
             - **Coordinator (macOS amd64)** — Intel Mac binary
@@ -239,8 +250,8 @@ jobs:
           draft: true
           prerelease: false
           files: |-
-            sidecar-apks/sidecar/app/build/outputs/apk/release/app-release.apk
-            sidecar-apks/sidecar/app/build/outputs/apk/debug/app-debug.apk
+            sidecar-apks/phonon-sidecar-release.apk
+            sidecar-apks/phonon-sidecar-debug.apk
             coordinator-binaries/phonon-coordinator-linux-amd64
             coordinator-binaries/phonon-coordinator-linux-arm64
             coordinator-binaries/phonon-coordinator-darwin-amd64
