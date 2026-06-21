@@ -132,9 +132,9 @@ jobs:
 
       - name: Collect APKs to dist/
         run: |
-          mkdir -p dist/
-          cp app/build/outputs/apk/release/app-release.apk dist/phonon-sidecar-release.apk
-          cp app/build/outputs/apk/debug/app-debug.apk dist/phonon-sidecar-debug.apk
+          mkdir -p "${{ github.workspace }}/dist/"
+          cp app/build/outputs/apk/release/app-release.apk "${{ github.workspace }}/dist/phonon-sidecar-release.apk"
+          cp app/build/outputs/apk/debug/app-debug.apk "${{ github.workspace }}/dist/phonon-sidecar-debug.apk"
 
       - name: Upload APKs
         uses: actions/upload-artifact@v4
