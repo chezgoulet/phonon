@@ -224,8 +224,8 @@ jobs:
           draft: true
           prerelease: false
           files: |-
-            sidecar-apks/app-release.apk
-            sidecar-apks/app-debug.apk
+            sidecar-apks/sidecar/app/build/outputs/apk/release/app-release.apk
+            sidecar-apks/sidecar/app/build/outputs/apk/debug/app-debug.apk
             coordinator-binaries/phonon-coordinator-linux-amd64
             coordinator-binaries/phonon-coordinator-linux-arm64
           fail_on_unmatched_files: false
