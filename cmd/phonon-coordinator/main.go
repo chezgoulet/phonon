@@ -96,6 +96,39 @@ func main() {
 	// Attach event log to registry
 	reg.SetEventLog(eventLog)
 
+	// Health monitor — periodic check loop with hysteresis. Constructed
+	// before the API handlers so its Prometheus metrics instance can be
+	// wired into the OpenAI handler.
+	healthCfg := health.DefaultMonitorConfig()
+	// Sidecar reachability probing: GET /health on each online phone's
+	// inference server every check cycle.
+	healthCfg.InferencePort = cfg.Cluster.InferencePort
+	if cfgErr == nil {
+		if cfg.Cluster.Health.Overheat.Threshold > 0 {
+			healthCfg.OverheatThreshold = cfg.Cluster.Health.Overheat.Threshold
+		}
+		if cfg.Cluster.Health.Overheat.ReentryThreshold > 0 {
+			healthCfg.OverheatReentryThreshold = cfg.Cluster.Health.Overheat.ReentryThreshold
+		}
+		if cfg.Cluster.Health.Battery.LowThreshold > 0 {
+			healthCfg.BatteryLowThreshold = cfg.Cluster.Health.Battery.LowThreshold
+		}
+		if cfg.Cluster.Health.Battery.ReentryThreshold > 0 {
+			healthCfg.BatteryReentryThreshold = cfg.Cluster.Health.Battery.ReentryThreshold
+		}
+		if cfg.Cluster.Health.Battery.CapacityThreshold > 0 {
+			healthCfg.BatteryCapacityThreshold = cfg.Cluster.Health.Battery.CapacityThreshold
+		}
+		if cfg.Cluster.Health.DrainingThreshold > 0 {
+			healthCfg.DrainingThreshold = cfg.Cluster.Health.DrainingThreshold
+		}
+		if d := cfg.Cluster.Health.OfflineTimeoutDuration(); d > 0 {
+			healthCfg.OfflineTimeout = d
+		}
+	}
+	healthMonitor := health.NewMonitor(reg, healthCfg)
+	healthMetrics := healthMonitor.RegisterMetrics()
+
 	wsHandler := api.NewWSHandler(reg)
 
 	// 5. Pairing manager — device identity, key exchange, code-based pairing
@@ -146,9 +179,19 @@ func main() {
 	sidecarHandler.SetDeviceAuthorizer(pairingMgr)
 	wsHandler.SetDeviceAuthorizer(pairingMgr)
 	pairingHandler := api.NewPairingHandler(pairingMgr, reg)
+
+	// Per-device inference circuit breaker: 3 failures / 5s opens for 30s,
+	// then a half-open probe. State is synced into node telemetry by the
+	// health monitor loop below.
+	circuitBreaker := api.NewDeviceCircuitBreaker()
+
 	openaiHandler := api.NewOpenAIHandler(reg,
 		api.WithMaxQueuePerNode(cfg.Cluster.Queue.MaxPerNode),
 		api.WithDeviceTokenLookup(pairingMgr.AuthTokenFor),
+		api.WithCircuitBreaker(circuitBreaker),
+		api.WithInferencePort(cfg.Cluster.InferencePort),
+		api.WithEventLog(eventLog),
+		api.WithMetrics(healthMonitor.Metrics()),
 	)
 	clusterHandler := api.NewClusterHandler(reg)
 
@@ -182,36 +225,17 @@ func main() {
 
 	// --- Background subsystems ---
 
-	// 1. Health monitor — periodic check loop with hysteresis
-	healthCfg := health.DefaultMonitorConfig()
-	if cfgErr == nil {
-		if cfg.Cluster.Health.Overheat.Threshold > 0 {
-			healthCfg.OverheatThreshold = cfg.Cluster.Health.Overheat.Threshold
-		}
-		if cfg.Cluster.Health.Overheat.ReentryThreshold > 0 {
-			healthCfg.OverheatReentryThreshold = cfg.Cluster.Health.Overheat.ReentryThreshold
-		}
-		if cfg.Cluster.Health.Battery.LowThreshold > 0 {
-			healthCfg.BatteryLowThreshold = cfg.Cluster.Health.Battery.LowThreshold
-		}
-		if cfg.Cluster.Health.Battery.ReentryThreshold > 0 {
-			healthCfg.BatteryReentryThreshold = cfg.Cluster.Health.Battery.ReentryThreshold
-		}
-		if cfg.Cluster.Health.Battery.CapacityThreshold > 0 {
-			healthCfg.BatteryCapacityThreshold = cfg.Cluster.Health.Battery.CapacityThreshold
-		}
-		if cfg.Cluster.Health.DrainingThreshold > 0 {
-			healthCfg.DrainingThreshold = cfg.Cluster.Health.DrainingThreshold
-		}
-		if d := cfg.Cluster.Health.OfflineTimeoutDuration(); d > 0 {
-			healthCfg.OfflineTimeout = d
-		}
-	}
-	healthMonitor := health.NewMonitor(reg, healthCfg)
-	healthMetrics := healthMonitor.RegisterMetrics()
-
 	// Wire event log to health monitor actions
 	healthMonitor.AddAction(health.WithEventLog(eventLog))
+
+	// Sync circuit breaker state into node telemetry every check cycle so
+	// it appears in the UI and cluster status, and so breakers that passed
+	// their cooldown surface as half-open promptly.
+	healthMonitor.AddCheckHook(func() {
+		for deviceID, state := range circuitBreaker.Snapshot() {
+			_ = reg.SetCircuitState(deviceID, string(state))
+		}
+	})
 
 	// 2. Discovery manager — mDNS (unless disabled) + manual registration
 	var mdnsDiscoverer discovery.Discoverer
@@ -290,8 +314,52 @@ func main() {
 	vizHandler := api.NewVizHandler(wsHandler)
 	vizHandler.RegisterRoutes(protectedMux)
 
-	// Body limit wraps auth middleware: oversized requests rejected before auth step
-	mux.Handle("/api/v1/", api.BodyLimit(api.DefaultBodyLimit)(authMiddleware.Handler(protectedMux)))
+	// Middleware chain (outermost first): body limit → rate limit → auth.
+	// Oversized requests are rejected before the rate limiter spends a
+	// token; throttled requests are rejected before token validation.
+	// Sidecar routes (/api/v1/sidecar/) are mounted separately above and
+	// are exempt from rate limiting.
+	var rateLimiter *api.RateLimiter
+	if cfg.Cluster.RateLimiting.Enabled {
+		rateLimiter = api.NewRateLimiter(cfg.Cluster.RateLimiting.TokensPerSecond, cfg.Cluster.RateLimiting.Burst)
+		logger.Info("rate limiting enabled",
+			"tokens_per_second", cfg.Cluster.RateLimiting.TokensPerSecond,
+			"burst", cfg.Cluster.RateLimiting.Burst)
+	}
+	var protected http.Handler = authMiddleware.Handler(protectedMux)
+	if rateLimiter != nil {
+		protected = rateLimiter.Middleware(protected)
+	}
+	protected = api.BodyLimit(api.DefaultBodyLimit)(protected)
+	mux.Handle("/api/v1/", protected)
+
+	// OpenAI-standard clients use the documented /v1/... paths (e.g.
+	// /v1/chat/completions). Mount the same protected chain there — the
+	// handlers register both /v1/ and /api/v1/ patterns.
+	mux.Handle("/v1/", protected)
+
+	// Model upload endpoint — same auth (+ rate limit) chain but its own
+	// body limit: model files are gigabytes, far above DefaultBodyLimit.
+	// Registered on more-specific patterns so they win over the /api/v1/
+	// mount above.
+	uploadHandler := api.NewModelUploadHandler(modelCache,
+		api.WithUploadMaxBytes(cfg.Cluster.Models.UploadMaxBytes),
+		api.WithModelRegistration(func(name string) {
+			openaiHandler.AddModel(name, "upload")
+		}),
+	)
+	uploadMux := http.NewServeMux()
+	uploadHandler.RegisterRoutes(uploadMux)
+	var upload http.Handler = authMiddleware.Handler(uploadMux)
+	if rateLimiter != nil {
+		upload = rateLimiter.Middleware(upload)
+	}
+	// Multipart framing adds overhead on top of the file itself.
+	upload = api.BodyLimit(cfg.Cluster.Models.UploadMaxBytes + (10 << 20))(upload)
+	mux.Handle("POST /api/v1/models/upload", upload)
+	mux.Handle("POST /v1/models/upload", upload)
+	logger.Info("model upload endpoint enabled",
+		"max_bytes", cfg.Cluster.Models.UploadMaxBytes, "cache_dir", cacheDir)
 
 	// Metrics — public, served from the health monitor's private Prometheus registry
 	mux.Handle("GET /metrics", healthMetrics.Handler())
@@ -305,8 +373,11 @@ func main() {
 	}
 
 	server := &http.Server{
-		Addr:    addr,
-		Handler: corsMiddleware(mux, cfg.Cluster.Networking.CORSOrigins, logger),
+		Addr: addr,
+		// TraceMiddleware is outermost so every request — including
+		// CORS preflights and auth rejections — gets a trace ID and the
+		// X-Phonon-Trace-Id response header.
+		Handler: api.TraceMiddleware(corsMiddleware(mux, cfg.Cluster.Networking.CORSOrigins, logger)),
 	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

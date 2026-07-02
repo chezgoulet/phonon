@@ -216,7 +216,11 @@ data class InferenceRequest(
     val model: String,
     val messages: List<Message>,
     val temperature: Double,
-    val maxTokens: Int
+    val maxTokens: Int,
+    /** When true, the response is streamed as SSE (OpenAI chunk format). */
+    val stream: Boolean = false,
+    /** Coordinator-computed inference deadline in ms (0 = unset). */
+    val timeoutMs: Int = 0
 ) {
     companion object {
         fun fromJson(json: JSONObject) = InferenceRequest(
@@ -231,7 +235,9 @@ data class InferenceRequest(
                 }
             },
             temperature = json.optDouble("temperature", 0.7),
-            maxTokens = json.optInt("max_tokens", 2048)
+            maxTokens = json.optInt("max_tokens", 2048),
+            stream = json.optBoolean("stream", false),
+            timeoutMs = json.optInt("timeout_ms", 0)
         )
     }
 }

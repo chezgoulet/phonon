@@ -58,6 +58,23 @@ cluster:
   queue:
     max_per_node: 3             # max concurrent requests per phone
 
+  # Global token-bucket rate limit for the protected API routes.
+  # Admin operations (pairing, preflight, model management, cluster) have
+  # priority: when throttling kicks in, inference requests are shed first.
+  # Sidecar routes are exempt.
+  rate_limiting:
+    enabled: false
+    tokens_per_second: 10
+    burst: 20
+
+  # Model management endpoints.
+  models:
+    upload_max_bytes: 8589934592  # 8 GiB cap for POST /api/v1/models/upload
+
+  # Port of the sidecar's on-phone inference server. Change only if the
+  # sidecar is launched with a matching PHONON_INFERENCE_PORT override.
+  inference_port: 9876
+
 # ── Inference Groups ─────────────────────────────────────────
 # Each group defines a model and the phones that serve it.
 groups:

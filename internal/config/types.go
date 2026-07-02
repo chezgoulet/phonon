@@ -43,6 +43,21 @@ type QueueConfig struct {
 	MaxPerNode int `yaml:"max_per_node"` // max requests queued per phone before returning 429 (default 3)
 }
 
+// RateLimitConfig controls the global token-bucket rate limiter applied to
+// the protected /api/v1/ routes (sidecar routes are exempt).
+type RateLimitConfig struct {
+	Enabled         bool    `yaml:"enabled"`           // default false
+	TokensPerSecond float64 `yaml:"tokens_per_second"` // refill rate (default 10)
+	Burst           int     `yaml:"burst"`             // bucket size (default 20)
+}
+
+// ModelsConfig controls model management endpoints.
+type ModelsConfig struct {
+	// UploadMaxBytes caps POST /api/v1/models/upload file size
+	// (default 8 GiB).
+	UploadMaxBytes int64 `yaml:"upload_max_bytes"`
+}
+
 // RedisConfig controls connection to a Redis server for HA state sharing.
 type RedisConfig struct {
 	Enabled  bool   `yaml:"enabled"`   // enable Redis-backed pairing store (HA mode)
@@ -83,6 +98,16 @@ type ClusterConfig struct {
 	EventLog   EventLogConfig   `yaml:"event_log"`
 	Queue      QueueConfig      `yaml:"queue"`
 	Pairing    PairingConfig    `yaml:"pairing"`
+
+	// RateLimiting throttles the protected API routes (see RateLimitConfig).
+	RateLimiting RateLimitConfig `yaml:"rate_limiting"`
+
+	// Models controls model management endpoints (see ModelsConfig).
+	Models ModelsConfig `yaml:"models"`
+
+	// InferencePort is the port the sidecar's inference server listens on.
+	// Must match the sidecar's PHONON_INFERENCE_PORT override (default 9876).
+	InferencePort int `yaml:"inference_port"`
 }
 
 // AuthConfig defines authentication for the coordinator API.

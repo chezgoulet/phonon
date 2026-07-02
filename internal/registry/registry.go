@@ -94,6 +94,9 @@ func (r *Registry) UpdateHeartbeat(deviceID string, telemetry HealthTelemetry) e
 	}
 
 	wasOffline := node.State == NodeStateOffline
+	// The circuit breaker state is coordinator-maintained; heartbeats from
+	// the phone must not clear it.
+	telemetry.CircuitState = node.Telemetry.CircuitState
 	node.Telemetry = telemetry
 	node.LastHeartbeat = time.Now()
 
@@ -256,6 +259,15 @@ func (r *Registry) Count() int {
 func (r *Registry) SetExcludeReason(deviceID, reason string) error {
 	return r.updateField(deviceID, func(n *Node) {
 		n.ExcludeReason = reason
+	})
+}
+
+// SetCircuitState records the inference circuit breaker state ("closed",
+// "open", "half-open") in the node's telemetry so it is visible in the UI
+// and cluster status. An empty string clears it.
+func (r *Registry) SetCircuitState(deviceID, state string) error {
+	return r.updateField(deviceID, func(n *Node) {
+		n.Telemetry.CircuitState = state
 	})
 }
 

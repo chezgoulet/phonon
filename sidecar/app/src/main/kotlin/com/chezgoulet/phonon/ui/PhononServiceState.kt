@@ -113,6 +113,11 @@ class PhononServiceState {
         lastTokensPerSecond = service.lastTokensPerSecond
         queueDepth = service.queueDepth
 
+        // Pairing screen state: without this the QR/code UI never renders
+        // (the field silently stayed at its "" default).
+        pairingCode = service.pairingCode ?: ""
+        uptimeSeconds = service.uptimeSeconds
+
         // VizState fields synced from ThemeEngine singleton
         peerStates = ThemeEngine.buildPeerStates()
         coordinatorMode = service.coordinatorMode

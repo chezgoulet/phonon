@@ -10,6 +10,7 @@ import android.content.Intent
 import android.os.Binder
 import android.os.IBinder
 import android.os.PowerManager
+import android.os.SystemClock
 import com.chezgoulet.phonon.coordinator.CoordinatorClient
 import com.chezgoulet.phonon.ui.ThemeEngine
 import java.io.File
@@ -48,6 +49,16 @@ class PhononService : Service() {
     @Volatile
     var pairingCode: String? = null
         private set
+
+    /**
+     * Monotonic service start marker for [uptimeSeconds]. elapsedRealtime
+     * is unaffected by wall-clock changes and ticks through Doze.
+     */
+    private var serviceStartElapsedMs: Long = SystemClock.elapsedRealtime()
+
+    /** Seconds since the service started. */
+    val uptimeSeconds: Long
+        get() = (SystemClock.elapsedRealtime() - serviceStartElapsedMs) / 1000L
 
     private var wakeLock: PowerManager.WakeLock? = null
     private var vizStateJob: Job? = null

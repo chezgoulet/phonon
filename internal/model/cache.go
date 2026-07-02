@@ -343,6 +343,91 @@ func (c *Cache) ModelPath(name string) (string, error) {
 	return entry.Path, nil
 }
 
+// ErrChecksumMismatch is returned by Put when the uploaded bytes do not
+// match the expected SHA-256.
+var ErrChecksumMismatch = fmt.Errorf("SHA-256 checksum mismatch")
+
+// ErrTooLarge is returned by Put when the upload exceeds maxBytes.
+var ErrTooLarge = fmt.Errorf("model file exceeds size limit")
+
+// Put streams a model file from r into the cache under name, hashing while
+// writing. If expectedSHA is non-empty, the computed SHA-256 must match
+// (case-insensitively) or the upload is discarded with ErrChecksumMismatch.
+// If maxBytes > 0, uploads exceeding it are discarded with ErrTooLarge.
+// The file is written to the cache tmp dir and atomically renamed into the
+// models dir on success — mirroring download() — so concurrent readers and
+// the reconciler never observe a partial file.
+func (c *Cache) Put(name string, r io.Reader, expectedSHA string, maxBytes int64) (*CacheEntry, error) {
+	if name == "" {
+		return nil, fmt.Errorf("model name required")
+	}
+
+	dest := filepath.Join(c.rootDir, cacheModelsDir, sanitizeName(name))
+	tmpDest := filepath.Join(c.rootDir, cacheTmpDir, sanitizeName(name)+".uploading")
+
+	if err := os.MkdirAll(filepath.Dir(tmpDest), 0o755); err != nil {
+		return nil, fmt.Errorf("create tmp dir: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		return nil, fmt.Errorf("create models dir: %w", err)
+	}
+
+	f, err := os.Create(tmpDest)
+	if err != nil {
+		return nil, fmt.Errorf("create upload tmp file: %w", err)
+	}
+	cleanup := func() {
+		f.Close()
+		os.Remove(tmpDest)
+	}
+
+	hasher := sha256.New()
+	src := io.Reader(r)
+	if maxBytes > 0 {
+		// Read one extra byte so exceeding the limit is detectable.
+		src = io.LimitReader(r, maxBytes+1)
+	}
+	written, err := io.Copy(io.MultiWriter(f, hasher), src)
+	if err != nil {
+		cleanup()
+		return nil, fmt.Errorf("write upload: %w", err)
+	}
+	if maxBytes > 0 && written > maxBytes {
+		cleanup()
+		return nil, fmt.Errorf("%w: got more than %d bytes", ErrTooLarge, maxBytes)
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(tmpDest)
+		return nil, fmt.Errorf("close upload tmp file: %w", err)
+	}
+
+	got := hex.EncodeToString(hasher.Sum(nil))
+	if expectedSHA != "" && !strings.EqualFold(got, expectedSHA) {
+		os.Remove(tmpDest)
+		return nil, fmt.Errorf("%w: expected %s, got %s", ErrChecksumMismatch, expectedSHA, got)
+	}
+
+	if err := os.Rename(tmpDest, dest); err != nil {
+		os.Remove(tmpDest)
+		return nil, fmt.Errorf("rename upload into cache: %w", err)
+	}
+
+	entry := &CacheEntry{
+		Name:      name,
+		Path:      dest,
+		SHA256:    got,
+		SizeBytes: written,
+		CachedAt:  time.Now(),
+	}
+	c.mu.Lock()
+	c.entries[name] = entry
+	c.mu.Unlock()
+
+	c.log.Info("model uploaded to cache", "model", name, "size", written)
+	result := *entry
+	return &result, nil
+}
+
 // ResolveHuggingFaceURL builds a HuggingFace download URL from a model identifier.
 // Format: "org/repo:quant" or "org/repo"
 // Example: "meta-llama/Llama-3.2-1B:Q4_K_M" → "https://huggingface.co/meta-llama/Llama-3.2-1B-GGUF/resolve/main/Llama-3.2-1B-Q4_K_M.gguf"

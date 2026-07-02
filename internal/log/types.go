@@ -23,6 +23,13 @@ const (
 	EventNodeReEntered  EventType = "node_reentered"
 	EventError          EventType = "error"
 	EventInfo           EventType = "info"
+
+	// Inference request lifecycle events (trace_id-correlated).
+	EventInferenceStarted EventType = "inference_started"
+	EventInferenceRouted  EventType = "inference_routed"
+	EventInferenceResult  EventType = "inference_result"
+	EventInferenceFailed  EventType = "inference_failed"
+	EventInferenceRetried EventType = "inference_retried"
 )
 
 // Severity levels.
@@ -42,6 +49,10 @@ type Event struct {
 	DeviceID  string    `json:"device_id,omitempty"`
 	Severity  Severity  `json:"severity"`
 	Details   string    `json:"details,omitempty"`
+
+	// TraceID correlates inference-related events with a single HTTP
+	// request (see api.TraceMiddleware). Empty for non-request events.
+	TraceID string `json:"trace_id,omitempty"`
 }
 
 // Query represents parameters for querying events.

@@ -41,6 +41,16 @@ class InferenceServer(
     private var serverSocket: ServerSocket? = null
     private var scope: CoroutineScope? = null
 
+    /**
+     * Listen port. Defaults to 9876; can be overridden with the
+     * PHONON_INFERENCE_PORT environment variable (e.g. set via
+     * `adb shell setprop` wrapper scripts or an instrumented launch).
+     * Must match the coordinator's `cluster.inference_port` setting.
+     */
+    private val listenPort: Int =
+        System.getenv(ENV_INFERENCE_PORT)?.toIntOrNull()?.takeIf { it in 1..65535 }
+            ?: DEFAULT_PORT
+
     // Max request body in bytes — 1 MB is generous for any chat prompt
     private val maxBodyBytes = 1_048_576
 
@@ -57,7 +67,7 @@ class InferenceServer(
         scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
         scope?.launch {
             try {
-                val port = 9876
+                val port = listenPort
                 serverSocket = ServerSocket()
                 serverSocket?.reuseAddress = true
                 serverSocket?.bind(InetSocketAddress(port))
@@ -96,7 +106,12 @@ class InferenceServer(
     /**
      * Port being listened on.
      */
-    val port: Int get() = serverSocket?.localPort ?: 9876
+    val port: Int get() = serverSocket?.localPort ?: listenPort
+
+    companion object {
+        const val DEFAULT_PORT = 9876
+        const val ENV_INFERENCE_PORT = "PHONON_INFERENCE_PORT"
+    }
 
     private suspend fun handleConnection(clientSocket: Socket) {
         try {
@@ -158,8 +173,20 @@ class InferenceServer(
                         if (!authorize(headers, writer)) return
                         handleInference(socket, writer, body)
                     }
-                    path == "/health" && method == "GET" ->
-                        sendResponse(writer, 200, "application/json", """{"status":"ok"}""")
+                    path == "/health" && method == "GET" -> {
+                        // Probed by the coordinator's health monitor every
+                        // check cycle: proves the inference server itself is
+                        // serving, not merely that PhononService heartbeats.
+                        val model = modelManager.currentModelName()
+                        val backend = modelManager.currentBackend()
+                        val body = JSONObject().apply {
+                            put("status", "ok")
+                            put("model_loaded", modelManager.isRunning())
+                            put("model", model ?: JSONObject.NULL)
+                            put("backend", backend ?: JSONObject.NULL)
+                        }
+                        sendResponse(writer, 200, "application/json", body.toString())
+                    }
                     else ->
                         sendResponse(writer, 404, "application/json", """{"error":"Not found"}""")
                 }
@@ -213,6 +240,12 @@ class InferenceServer(
         val startTime = System.currentTimeMillis()
         try {
             val request = InferenceRequest.fromJson(JSONObject(body))
+
+            // Streaming path — SSE over chunked transfer encoding.
+            if (request.stream) {
+                handleStreamingInference(writer, request)
+                return
+            }
 
             // Build the prompt from the message history
             val prompt = buildPrompt(request)
@@ -270,6 +303,125 @@ class InferenceServer(
             sendResponse(writer, 502, "application/json",
                 """{"error":"Inference failed"}""")
         }
+    }
+
+    /**
+     * Streaming inference: responds with SSE events over chunked transfer
+     * encoding, in the OpenAI chat.completion.chunk delta format:
+     *
+     *   data: {"choices":[{"delta":{"content":"Hello"},"index":0}]}
+     *   data: {"choices":[{"delta":{"content":" world"},"index":0}]}
+     *   data: [DONE]
+     *
+     * The LiteRT-LM Kotlin Conversation API in use here is synchronous —
+     * Conversation.sendMessage() returns only the completed message and
+     * exposes no incremental token callback. Streaming is therefore
+     * approximated: the full generation runs first (with SSE keepalive
+     * comments every 2s so the coordinator's per-chunk stall detector
+     * doesn't fire), then the text is emitted in word-boundary chunks at
+     * ~10ms intervals.
+     *
+     * TODO(litert-lm): switch to the SDK's incremental generation API
+     * (token callback / async stream) as soon as one ships, and hold
+     * engineMutex across the whole generation instead of pre-generating.
+     */
+    private suspend fun handleStreamingInference(writer: java.io.OutputStream, request: InferenceRequest) = coroutineScope {
+        val prompt = buildPrompt(request)
+
+        // Commit to SSE before generation so the coordinator sees bytes
+        // (headers + keepalives) instead of silence while the model runs.
+        sendChunkedHeader(writer, "text/event-stream")
+
+        val generation = async(Dispatchers.Default) {
+            engineMutex.withLock {
+                modelManager.generate(prompt)
+            }
+        }
+
+        try {
+            // Await generation, emitting an SSE comment every 2s as a
+            // keepalive. Comments (lines starting with ':') are ignored
+            // by SSE parsers but reset the coordinator's stall timer.
+            var text: String? = null
+            while (text == null) {
+                text = withTimeoutOrNull(2_000) { generation.await() }
+                if (text == null) {
+                    sendChunk(writer, ": keepalive\n\n")
+                }
+            }
+
+            // Emit word-boundary deltas at ~10ms intervals.
+            for (piece in splitDeltas(text)) {
+                val event = JSONObject().put(
+                    "choices",
+                    org.json.JSONArray().put(
+                        JSONObject()
+                            .put("delta", JSONObject().put("content", piece))
+                            .put("index", 0)
+                    )
+                )
+                sendChunk(writer, "data: $event\n\n")
+                delay(10)
+            }
+            sendChunk(writer, "data: [DONE]\n\n")
+            endChunks(writer)
+            Log.i(tag, "Streaming inference completed (${text.length} chars)")
+        } catch (e: IllegalStateException) {
+            // No model loaded — headers already sent, so report in-band.
+            Log.w(tag, "No model loaded for streaming: ${e.message}")
+            sendStreamError(writer, "No model loaded")
+        } catch (e: Exception) {
+            Log.w(tag, "Streaming inference error: ${e.message}")
+            generation.cancel()
+            // Strip error details to avoid information disclosure
+            sendStreamError(writer, "Inference failed")
+        }
+    }
+
+    /** Splits generated text into word-boundary chunks (word + trailing whitespace). */
+    private fun splitDeltas(text: String): List<String> =
+        Regex("""\S+\s*|\s+""").findAll(text).map { it.value }.toList()
+
+    /** Emits an SSE error event followed by [DONE] and closes the chunk stream. */
+    private fun sendStreamError(writer: java.io.OutputStream, message: String) {
+        try {
+            val err = JSONObject().put(
+                "error",
+                JSONObject().put("message", message).put("type", "inference_error")
+            )
+            sendChunk(writer, "data: $err\n\n")
+            sendChunk(writer, "data: [DONE]\n\n")
+            endChunks(writer)
+        } catch (_: Exception) {
+            // Socket already gone — nothing to report to.
+        }
+    }
+
+    /** Writes chunked-transfer response headers for a streaming reply. */
+    private fun sendChunkedHeader(writer: java.io.OutputStream, contentType: String) {
+        val head = "HTTP/1.1 200 OK\r\n" +
+                "Content-Type: $contentType\r\n" +
+                "Transfer-Encoding: chunked\r\n" +
+                "Cache-Control: no-cache\r\n" +
+                "Connection: close\r\n" +
+                "\r\n"
+        writer.write(head.toByteArray())
+        writer.flush()
+    }
+
+    /** Writes one HTTP/1.1 chunk (hex size + CRLF-framed payload). */
+    private fun sendChunk(writer: java.io.OutputStream, data: String) {
+        val bytes = data.toByteArray(Charsets.UTF_8)
+        writer.write("%x\r\n".format(bytes.size).toByteArray())
+        writer.write(bytes)
+        writer.write("\r\n".toByteArray())
+        writer.flush()
+    }
+
+    /** Terminates the chunked response. */
+    private fun endChunks(writer: java.io.OutputStream) {
+        writer.write("0\r\n\r\n".toByteArray())
+        writer.flush()
     }
 
     /**

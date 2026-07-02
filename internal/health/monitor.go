@@ -2,7 +2,10 @@ package health
 
 import (
 	"context"
+	"fmt"
+	"io"
 	"log/slog"
+	"net/http"
 	"sync"
 	"time"
 
@@ -18,12 +21,17 @@ const (
 	reasonLowBattery  = "low-battery"
 	reasonDraining    = "battery-draining"
 	reasonDegraded    = "degraded"
-	ActionStandbyPromote ActionType = "standby_promote"
-	ActionNodeOffline    ActionType = "node_offline"
-	ActionNodeOverheat   ActionType = "node_overheat"
-	ActionNodeDraining   ActionType = "node_draining"
-	ActionNodeDrained    ActionType = "node_drained"
-	ActionNodeReEntered  ActionType = "node_reentered"
+	// reasonUnreachable is probe-managed (see probeSidecars): the phone
+	// heartbeats fine but its inference server does not answer /health.
+	reasonUnreachable = "inference_unreachable"
+
+	ActionStandbyPromote  ActionType = "standby_promote"
+	ActionNodeOffline     ActionType = "node_offline"
+	ActionNodeOverheat    ActionType = "node_overheat"
+	ActionNodeDraining    ActionType = "node_draining"
+	ActionNodeDrained     ActionType = "node_drained"
+	ActionNodeReEntered   ActionType = "node_reentered"
+	ActionNodeUnreachable ActionType = "node_unreachable"
 )
 
 // Action is a hook called when the health monitor detects a state transition.
@@ -45,6 +53,8 @@ func WithEventLog(el *log.EventLog) Action {
 			_ = el.Write(log.EventNodeDrained, deviceID, log.SeverityError, "battery depleted — offloading models")
 		case ActionStandbyPromote:
 			_ = el.Write(log.EventInfo, deviceID, log.SeverityInfo, "standby node promoted to active")
+		case ActionNodeUnreachable:
+			_ = el.Write(log.EventError, deviceID, log.SeverityError, "inference server unreachable — excluding from routing")
 		}
 		_ = groupName
 	}
@@ -61,6 +71,14 @@ type MonitorConfig struct {
 	BatteryCapacityThreshold float64 // % — mark charger-dependent below this
 	OfflineTimeout           time.Duration
 	CheckInterval            time.Duration // how often to run the check loop
+
+	// Sidecar probing: every check cycle the monitor GETs
+	// http://<phone>:<InferencePort>/health on each online phone.
+	// InferencePort <= 0 disables probing (the default for bare
+	// MonitorConfig values; main wires cluster.inference_port).
+	InferencePort         int
+	ProbeTimeout          time.Duration // per-probe deadline (default 3s)
+	ProbeFailureThreshold int           // consecutive failures before exclusion (default 3)
 }
 
 // DefaultMonitorConfig returns a config with sensible defaults.
@@ -74,6 +92,8 @@ func DefaultMonitorConfig() MonitorConfig {
 		BatteryCapacityThreshold: 80,
 		OfflineTimeout:           60 * time.Second,
 		CheckInterval:            5 * time.Second,
+		ProbeTimeout:             3 * time.Second,
+		ProbeFailureThreshold:    3,
 	}
 }
 
@@ -86,19 +106,39 @@ type Monitor struct {
 
 	actions []Action
 
-	mu       sync.Mutex
-	stopCh   chan struct{}
-	running  bool
+	// checkHooks run at the end of every check cycle. Used to piggyback
+	// periodic maintenance (e.g. syncing circuit breaker state into the
+	// registry) on the monitor's 5-second loop.
+	checkHooks []func()
+
+	// probeFn performs one sidecar health probe. Overridable in tests.
+	probeFn func(ctx context.Context, url string) error
+
+	// probeFailures counts consecutive probe failures per device.
+	// Guarded by mu.
+	probeFailures map[string]int
+
+	mu      sync.Mutex
+	stopCh  chan struct{}
+	running bool
 }
 
 // NewMonitor creates a health monitor.
 func NewMonitor(reg *registry.Registry, cfg MonitorConfig) *Monitor {
+	if cfg.ProbeTimeout <= 0 {
+		cfg.ProbeTimeout = 3 * time.Second
+	}
+	if cfg.ProbeFailureThreshold <= 0 {
+		cfg.ProbeFailureThreshold = 3
+	}
 	return &Monitor{
-		reg:     reg,
-		cfg:     cfg,
-		log:     slog.With("component", "health-monitor"),
-		metrics: NewMetrics(),
-		actions: make([]Action, 0),
+		reg:           reg,
+		cfg:           cfg,
+		log:           slog.With("component", "health-monitor"),
+		metrics:       NewMetrics(),
+		actions:       make([]Action, 0),
+		probeFn:       defaultSidecarProbe,
+		probeFailures: make(map[string]int),
 	}
 }
 
@@ -107,6 +147,15 @@ func (m *Monitor) AddAction(a Action) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.actions = append(m.actions, a)
+}
+
+// AddCheckHook registers a function invoked at the end of every check
+// cycle (every CheckInterval, default 5s). Hooks must be fast and must
+// not block.
+func (m *Monitor) AddCheckHook(fn func()) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.checkHooks = append(m.checkHooks, fn)
 }
 
 // RegisterMetrics registers Prometheus metrics and returns the metrics instance.
@@ -177,8 +226,20 @@ func (m *Monitor) Check() {
 	// Step 2: Evaluate each online node for health conditions
 	m.evaluateNodes(ctx)
 
+	// Step 2b: Probe each online phone's inference server
+	m.probeSidecars(ctx)
+
 	// Step 3: Update Prometheus metrics
 	m.updateMetrics()
+
+	// Step 4: Run registered check hooks (e.g. circuit breaker sync)
+	m.mu.Lock()
+	hooks := make([]func(), len(m.checkHooks))
+	copy(hooks, m.checkHooks)
+	m.mu.Unlock()
+	for _, fn := range hooks {
+		fn()
+	}
 }
 
 // checkStaleNodes marks nodes as offline if they haven't sent a heartbeat.
@@ -236,6 +297,13 @@ func (m *Monitor) evaluateNodes(ctx context.Context) {
 func (m *Monitor) evaluateNode(node *registry.Node) string {
 	reason := node.ExcludeReason
 
+	// inference_unreachable is owned by the sidecar probe: only a
+	// successful probe (probeSidecars) may clear or replace it —
+	// telemetry evaluation must not resurrect the node.
+	if reason == reasonUnreachable {
+		return reasonUnreachable
+	}
+
 	// --- Overheat check with hysteresis ---
 	if node.Telemetry.ThermalTempC >= m.cfg.OverheatThreshold {
 		return reasonOverheating
@@ -280,6 +348,106 @@ func (m *Monitor) evaluateNode(node *registry.Node) string {
 	}
 
 	return ""
+}
+
+// probeSidecars actively GETs each online phone's inference server
+// /health endpoint. A phone can heartbeat perfectly (the PhononService
+// is alive) while its inference server is wedged — heartbeats alone
+// don't prove the phone can serve requests.
+//
+// After ProbeFailureThreshold consecutive failures the node is excluded
+// with reason "inference_unreachable"; the first successful probe clears
+// that reason (and only that reason — telemetry-managed exclusions are
+// untouched). Disabled when InferencePort <= 0.
+func (m *Monitor) probeSidecars(ctx context.Context) {
+	if m.cfg.InferencePort <= 0 {
+		return
+	}
+
+	nodes := m.reg.ListOnline()
+	if len(nodes) == 0 {
+		return
+	}
+
+	// Probe concurrently: sequential 3s timeouts across a fleet would
+	// blow the 5s check interval.
+	var wg sync.WaitGroup
+	for i := range nodes {
+		node := nodes[i] // copy
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			url := fmt.Sprintf("http://%s:%d/health", node.IPAddress, m.cfg.InferencePort)
+			pctx, cancel := context.WithTimeout(ctx, m.cfg.ProbeTimeout)
+			err := m.probeFn(pctx, url)
+			cancel()
+			m.recordProbeResult(ctx, &node, url, err)
+		}()
+	}
+	wg.Wait()
+}
+
+// recordProbeResult updates the consecutive-failure counter and the
+// node's exclusion state for one probe outcome.
+func (m *Monitor) recordProbeResult(ctx context.Context, node *registry.Node, url string, probeErr error) {
+	m.mu.Lock()
+	if probeErr != nil {
+		m.probeFailures[node.DeviceID]++
+	} else {
+		delete(m.probeFailures, node.DeviceID)
+	}
+	failures := m.probeFailures[node.DeviceID]
+	m.mu.Unlock()
+
+	if probeErr != nil {
+		m.log.Debug("sidecar probe failed",
+			"device_id", node.DeviceID, "url", url,
+			"consecutive_failures", failures, "error", probeErr)
+
+		// Exclude after the threshold — but never overwrite a
+		// telemetry-managed exclusion (overheating etc.); if that
+		// clears while the phone is still unreachable, the counter is
+		// still over threshold and the next cycle excludes it.
+		if failures >= m.cfg.ProbeFailureThreshold && node.ExcludeReason == "" {
+			m.log.Warn("inference server unreachable — excluding node",
+				"device_id", node.DeviceID, "url", url,
+				"consecutive_failures", failures)
+			_ = m.reg.SetExcludeReason(node.DeviceID, reasonUnreachable)
+			m.fireActions(ctx, node, ActionNodeUnreachable)
+		}
+		return
+	}
+
+	// Probe succeeded: clear the exclusion iff the probe owns it.
+	if node.ExcludeReason == reasonUnreachable {
+		m.log.Info("inference server reachable again — node re-entering routing",
+			"device_id", node.DeviceID)
+		_ = m.reg.ClearExcludeReason(node.DeviceID)
+		m.fireActions(ctx, node, ActionNodeReEntered)
+	}
+}
+
+// probeHTTPClient is shared by all sidecar probes. No global timeout:
+// each probe carries a per-attempt context deadline.
+var probeHTTPClient = &http.Client{}
+
+// defaultSidecarProbe GETs the sidecar /health endpoint and treats
+// anything but a 200 as a failure.
+func defaultSidecarProbe(ctx context.Context, url string) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := probeHTTPClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("health endpoint returned HTTP %d", resp.StatusCode)
+	}
+	return nil
 }
 
 // fireActions calls all registered actions for a node state transition.

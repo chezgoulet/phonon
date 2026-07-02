@@ -107,6 +107,7 @@ type lineEvent struct {
 	DeviceID  string `json:"device_id,omitempty"`
 	Severity  string `json:"severity"`
 	Details   string `json:"details,omitempty"`
+	TraceID   string `json:"trace_id,omitempty"`
 }
 
 func (el *EventLog) load() error {
@@ -132,6 +133,7 @@ func (el *EventLog) load() error {
 			DeviceID: le.DeviceID,
 			Severity: Severity(le.Severity),
 			Details:  le.Details,
+			TraceID:  le.TraceID,
 		}
 		if t, err := time.Parse(time.RFC3339, le.Timestamp); err == nil {
 			e.Timestamp = t
@@ -158,6 +160,17 @@ func (el *EventLog) load() error {
 
 // Write inserts a new event. Thread-safe.
 func (el *EventLog) Write(eventType EventType, deviceID string, severity Severity, details string) error {
+	return el.WriteEvent(Event{
+		Type:     eventType,
+		DeviceID: deviceID,
+		Severity: severity,
+		Details:  details,
+	})
+}
+
+// WriteEvent inserts a new event with all fields (including TraceID).
+// The ID and Timestamp are assigned by the log. Thread-safe.
+func (el *EventLog) WriteEvent(e Event) error {
 	el.mu.Lock()
 	defer el.mu.Unlock()
 
@@ -165,24 +178,20 @@ func (el *EventLog) Write(eventType EventType, deviceID string, severity Severit
 		return fmt.Errorf("event log is closed")
 	}
 
-	id := el.nextID.Add(1) - 1
-	now := time.Now().UTC()
-	e := Event{
-		ID:        id,
-		Timestamp: now,
-		Type:      eventType,
-		DeviceID:  deviceID,
-		Severity:  severity,
-		Details:   details,
+	e.ID = el.nextID.Add(1) - 1
+	e.Timestamp = time.Now().UTC()
+	if e.Severity == "" {
+		e.Severity = SeverityInfo
 	}
 
 	le := lineEvent{
-		ID:        id,
-		Timestamp: now.Format(time.RFC3339),
-		Type:      string(eventType),
-		DeviceID:  deviceID,
-		Severity:  string(severity),
-		Details:   details,
+		ID:        e.ID,
+		Timestamp: e.Timestamp.Format(time.RFC3339),
+		Type:      string(e.Type),
+		DeviceID:  e.DeviceID,
+		Severity:  string(e.Severity),
+		Details:   e.Details,
+		TraceID:   e.TraceID,
 	}
 
 	data, err := json.Marshal(le)

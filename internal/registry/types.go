@@ -20,6 +20,12 @@ type HealthTelemetry struct {
 	IsCharging         bool      `json:"is_charging"`
 	QueueDepth         int       `json:"queue_depth"`
 	HeartbeatRecorded  time.Time `json:"-"`
+
+	// CircuitState is the inference circuit breaker state for this device
+	// ("closed", "open", "half-open"), maintained by the coordinator (not
+	// reported by the phone) and preserved across heartbeat updates. Empty
+	// means closed/untracked.
+	CircuitState string `json:"circuit_breaker_state,omitempty"`
 }
 
 // ModelStatus describes what model is loaded and its state.

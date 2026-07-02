@@ -21,6 +21,12 @@ class MDNSAnnouncer(
     private var nsdManager: NsdManager? = null
     private var registered = false
 
+    // NsdManager.unregisterService() requires the *same* listener instance
+    // that was passed to registerService() — passing a fresh listener
+    // throws IllegalArgumentException ("listener not registered") and the
+    // service silently stays announced. Keep the instance here.
+    private var registrationListener: NsdManager.RegistrationListener? = null
+
     private val serviceType = "_phonon._tcp"
     private val serviceName = "Phonon Worker - ${deviceId.takeLast(8)}"
 
@@ -45,28 +51,31 @@ class MDNSAnnouncer(
                 setAttribute("device_model", deviceModel)
             }
 
+            val listener = object : NsdManager.RegistrationListener {
+                override fun onServiceRegistered(info: NsdServiceInfo?) {
+                    registered = true
+                    Log.i(tag, "mDNS registered: ${info?.serviceName} ($deviceModel)")
+                }
+
+                override fun onRegistrationFailed(info: NsdServiceInfo?, errorCode: Int) {
+                    Log.w(tag, "mDNS registration failed: errorCode=$errorCode")
+                }
+
+                override fun onServiceUnregistered(info: NsdServiceInfo?) {
+                    registered = false
+                    Log.i(tag, "mDNS unregistered")
+                }
+
+                override fun onUnregistrationFailed(info: NsdServiceInfo?, errorCode: Int) {
+                    Log.w(tag, "mDNS unregistration failed: errorCode=$errorCode")
+                }
+            }
+            registrationListener = listener
+
             nsdManager?.registerService(
                 serviceInfo,
                 NsdManager.PROTOCOL_DNS_SD,
-                object : NsdManager.RegistrationListener {
-                    override fun onServiceRegistered(info: NsdServiceInfo?) {
-                        registered = true
-                        Log.i(tag, "mDNS registered: ${info?.serviceName} ($deviceModel)")
-                    }
-
-                    override fun onRegistrationFailed(info: NsdServiceInfo?, errorCode: Int) {
-                        Log.w(tag, "mDNS registration failed: errorCode=$errorCode")
-                    }
-
-                    override fun onServiceUnregistered(info: NsdServiceInfo?) {
-                        registered = false
-                        Log.i(tag, "mDNS unregistered")
-                    }
-
-                    override fun onUnregistrationFailed(info: NsdServiceInfo?, errorCode: Int) {
-                        Log.w(tag, "mDNS unregistration failed: errorCode=$errorCode")
-                    }
-                }
+                listener
             )
         } catch (e: SecurityException) {
             Log.e(tag, "mDNS permission denied: ${e.message}")
@@ -79,21 +88,19 @@ class MDNSAnnouncer(
      * Stop mDNS announcement.
      */
     fun stop() {
-        if (registered && nsdManager != null) {
+        // Unregister with the SAME listener instance passed to
+        // registerService() — NsdManager keys registrations by listener
+        // identity, and a fresh anonymous listener here throws
+        // IllegalArgumentException, leaving the service announced forever.
+        val listener = registrationListener
+        if (listener != null && nsdManager != null) {
             try {
-                nsdManager?.unregisterService(
-                    object : NsdManager.RegistrationListener {
-                        override fun onServiceRegistered(info: NsdServiceInfo?) {}
-                        override fun onRegistrationFailed(info: NsdServiceInfo?, errorCode: Int) {}
-                        override fun onServiceUnregistered(info: NsdServiceInfo?) {
-                            Log.i(tag, "mDNS unregistered")
-                        }
-                        override fun onUnregistrationFailed(info: NsdServiceInfo?, errorCode: Int) {
-                            Log.w(tag, "mDNS unregistration failed: $errorCode")
-                        }
-                    }
-                )
+                nsdManager?.unregisterService(listener)
+            } catch (e: IllegalArgumentException) {
+                // Registration never completed (or already unregistered).
+                Log.w(tag, "mDNS unregister skipped: ${e.message}")
             } catch (_: Exception) {}
+            registrationListener = null
             registered = false
         }
     }

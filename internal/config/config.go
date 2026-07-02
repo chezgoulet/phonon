@@ -47,6 +47,24 @@ func (c *Config) setDefaults() {
 		c.Cluster.Queue.MaxPerNode = 3
 	}
 
+	// Inference port default — must match the sidecar's InferenceServer.
+	if c.Cluster.InferencePort == 0 {
+		c.Cluster.InferencePort = 9876
+	}
+
+	// Model upload size limit default — 8 GiB
+	if c.Cluster.Models.UploadMaxBytes == 0 {
+		c.Cluster.Models.UploadMaxBytes = 8 << 30
+	}
+
+	// Rate limiting defaults (only meaningful when enabled)
+	if c.Cluster.RateLimiting.TokensPerSecond == 0 {
+		c.Cluster.RateLimiting.TokensPerSecond = 10
+	}
+	if c.Cluster.RateLimiting.Burst == 0 {
+		c.Cluster.RateLimiting.Burst = 20
+	}
+
 	// Pairing / Redis defaults
 	p := &c.Cluster.Pairing
 	if p.Redis.Addr == "" {

@@ -19,6 +19,13 @@ type Metrics struct {
 	BatteryLevel     *prometheus.GaugeVec
 	ThermalTempC     *prometheus.GaugeVec
 
+	// Inference request observability (updated by the OpenAI handler).
+	InferenceDuration        prometheus.Histogram
+	InferenceTokensPerSecond prometheus.Histogram
+	InferenceErrors          *prometheus.CounterVec
+	InferenceRetries         prometheus.Counter
+	RequestsActive           prometheus.Gauge
+
 	registry     *prometheus.Registry
 	registryOnce bool
 }
@@ -82,6 +89,39 @@ func NewMetrics() *Metrics {
 			},
 			[]string{"device_id"},
 		),
+		InferenceDuration: prometheus.NewHistogram(
+			prometheus.HistogramOpts{
+				Name:    "phonon_inference_duration_ms",
+				Help:    "End-to-end inference duration in milliseconds.",
+				Buckets: []float64{100, 500, 1000, 5000, 10000, 30000, 60000},
+			},
+		),
+		InferenceTokensPerSecond: prometheus.NewHistogram(
+			prometheus.HistogramOpts{
+				Name:    "phonon_inference_tokens_per_second",
+				Help:    "Completion tokens per second per inference request.",
+				Buckets: []float64{1, 2, 5, 10, 20, 50, 100, 200},
+			},
+		),
+		InferenceErrors: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "phonon_inference_errors_total",
+				Help: "Inference request failures by error type.",
+			},
+			[]string{"error_type"}, // timeout | connection | phone_error | circuit_breaker
+		),
+		InferenceRetries: prometheus.NewCounter(
+			prometheus.CounterOpts{
+				Name: "phonon_inference_retries_total",
+				Help: "Inference requests failed over to a fallback phone.",
+			},
+		),
+		RequestsActive: prometheus.NewGauge(
+			prometheus.GaugeOpts{
+				Name: "phonon_requests_active",
+				Help: "Currently active inference requests.",
+			},
+		),
 	}
 }
 
@@ -101,6 +141,11 @@ func (m *Metrics) Register() {
 	m.registry.MustRegister(m.QueueDepth)
 	m.registry.MustRegister(m.BatteryLevel)
 	m.registry.MustRegister(m.ThermalTempC)
+	m.registry.MustRegister(m.InferenceDuration)
+	m.registry.MustRegister(m.InferenceTokensPerSecond)
+	m.registry.MustRegister(m.InferenceErrors)
+	m.registry.MustRegister(m.InferenceRetries)
+	m.registry.MustRegister(m.RequestsActive)
 }
 
 // Handler returns an HTTP handler that serves metrics from this instance's
