@@ -262,10 +262,10 @@ func (r *Registry) SetExcludeReason(deviceID, reason string) error {
 	})
 }
 
-// SetCircuitState records the inference circuit breaker state ("closed",
-// "open", "half-open") in the node's telemetry so it is visible in the UI
-// and cluster status. An empty string clears it.
-func (r *Registry) SetCircuitState(deviceID, state string) error {
+// SetCircuitState records the inference circuit breaker state (BreakerClosed,
+// BreakerOpen, BreakerHalfOpen) in the node's telemetry so it is visible in the
+// UI and cluster status. An empty value clears it.
+func (r *Registry) SetCircuitState(deviceID string, state BreakerState) error {
 	return r.updateField(deviceID, func(n *Node) {
 		n.Telemetry.CircuitState = state
 	})

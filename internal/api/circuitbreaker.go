@@ -3,18 +3,22 @@ package api
 import (
 	"sync"
 	"time"
+
+	"github.com/chezgoulet/phonon/internal/registry"
 )
 
-// BreakerState is the state of a device's circuit breaker.
-type BreakerState string
+// BreakerState is the state of a device's circuit breaker. It is an alias for
+// registry.BreakerState so the breaker and the node telemetry that stores it
+// share one compiler-enforced type (see internal/registry/types.go).
+type BreakerState = registry.BreakerState
 
 const (
 	// BreakerClosed — device is healthy, requests flow normally.
-	BreakerClosed BreakerState = "closed"
+	BreakerClosed = registry.BreakerClosed
 	// BreakerOpen — device recently failed repeatedly; no routing.
-	BreakerOpen BreakerState = "open"
+	BreakerOpen = registry.BreakerOpen
 	// BreakerHalfOpen — cooldown elapsed; a single probe request is allowed.
-	BreakerHalfOpen BreakerState = "half-open"
+	BreakerHalfOpen = registry.BreakerHalfOpen
 )
 
 // CircuitBreaker tracks per-device inference failures and gates routing.

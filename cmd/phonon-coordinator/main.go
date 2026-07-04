@@ -233,7 +233,7 @@ func main() {
 	// their cooldown surface as half-open promptly.
 	healthMonitor.AddCheckHook(func() {
 		for deviceID, state := range circuitBreaker.Snapshot() {
-			_ = reg.SetCircuitState(deviceID, string(state))
+			_ = reg.SetCircuitState(deviceID, state)
 		}
 	})
 
