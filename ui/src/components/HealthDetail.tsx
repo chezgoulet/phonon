@@ -1,10 +1,28 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { getClusterNodes, type ClusterNode } from "../lib/api";
+import Sparkline from "./Sparkline";
 
 interface Props {
   node: ClusterNode;
   onBack: () => void;
 }
+
+// Live telemetry poll cadence. At 10s, HISTORY_MAX samples ≈ 1 hour and the
+// queue window (QUEUE_WINDOW samples) ≈ 5 minutes.
+const POLL_MS = 10_000;
+const HISTORY_MAX = 360; // ~1 hour at 10s
+const QUEUE_WINDOW = 30; // ~5 minutes at 10s
+
+interface Sample {
+  battery: number;
+  temp: number;
+  queue: number;
+}
+
+// Palette hexes (mirror tailwind.config phonon.*), for canvas strokes.
+const COLOR_BATTERY = "#38bdf8"; // accent
+const COLOR_TEMP = "#eab308"; // warning
+const COLOR_QUEUE = "#22c55e"; // success
 
 function tempBarColor(c: number): string {
   if (c <= 35) return "bg-phonon-success";
@@ -19,33 +37,103 @@ function batteryColor(l: number): string {
 }
 
 export default function HealthDetail({ node, onBack }: Props) {
-  const { telemetry: t } = node;
+  // Live node telemetry: seed from the passed snapshot, then refresh by
+  // polling /api/v1/cluster/nodes and matching on device_id.
+  const [live, setLive] = useState<ClusterNode>(node);
+  const [history, setHistory] = useState<Sample[]>(() => [
+    {
+      battery: node.telemetry.battery_level,
+      temp: node.telemetry.thermal_temp_c,
+      queue: node.telemetry.queue_depth,
+    },
+  ]);
+  const deviceId = node.device_id;
+  // Keep the latest device_id available to the interval without re-subscribing.
+  const deviceIdRef = useRef(deviceId);
+  deviceIdRef.current = deviceId;
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const poll = async () => {
+      try {
+        const res = await getClusterNodes();
+        if (cancelled) return;
+        const fresh = res.data.find((n) => n.device_id === deviceIdRef.current);
+        if (!fresh) return;
+        setLive(fresh);
+        setHistory((prev) => {
+          const next = [
+            ...prev,
+            {
+              battery: fresh.telemetry.battery_level,
+              temp: fresh.telemetry.thermal_temp_c,
+              queue: fresh.telemetry.queue_depth,
+            },
+          ];
+          return next.length > HISTORY_MAX ? next.slice(next.length - HISTORY_MAX) : next;
+        });
+      } catch {
+        /* transient — keep last known values */
+      }
+    };
+
+    const timer = setInterval(poll, POLL_MS);
+    poll();
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [deviceId]);
+
+  const t = live.telemetry;
+
+  const batterySeries = useMemo(() => history.map((s) => s.battery), [history]);
+  const tempSeries = useMemo(() => history.map((s) => s.temp), [history]);
+  const queueSeries = useMemo(
+    () => history.slice(-QUEUE_WINDOW).map((s) => s.queue),
+    [history]
+  );
 
   const telemetryItems = useMemo(
     () => [
       {
         label: "Battery",
         value: `${Math.round(t.battery_level)}%`,
-        detail: t.is_charging ? "Charging" : "Not charging",
+        detail: t.is_charging ? "Charging · last hour" : "Not charging · last hour",
         bar: t.battery_level / 100,
         barColor: batteryColor(t.battery_level),
+        series: batterySeries,
+        seriesColor: COLOR_BATTERY,
+        rangeMin: 0,
+        rangeMax: 100,
       },
       {
         label: "Temperature",
         value: `${Math.round(t.thermal_temp_c)}°C`,
-        detail: t.thermal_temp_c <= 35 ? "Normal" : t.thermal_temp_c <= 42 ? "Warm" : "Hot",
+        detail:
+          (t.thermal_temp_c <= 35 ? "Normal" : t.thermal_temp_c <= 42 ? "Warm" : "Hot") +
+          " · last hour",
         bar: Math.min(t.thermal_temp_c / 60, 1),
         barColor: tempBarColor(t.thermal_temp_c),
+        series: tempSeries,
+        seriesColor: COLOR_TEMP,
+        rangeMin: 20,
+        rangeMax: 60,
       },
       {
         label: "Queue Depth",
         value: String(t.queue_depth),
-        detail: "Pending requests",
+        detail: "Pending requests · last 5 min",
         bar: 0, // no bar for queue
         barColor: "",
+        series: queueSeries,
+        seriesColor: COLOR_QUEUE,
+        rangeMin: undefined,
+        rangeMax: undefined,
       },
     ],
-    [t]
+    [t, batterySeries, tempSeries, queueSeries]
   );
 
   return (
@@ -71,14 +159,14 @@ export default function HealthDetail({ node, onBack }: Props) {
           <div className="flex items-center gap-2">
             <span
               className={`h-3 w-3 rounded-full ${
-                node.state === "online"
+                live.state === "online"
                   ? "bg-phonon-success"
-                  : node.state === "paired"
+                  : live.state === "paired"
                   ? "bg-phonon-warning"
                   : "bg-phonon-muted"
               }`}
             />
-            <span className="text-sm font-medium">{node.state}</span>
+            <span className="text-sm font-medium">{live.state}</span>
           </div>
         </div>
       </div>
@@ -107,6 +195,17 @@ export default function HealthDetail({ node, onBack }: Props) {
                     />
                   </div>
                 )}
+                <div className="mt-1">
+                  <Sparkline
+                    data={item.series}
+                    color={item.seriesColor}
+                    min={item.rangeMin}
+                    max={item.rangeMax}
+                    width={240}
+                    height={32}
+                    className="w-full"
+                  />
+                </div>
                 <p className="text-[10px] text-phonon-muted">{item.detail}</p>
               </div>
             ))}
@@ -144,7 +243,7 @@ export default function HealthDetail({ node, onBack }: Props) {
             <div className="flex justify-between">
               <dt className="text-phonon-muted">Model</dt>
               <dd className="font-mono text-phonon-text">
-                {node.model_loaded || "none"}
+                {live.model_loaded || "none"}
               </dd>
             </div>
             <div className="flex justify-between">
