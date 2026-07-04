@@ -113,6 +113,20 @@ class InferenceServer(
         const val ENV_INFERENCE_PORT = "PHONON_INFERENCE_PORT"
 
         /**
+         * Interval (ms) at which the streaming path emits an SSE `: keepalive`
+         * comment while the synchronous engine generates the full response.
+         *
+         * PROTOCOL CONTRACT: this is the maximum gap between bytes the
+         * coordinator sees during pre-generation. Any coordinator-side stall
+         * detector must use a timeout greater than
+         * `KEEPALIVE_INTERVAL_MS + expected inter-token latency`, or it will
+         * falsely abort healthy generations. Kept in sync with the coordinator
+         * by documentation — see docs/PHONE-API.md "Streaming (SSE)" (#277,
+         * #280).
+         */
+        const val KEEPALIVE_INTERVAL_MS = 2_000L
+
+        /**
          * Fixed delta size (characters) used for scripts without whitespace
          * word boundaries (CJK, Thai, …). See [splitDeltas].
          */
@@ -366,12 +380,13 @@ class InferenceServer(
         }
 
         try {
-            // Await generation, emitting an SSE comment every 2s as a
-            // keepalive. Comments (lines starting with ':') are ignored
-            // by SSE parsers but reset the coordinator's stall timer.
+            // Await generation, emitting an SSE comment every
+            // KEEPALIVE_INTERVAL_MS as a keepalive. Comments (lines starting
+            // with ':') are ignored by SSE parsers but reset the coordinator's
+            // stall timer.
             var text: String? = null
             while (text == null) {
-                text = withTimeoutOrNull(2_000) { generation.await() }
+                text = withTimeoutOrNull(KEEPALIVE_INTERVAL_MS) { generation.await() }
                 if (text == null) {
                     sendChunk(writer, ": keepalive\n\n")
                 }
