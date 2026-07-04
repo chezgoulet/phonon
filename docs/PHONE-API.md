@@ -113,17 +113,12 @@ object:
 
 Token counts are rough estimates (`chars / 4`).
 
-> ### ⚠️ Known discrepancy (coordinator decode)
-> The coordinator's `defaultInferenceProxy` currently decodes the non-streaming
-> response into `PhoneInferenceResponse{ text, tokens, duration_ms }`
-> (`internal/api/openai.go`), which does **not** match the OpenAI-shaped object
-> the sidecar emits above. As a result the coordinator reads an empty `text` on
-> the non-streaming path. Streaming (the primary path) is unaffected.
->
-> This doc treats the **OpenAI `chat.completion` shape as canonical** for what
-> the sidecar sends. The coordinator decode struct should be reconciled to read
-> `choices[0].message.content` (tracked as a follow-up). Documented here so the
-> mismatch is explicit and testable rather than latent.
+The **OpenAI `chat.completion` shape is canonical** for what the sidecar sends.
+The coordinator's `defaultInferenceProxy` reads `choices[0].message.content` and
+`usage.completion_tokens` from it (and still accepts a flat `{text, tokens,
+duration_ms}` body for back-compat). This is exercised end to end by
+`TestCoordinatorSidecarContract` in `internal/api/contract_test.go`, which runs
+the real proxy against a sidecar that speaks this protocol.
 
 ---
 
