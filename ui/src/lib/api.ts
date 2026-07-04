@@ -63,6 +63,42 @@ export async function getAuthStatus(): Promise<AuthStatus> {
   return fetchJSON<AuthStatus>("/api/v1/auth/status");
 }
 
+// ── Event log ──
+
+export type EventSeverity = "info" | "warning" | "error";
+
+export interface ClusterEvent {
+  id: number;
+  timestamp: string;
+  event_type: string;
+  device_id?: string;
+  severity: string;
+  details?: string;
+}
+
+export interface EventQuery {
+  limit?: number;
+  device_id?: string;
+  event_type?: string;
+  since?: string; // RFC3339
+  until?: string; // RFC3339
+}
+
+// Fetches the event log. Endpoint is /api/v1/events (server supports limit,
+// device_id, event_type, since, until; severity is filtered client-side).
+export async function getEvents(
+  q: EventQuery = {}
+): Promise<{ object: string; data: ClusterEvent[] }> {
+  const params = new URLSearchParams();
+  if (q.limit) params.set("limit", String(q.limit));
+  if (q.device_id) params.set("device_id", q.device_id);
+  if (q.event_type) params.set("event_type", q.event_type);
+  if (q.since) params.set("since", q.since);
+  if (q.until) params.set("until", q.until);
+  const qs = params.toString();
+  return fetchJSON(`${API}/events${qs ? `?${qs}` : ""}`);
+}
+
 // ── Visualization types ──
 
 export interface VizPack {
