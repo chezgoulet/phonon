@@ -242,13 +242,22 @@ func (m *Monitor) Check() {
 	}
 }
 
-// checkStaleNodes marks nodes as offline if they haven't sent a heartbeat.
+// checkStaleNodes marks nodes as offline if they haven't sent a heartbeat and
+// fires ActionNodeOffline for each online → offline transition so registered
+// actions (event log, standby promotion) can react.
 func (m *Monitor) checkStaleNodes(ctx context.Context) {
 	stale := m.reg.PurgeStale(m.cfg.OfflineTimeout)
-	if stale > 0 {
-		m.log.Info("marked stale nodes offline", "count", stale)
+	if len(stale) == 0 {
+		return
 	}
-	_ = ctx
+	m.log.Info("marked stale nodes offline", "count", len(stale))
+	for _, id := range stale {
+		node, ok := m.reg.Get(id)
+		if !ok {
+			continue
+		}
+		m.fireActions(ctx, &node, ActionNodeOffline)
+	}
 }
 
 // evaluateNodes checks each online node for overheat, low battery, draining,

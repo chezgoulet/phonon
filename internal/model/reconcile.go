@@ -17,6 +17,7 @@ type CommandIssuer interface {
 	SendModelPush(deviceID, model, url, checksum string, sizeBytes int64) (string, error)
 	SendModelLoad(deviceID, model, backend, checksum string) (string, error)
 	SendModelUnload(deviceID string) (string, error)
+	SendStandbyPromote(deviceID, model, url, checksum string) (string, error)
 	HasConnection(deviceID string) bool
 }
 
@@ -39,6 +40,10 @@ type Reconciler struct {
 
 	// Track which groups are in the middle of a rolling update.
 	rollingGroups map[string]bool
+
+	// groups is the configured group set, captured at Start so standby
+	// promotion can look up a group's standby list and model by name.
+	groups []config.GroupConfig
 }
 
 // NewReconciler creates a reconciler. baseURL is the coordinator URL for
@@ -65,6 +70,7 @@ func (r *Reconciler) Start(ctx context.Context, groups []config.GroupConfig) err
 	}
 
 	r.ctx = ctx
+	r.groups = groups
 	ctx, cancel := context.WithCancel(ctx)
 	r.cancel = cancel
 	r.running = true
@@ -174,6 +180,93 @@ func (r *Reconciler) ReconcileGroup(g *config.GroupConfig) []ReconcilerStep {
 	}
 
 	return steps
+}
+
+// PromoteStandby promotes the healthiest connected standby node in the given
+// group into the active pool after an active node dropped. It issues a
+// standby_promote command (cache-aware push + load) to the selected node and
+// marks it promoted in the registry. Returns the promoted device ID, or "" if
+// the group has no eligible standby.
+//
+// Promotion is best-effort and NOT instantaneous: the standby still has to
+// load the model before it starts serving inference, and routing only picks it
+// up once ModelStatus.Loaded reflects the group's model.
+func (r *Reconciler) PromoteStandby(groupName string) string {
+	g := r.groupByName(groupName)
+	if g == nil || g.Model == "" || len(g.Standby) == 0 {
+		return ""
+	}
+
+	best := r.pickStandby(g)
+	if best == "" {
+		r.log.Warn("no eligible standby to promote", "group", groupName)
+		return ""
+	}
+
+	// A cached model yields a LAN download URL; if empty the sidecar falls
+	// back to its own model management for the standby_promote.
+	url := r.cachedDownloadURL(g.Model)
+	if _, err := r.issuer.SendStandbyPromote(best, g.Model, url, g.Checksum); err != nil {
+		r.log.Error("standby promote command failed",
+			"device_id", best, "group", groupName, "error", err)
+		return ""
+	}
+	if err := r.reg.SetPromoted(best, true); err != nil {
+		r.log.Warn("failed to mark node promoted", "device_id", best, "error", err)
+	}
+	r.log.Info("promoted standby to active pool",
+		"device_id", best, "group", groupName, "model", g.Model)
+	return best
+}
+
+// groupByName returns the configured group with the given name, or nil.
+func (r *Reconciler) groupByName(name string) *config.GroupConfig {
+	r.mu.Lock()
+	groups := r.groups
+	r.mu.Unlock()
+	for i := range groups {
+		if groups[i].Name == name {
+			return &groups[i]
+		}
+	}
+	return nil
+}
+
+// pickStandby returns the healthiest connected, online standby in the group
+// that is not already serving the group's model — coolest first, then highest
+// battery. Returns "" if none qualify.
+func (r *Reconciler) pickStandby(g *config.GroupConfig) string {
+	var best *registry.Node
+	for _, id := range g.Standby {
+		node, ok := r.reg.Get(id)
+		if !ok || node.State != registry.NodeStateOnline {
+			continue
+		}
+		if !r.issuer.HasConnection(id) {
+			continue
+		}
+		// Already serving this model → effectively active already; skip.
+		if node.ModelStatus.Loaded && node.ModelStatus.Name == g.Model {
+			continue
+		}
+		n := node
+		if best == nil || healthierStandby(&n, best) {
+			best = &n
+		}
+	}
+	if best == nil {
+		return ""
+	}
+	return best.DeviceID
+}
+
+// healthierStandby reports whether a is a better promotion target than b:
+// cooler temperature first, then higher battery.
+func healthierStandby(a, b *registry.Node) bool {
+	if a.Telemetry.ThermalTempC != b.Telemetry.ThermalTempC {
+		return a.Telemetry.ThermalTempC < b.Telemetry.ThermalTempC
+	}
+	return a.Telemetry.BatteryLevel > b.Telemetry.BatteryLevel
 }
 
 // cachedDownloadURL returns the download URL if the model is cached, or empty.

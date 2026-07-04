@@ -338,29 +338,38 @@ func (r *Registry) ListOnline() []Node {
 	return result
 }
 
+// SetPromoted records whether a standby node has been promoted into the active
+// pool. Returns ErrNotFound if the device doesn't exist.
+func (r *Registry) SetPromoted(deviceID string, promoted bool) error {
+	return r.updateField(deviceID, func(n *Node) {
+		n.Promoted = promoted
+	})
+}
+
 // PurgeStale marks nodes as offline if their last heartbeat exceeds the timeout.
 // Returns the number of nodes marked offline.
-func (r *Registry) PurgeStale(timeout time.Duration) int {
+// It returns the device IDs of nodes that transitioned online → offline in
+// this call (nil if none), so callers can react to the transition (e.g.
+// standby promotion).
+func (r *Registry) PurgeStale(timeout time.Duration) []string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	deadline := time.Now().Add(-timeout)
-	count := 0
 	var staleIDs []string
 
 	for _, node := range r.nodes {
 		if node.State == NodeStateOnline && node.LastHeartbeat.Before(deadline) {
 			node.State = NodeStateOffline
 			staleIDs = append(staleIDs, node.DeviceID)
-			count++
 		}
 	}
 
-	if count > 0 && r.eventLog != nil {
+	if len(staleIDs) > 0 && r.eventLog != nil {
 		for _, id := range staleIDs {
 			_ = r.eventLog.Write(log.EventNodeLeft, id, log.SeverityWarning, "node went offline (stale heartbeat)")
 		}
 	}
 
-	return count
+	return staleIDs
 }

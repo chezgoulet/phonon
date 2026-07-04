@@ -267,6 +267,21 @@ func main() {
 		coordinatorURL = fmt.Sprintf("http://localhost:%s", coordinatorPort)
 	}
 	reconciler := model.NewReconciler(modelCache, reg, wsHandler, coordinatorURL)
+
+	// Standby promotion (#236): when an active node drops, promote the
+	// healthiest connected standby in its group into the active pool. Wired
+	// here (rather than inside the health monitor) to keep internal/health
+	// decoupled from internal/model. Best-effort — not instantaneous.
+	healthMonitor.AddAction(func(_ context.Context, deviceID, groupName string, at health.ActionType) {
+		if at != health.ActionNodeOffline || groupName == "" {
+			return
+		}
+		if promoted := reconciler.PromoteStandby(groupName); promoted != "" {
+			_ = eventLog.Write(phononlog.EventInfo, promoted, phononlog.SeverityInfo,
+				"standby promoted to active pool after "+deviceID+" went offline")
+		}
+	})
+
 	preflightHandler := api.NewPreflightHandler(reg, modelCache, cfg)
 
 	// Set up routes
