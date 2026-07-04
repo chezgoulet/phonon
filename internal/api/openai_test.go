@@ -11,9 +11,7 @@ import (
 	"github.com/chezgoulet/phonon/internal/registry"
 )
 
-
 const testChatBody = `{"model":"test-model","messages":[{"role":"user","content":"hello"}]}`
-
 
 func TestNewOpenAIHandler(t *testing.T) {
 	reg := registry.New()
@@ -272,8 +270,10 @@ func TestChatCompletionWithOnlinePhone(t *testing.T) {
 	if v := w.Header().Get("X-Phonon-Device"); v != "phone-01" {
 		t.Errorf("expected X-Phonon-Device: phone-01, got %s", v)
 	}
-	if v := w.Header().Get("X-Phonon-Queue-Depth"); v != "2" {
-		t.Errorf("expected X-Phonon-Queue-Depth: 2, got %s", v)
+	// In-flight depth reflects the coordinator's own concurrency; a lone
+	// completed request leaves 0 in flight to the device.
+	if v := w.Header().Get("X-Phonon-In-Flight"); v != "0" {
+		t.Errorf("expected X-Phonon-In-Flight: 0, got %s", v)
 	}
 	if v := w.Header().Get("X-Phonon-Group"); v != "" {
 		t.Errorf("expected empty X-Phonon-Group, got %s", v)
@@ -338,17 +338,17 @@ func TestChatCompletionPhoneFails(t *testing.T) {
 func TestChatCompletionBackpressure(t *testing.T) {
 	reg := registry.New()
 
-	// Phone at capacity (QueueDepth = 3, default max = 3)
 	reg.Register("phone-01", "test-phone", "10.0.0.5")
 	reg.Pair("phone-01")
-	reg.UpdateHeartbeat("phone-01", registry.HealthTelemetry{
-		QueueDepth: 3,
-	})
+	reg.UpdateHeartbeat("phone-01", registry.HealthTelemetry{})
 	reg.SetModelStatus("phone-01", registry.ModelStatus{Name: "test-model", Loaded: true})
 
-	// Pass maxQueuePerNode = 2 to force backpressure
+	// maxQueuePerNode = 2; drive the phone to capacity with real in-flight
+	// requests so backpressure sheds the incoming request.
 	h := NewOpenAIHandler(reg, WithMaxQueuePerNode(2))
 	h.AddModel("test-model", "test")
+	h.inflight.acquire("phone-01")
+	h.inflight.acquire("phone-01") // in-flight depth 2 == maxQueuePerNode
 
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
@@ -695,35 +695,44 @@ func TestStreamChatCompletionProxyError(t *testing.T) {
 }
 
 func TestSelectPhoneHealthAware(t *testing.T) {
-	tests := []struct{
-		name string
+	// Load is the coordinator's own in-flight count per device (inFlight1/2),
+	// not the phone-reported queue depth. Temperature and battery are the
+	// tiebreakers when in-flight depth is equal.
+	tests := []struct {
+		name         string
+		inFlight1    int
+		inFlight2    int
 		phone1Health registry.HealthTelemetry
 		phone2Health registry.HealthTelemetry
-		expectedIP string
+		expectedIP   string
 	}{
 		{
-			name: "lower queue depth wins",
-			phone1Health: registry.HealthTelemetry{QueueDepth: 5, ThermalTempC: 30, BatteryLevel: 80},
-			phone2Health: registry.HealthTelemetry{QueueDepth: 1, ThermalTempC: 30, BatteryLevel: 80},
-			expectedIP: "10.0.0.2",
+			name:         "lower in-flight load wins",
+			inFlight1:    5,
+			inFlight2:    1,
+			phone1Health: registry.HealthTelemetry{ThermalTempC: 30, BatteryLevel: 80},
+			phone2Health: registry.HealthTelemetry{ThermalTempC: 30, BatteryLevel: 80},
+			expectedIP:   "10.0.0.2",
 		},
 		{
-			name: "cooler temperature wins",
-			phone1Health: registry.HealthTelemetry{QueueDepth: 3, ThermalTempC: 35, BatteryLevel: 80},
-			phone2Health: registry.HealthTelemetry{QueueDepth: 3, ThermalTempC: 28, BatteryLevel: 80},
-			expectedIP: "10.0.0.2",
+			name:         "cooler temperature wins",
+			phone1Health: registry.HealthTelemetry{ThermalTempC: 35, BatteryLevel: 80},
+			phone2Health: registry.HealthTelemetry{ThermalTempC: 28, BatteryLevel: 80},
+			expectedIP:   "10.0.0.2",
 		},
 		{
-			name: "higher battery wins",
-			phone1Health: registry.HealthTelemetry{QueueDepth: 2, ThermalTempC: 30, BatteryLevel: 60},
-			phone2Health: registry.HealthTelemetry{QueueDepth: 2, ThermalTempC: 30, BatteryLevel: 90},
-			expectedIP: "10.0.0.2",
+			name:         "higher battery wins",
+			phone1Health: registry.HealthTelemetry{ThermalTempC: 30, BatteryLevel: 60},
+			phone2Health: registry.HealthTelemetry{ThermalTempC: 30, BatteryLevel: 90},
+			expectedIP:   "10.0.0.2",
 		},
 		{
-			name: "combined: queue depth overrides temperature",
-			phone1Health: registry.HealthTelemetry{QueueDepth: 0, ThermalTempC: 40, BatteryLevel: 50},
-			phone2Health: registry.HealthTelemetry{QueueDepth: 5, ThermalTempC: 25, BatteryLevel: 90},
-			expectedIP: "10.0.0.1", // phone-01 has lower queue depth
+			name:         "combined: in-flight load overrides temperature",
+			inFlight1:    0,
+			inFlight2:    5,
+			phone1Health: registry.HealthTelemetry{ThermalTempC: 40, BatteryLevel: 50},
+			phone2Health: registry.HealthTelemetry{ThermalTempC: 25, BatteryLevel: 90},
+			expectedIP:   "10.0.0.1", // phone-01 has lower in-flight load
 		},
 	}
 
@@ -742,6 +751,12 @@ func TestSelectPhoneHealthAware(t *testing.T) {
 			reg.SetModelStatus("phone-02", registry.ModelStatus{Name: "llama", Loaded: true})
 
 			h := NewOpenAIHandler(reg, WithMaxQueuePerNode(0))
+			for i := 0; i < tt.inFlight1; i++ {
+				h.inflight.acquire("phone-01")
+			}
+			for i := 0; i < tt.inFlight2; i++ {
+				h.inflight.acquire("phone-02")
+			}
 
 			phone, _, err := h.selectPhone("llama")
 			if err != nil {

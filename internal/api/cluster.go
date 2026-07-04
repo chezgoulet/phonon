@@ -33,14 +33,14 @@ func (h *ClusterHandler) RegisterRoutes(mux *http.ServeMux) {
 
 // ClusterHealthResponse is the aggregate cluster health report.
 type ClusterHealthResponse struct {
-	Status      string           `json:"status"`       // healthy, degraded, offline
-	TotalNodes  int              `json:"total_nodes"`
-	OnlineNodes int              `json:"online_nodes"`
-	OfflineNodes int             `json:"offline_nodes"`
-	PairedNodes int              `json:"paired_nodes"`
-	Groups      map[string]int   `json:"groups"`        // group name → node count
-	StaleCount  int              `json:"stale_nodes"`   // nodes with no recent heartbeat
-	Timestamp   time.Time        `json:"timestamp"`
+	Status       string         `json:"status"` // healthy, degraded, offline
+	TotalNodes   int            `json:"total_nodes"`
+	OnlineNodes  int            `json:"online_nodes"`
+	OfflineNodes int            `json:"offline_nodes"`
+	PairedNodes  int            `json:"paired_nodes"`
+	Groups       map[string]int `json:"groups"`      // group name → node count
+	StaleCount   int            `json:"stale_nodes"` // nodes with no recent heartbeat
+	Timestamp    time.Time      `json:"timestamp"`
 }
 
 func (h *ClusterHandler) handleClusterHealth(w http.ResponseWriter, _ *http.Request) {

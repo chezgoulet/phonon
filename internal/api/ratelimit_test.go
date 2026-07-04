@@ -106,7 +106,7 @@ func TestPriorityClassification(t *testing.T) {
 
 func TestBackpressureWeightingPrefersLessLoadedPhone(t *testing.T) {
 	reg := registry.New()
-	setup := func(id, ip string, queue int, temp float64) {
+	setup := func(id, ip string, temp float64) {
 		if err := reg.Register(id, "phone", ip); err != nil {
 			t.Fatal(err)
 		}
@@ -114,7 +114,7 @@ func TestBackpressureWeightingPrefersLessLoadedPhone(t *testing.T) {
 			t.Fatal(err)
 		}
 		if err := reg.UpdateHeartbeat(id, registry.HealthTelemetry{
-			BatteryLevel: 80, ThermalTempC: temp, QueueDepth: queue,
+			BatteryLevel: 80, ThermalTempC: temp,
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -123,23 +123,31 @@ func TestBackpressureWeightingPrefersLessLoadedPhone(t *testing.T) {
 		}
 	}
 
-	// maxQueuePerNode = 10. phone-hot: queue 6 (>50%, weight halved →
-	// effective 12) but ice cold. phone-warm: queue 5 (=50%, no penalty)
-	// and hotter. Without weighting, phone-hot (lower raw queue... no —
-	// 6 > 5) — use queue 6 vs 7: without weighting phone-b (7) loses;
-	// with weighting phone-a at 6 (effective 12) must lose to phone-b's
-	// raw... pick clearer numbers below.
-	setup("phone-a", "10.0.0.1", 6, 20) // >50% of 10 → effective 12
-	setup("phone-b", "10.0.0.2", 7, 45) // >50% too → effective 14; a still wins
-	setup("phone-c", "10.0.0.3", 5, 45) // exactly 50% → effective 5, wins overall
+	setup("phone-a", "10.0.0.1", 20) // ice cold
+	setup("phone-b", "10.0.0.2", 45)
+	setup("phone-c", "10.0.0.3", 45)
 
 	h := NewOpenAIHandler(reg, WithMaxQueuePerNode(10))
+	// Load is real coordinator in-flight depth, not phone telemetry.
+	// maxQueuePerNode = 10. phone-a: 6 in-flight (>50% → weight halved →
+	// effective 12) but ice cold. phone-b: 7 (>50% → effective 14).
+	// phone-c: 5 (exactly 50% → no penalty → effective 5) wins overall — the
+	// weighting spreads load off the busier-but-cooler phone-a.
+	load := func(id string, n int) {
+		for i := 0; i < n; i++ {
+			h.inflight.acquire(id)
+		}
+	}
+	load("phone-a", 6)
+	load("phone-b", 7)
+	load("phone-c", 5)
+
 	_, node, err := h.selectPhone("m")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if node.DeviceID != "phone-c" {
-		t.Errorf("weighted selection should prefer phone-c (effective queue 5), got %s", node.DeviceID)
+		t.Errorf("weighted selection should prefer phone-c (effective in-flight 5), got %s", node.DeviceID)
 	}
 }
 

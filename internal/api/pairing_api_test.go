@@ -79,8 +79,8 @@ func TestPairingRequest_Success(t *testing.T) {
 	_, _, mux := setupPairingTest(t)
 
 	body := mustMarshal(t, map[string]string{
-		"device_id":    "TEST-PHONE",
-		"device_model": "pixel-9",
+		"device_id":     "TEST-PHONE",
+		"device_model":  "pixel-9",
 		"device_pubkey": ed25519PubKey(),
 	})
 
@@ -137,8 +137,8 @@ func TestPairingRequest_AlreadyPaired(t *testing.T) {
 
 	// Attempt to pair again
 	body := mustMarshal(t, map[string]string{
-		"device_id":    "TEST-PHONE",
-		"device_model": "pixel-9",
+		"device_id":     "TEST-PHONE",
+		"device_model":  "pixel-9",
 		"device_pubkey": pubKeyHex,
 	})
 	w := execPost(t, mux, "/api/v1/sidecar/pair/request", body)

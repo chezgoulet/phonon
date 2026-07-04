@@ -138,6 +138,14 @@ type OpenAIHandler struct {
 	// breaker gates routing to devices with recent inference failures.
 	breaker CircuitBreaker
 
+	// inflight tracks the coordinator's own per-device in-flight request
+	// count — the real load signal for routing and backpressure (the
+	// phone-reported queue depth is unreliable). dispatchMu serializes the
+	// select-and-claim step so concurrent requests don't all pick the same
+	// "least loaded" phone before its count is incremented.
+	inflight   *inflightTracker
+	dispatchMu sync.Mutex
+
 	// inferencePort is the sidecar inference server port (default 9876,
 	// configurable via cluster.inference_port).
 	inferencePort int
@@ -156,6 +164,7 @@ func NewOpenAIHandler(reg *registry.Registry, opts ...OpenAIOption) *OpenAIHandl
 		log:             slog.With("component", "openai"),
 		maxQueuePerNode: 3, // default
 		inferencePort:   defaultInferencePort,
+		inflight:        newInflightTracker(),
 	}
 	for _, opt := range opts {
 		opt(h)
@@ -442,7 +451,7 @@ func (h *OpenAIHandler) handleChatCompletion(w http.ResponseWriter, r *http.Requ
 	)
 
 	for attempt := 0; attempt < maxAttempts; attempt++ {
-		phone, node, err := h.selectPhoneExcluding(req.Model, exclude)
+		phone, node, release, err := h.selectAndAcquire(req.Model, exclude)
 		if err != nil {
 			if attempt == 0 {
 				h.log.Warn("no available phone for inference", "model", req.Model, "error", err)
@@ -483,8 +492,8 @@ func (h *OpenAIHandler) handleChatCompletion(w http.ResponseWriter, r *http.Requ
 		}
 
 		h.logEvent(phononlog.EventInferenceRouted, node.DeviceID, phononlog.SeverityInfo, traceID, map[string]any{
-			"device_id":   node.DeviceID,
-			"queue_depth": node.Telemetry.QueueDepth,
+			"device_id": node.DeviceID,
+			"in_flight": h.inflight.depth(node.DeviceID),
 		})
 
 		phoneURL := h.phoneInferenceURL(phone)
@@ -503,6 +512,8 @@ func (h *OpenAIHandler) handleChatCompletion(w http.ResponseWriter, r *http.Requ
 			TraceID:     traceID,
 			AuthToken:   authToken,
 		})
+		// The request to this phone is done (success or failure): free the slot.
+		release()
 		if err != nil {
 			h.breaker.RecordFailure(node.DeviceID)
 			exclude[node.DeviceID] = true
@@ -559,7 +570,7 @@ func (h *OpenAIHandler) handleChatCompletion(w http.ResponseWriter, r *http.Requ
 	// Set response headers
 	w.Header().Set("X-Phonon-Device", phoneNode.DeviceID)
 	w.Header().Set("X-Phonon-Group", phoneNode.Group)
-	w.Header().Set("X-Phonon-Queue-Depth", fmt.Sprintf("%d", phoneNode.Telemetry.QueueDepth))
+	w.Header().Set("X-Phonon-In-Flight", fmt.Sprintf("%d", h.inflight.depth(phoneNode.DeviceID)))
 
 	// Build OpenAI-compatible response
 	promptText := buildPrompt(req.Messages)
@@ -618,8 +629,10 @@ func (h *OpenAIHandler) selectPhoneExcluding(modelName string, exclude map[strin
 			continue
 		}
 		if node.ModelStatus.Loaded && node.ModelStatus.Name == modelName {
-			// Check backpressure: skip phones at capacity
-			if h.maxQueuePerNode > 0 && node.Telemetry.QueueDepth >= h.maxQueuePerNode {
+			// Check backpressure: skip phones at capacity. Depth is the
+			// coordinator's own in-flight count for the device, not the
+			// (unreliable) phone-reported queue depth.
+			if h.maxQueuePerNode > 0 && h.inflight.depth(node.DeviceID) >= h.maxQueuePerNode {
 				continue
 			}
 			candidates = append(candidates, *node)
@@ -637,14 +650,15 @@ func (h *OpenAIHandler) selectPhoneExcluding(modelName string, exclude map[strin
 		return "", registry.Node{}, fmt.Errorf("no online node has model %q loaded", modelName)
 	}
 
-	// Sort by health: least queue depth, coolest temperature, most battery.
-	// Backpressure weighting: a phone whose reported queue depth exceeds
-	// 50% of maxQueuePerNode has its routing weight halved — modeled here
-	// as a doubled effective queue depth — so load spreads to less-busy
-	// phones before a node saturates.
+	// Sort by health: least in-flight load, coolest temperature, most
+	// battery. Load is the coordinator's own per-device in-flight count.
+	// Backpressure weighting: a phone whose in-flight depth exceeds 50% of
+	// maxQueuePerNode has its routing weight halved — modeled here as a
+	// doubled effective depth — so load spreads to less-busy phones before a
+	// node saturates.
 	slices.SortFunc(candidates, func(a, b registry.Node) int {
-		aq := h.effectiveQueueDepth(a.Telemetry.QueueDepth)
-		bq := h.effectiveQueueDepth(b.Telemetry.QueueDepth)
+		aq := h.effectiveQueueDepth(h.inflight.depth(a.DeviceID))
+		bq := h.effectiveQueueDepth(h.inflight.depth(b.DeviceID))
 		// Effective queue depth (ascending — lower is better)
 		if aq != bq {
 			if aq < bq {
@@ -666,7 +680,10 @@ func (h *OpenAIHandler) selectPhoneExcluding(modelName string, exclude map[strin
 			}
 			return 1
 		}
-		return 0
+		// Final tiebreak: stable by device ID so selection among equally
+		// healthy phones is deterministic rather than dependent on map
+		// iteration order (avoids arbitrary flapping between identical nodes).
+		return strings.Compare(a.DeviceID, b.DeviceID)
 	})
 
 	// Pick the healthiest candidate whose circuit breaker admits traffic.
@@ -680,14 +697,33 @@ func (h *OpenAIHandler) selectPhoneExcluding(modelName string, exclude map[strin
 	return "", registry.Node{}, fmt.Errorf("all candidate nodes for model %q are circuit-broken", modelName)
 }
 
-// effectiveQueueDepth applies the backpressure weighting: queue depths
+// selectAndAcquire selects the healthiest phone for the model and atomically
+// claims an in-flight slot on it, returning a release function to call once the
+// request to that phone completes. The select-and-claim is serialized by
+// dispatchMu so two concurrent requests can't both pick the same idle phone
+// before its in-flight count reflects the first — the bug that made every
+// request pile onto one node when routing trusted the phone's queue depth.
+//
+// On error the returned release is a no-op.
+func (h *OpenAIHandler) selectAndAcquire(modelName string, exclude map[string]bool) (string, registry.Node, func(), error) {
+	h.dispatchMu.Lock()
+	defer h.dispatchMu.Unlock()
+
+	ip, node, err := h.selectPhoneExcluding(modelName, exclude)
+	if err != nil {
+		return "", registry.Node{}, func() {}, err
+	}
+	return ip, node, h.inflight.acquire(node.DeviceID), nil
+}
+
+// effectiveQueueDepth applies the backpressure weighting: in-flight depths
 // above 50% of maxQueuePerNode count double, halving that phone's routing
 // weight relative to less-loaded peers.
-func (h *OpenAIHandler) effectiveQueueDepth(queueDepth int) int {
-	if h.maxQueuePerNode > 0 && 2*queueDepth > h.maxQueuePerNode {
-		return queueDepth * 2
+func (h *OpenAIHandler) effectiveQueueDepth(depth int) int {
+	if h.maxQueuePerNode > 0 && 2*depth > h.maxQueuePerNode {
+		return depth * 2
 	}
-	return queueDepth
+	return depth
 }
 
 // phoneInferenceURL builds the sidecar inference endpoint URL for a phone IP.
@@ -827,8 +863,9 @@ func (h *OpenAIHandler) handleStreamingChatCompletion(w http.ResponseWriter, r *
 	})
 
 	// Select the first phone before committing to SSE so selection
-	// failures can still return a regular JSON error status.
-	phone, phoneNode, err := h.selectPhoneExcluding(req.Model, nil)
+	// failures can still return a regular JSON error status. The in-flight
+	// slot is claimed here and released after the stream attempt completes.
+	phone, phoneNode, release, err := h.selectAndAcquire(req.Model, nil)
 	if err != nil {
 		h.log.Warn("no available phone for streaming", "model", req.Model, "error", err)
 		if strings.Contains(err.Error(), "circuit-broken") {
@@ -855,6 +892,7 @@ func (h *OpenAIHandler) handleStreamingChatCompletion(w http.ResponseWriter, r *
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {
+		release() // never dispatched — free the slot claimed at selection
 		h.log.Error("streaming not supported by ResponseWriter")
 		writeJSON(w, http.StatusInternalServerError, map[string]any{
 			"error": map[string]string{
@@ -873,7 +911,7 @@ func (h *OpenAIHandler) handleStreamingChatCompletion(w http.ResponseWriter, r *
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("X-Phonon-Device", phoneNode.DeviceID)
 	w.Header().Set("X-Phonon-Group", phoneNode.Group)
-	w.Header().Set("X-Phonon-Queue-Depth", fmt.Sprintf("%d", phoneNode.Telemetry.QueueDepth))
+	w.Header().Set("X-Phonon-In-Flight", fmt.Sprintf("%d", h.inflight.depth(phoneNode.DeviceID)))
 
 	// Role stanza
 	roleChunk := fmt.Sprintf(`data: {"id":%q,"object":"chat.completion.chunk","created":%d,"model":%q,"choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}`,
@@ -894,7 +932,7 @@ func (h *OpenAIHandler) handleStreamingChatCompletion(w http.ResponseWriter, r *
 
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		if attempt > 0 {
-			phone, phoneNode, err = h.selectPhoneExcluding(req.Model, exclude)
+			phone, phoneNode, release, err = h.selectAndAcquire(req.Model, exclude)
 			if err != nil {
 				lastErr = fmt.Errorf("%w (no fallback phone: %v)", lastErr, err)
 				break
@@ -910,8 +948,8 @@ func (h *OpenAIHandler) handleStreamingChatCompletion(w http.ResponseWriter, r *
 		}
 
 		h.logEvent(phononlog.EventInferenceRouted, phoneNode.DeviceID, phononlog.SeverityInfo, traceID, map[string]any{
-			"device_id":   phoneNode.DeviceID,
-			"queue_depth": phoneNode.Telemetry.QueueDepth,
+			"device_id": phoneNode.DeviceID,
+			"in_flight": h.inflight.depth(phoneNode.DeviceID),
 		})
 
 		phoneURL := h.phoneInferenceURL(phone)
@@ -951,6 +989,8 @@ func (h *OpenAIHandler) handleStreamingChatCompletion(w http.ResponseWriter, r *
 			fmt.Fprintf(w, "%s\n\n", chunk)
 			flusher.Flush()
 		})
+		// The stream attempt to this phone is done: free the slot.
+		release()
 
 		if err != nil {
 			h.breaker.RecordFailure(phoneNode.DeviceID)

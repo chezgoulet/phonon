@@ -138,14 +138,14 @@ func TestIntegration_FullSidecarLifecycle(t *testing.T) {
 
 	// Step 3: Send heartbeat (Kotlin sendHeartbeat)
 	heartbeatBody := map[string]any{
-		"device_id":  "PHONE-001",
-		"battery":    map[string]any{"level": 0.85, "charging": true, "capacity_pct": 78.0},
-		"thermal":    map[string]any{"soc_temp_c": 36.5},
-		"storage":    map[string]any{"total_gb": 128.0, "free_gb": 64.0},
+		"device_id":   "PHONE-001",
+		"battery":     map[string]any{"level": 0.85, "charging": true, "capacity_pct": 78.0},
+		"thermal":     map[string]any{"soc_temp_c": 36.5},
+		"storage":     map[string]any{"total_gb": 128.0, "free_gb": 64.0},
 		"queue_depth": 0,
-		"network":    "wlan0",
-		"model":      map[string]any{"loaded": nil},
-		"timestamp":  time.Now().UTC().Format(time.RFC3339),
+		"network":     "wlan0",
+		"model":       map[string]any{"loaded": nil},
+		"timestamp":   time.Now().UTC().Format(time.RFC3339),
 	}
 	b, _ := json.Marshal(heartbeatBody)
 	resp, err := http.Post(server.URL+"/api/v1/sidecar/heartbeat", "application/json", bytes.NewReader(b))

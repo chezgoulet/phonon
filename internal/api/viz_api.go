@@ -10,16 +10,17 @@ import (
 // VizHandler exposes REST endpoints for remote visualization pack control.
 //
 // Routes (all auth-protected, registered under /api/v1/viz/):
-//   GET    /api/v1/viz/packs                  — list built-in pack manifests
-//   POST   /api/v1/viz/device/{deviceId}/switch — per-device pack switch
-//   POST   /api/v1/viz/switch                 — broadcast pack switch
-//   POST   /api/v1/viz/device/{deviceId}/config — per-device config push
-//   POST   /api/v1/viz/arrangement             — set + broadcast arrangement
-//   POST   /api/v1/viz/show-numbers            — broadcast number toggle
+//
+//	GET    /api/v1/viz/packs                  — list built-in pack manifests
+//	POST   /api/v1/viz/device/{deviceId}/switch — per-device pack switch
+//	POST   /api/v1/viz/switch                 — broadcast pack switch
+//	POST   /api/v1/viz/device/{deviceId}/config — per-device config push
+//	POST   /api/v1/viz/arrangement             — set + broadcast arrangement
+//	POST   /api/v1/viz/show-numbers            — broadcast number toggle
 type VizHandler struct {
-	ws       *WSHandler
-	log      *slog.Logger
-	mu       sync.RWMutex
+	ws          *WSHandler
+	log         *slog.Logger
+	mu          sync.RWMutex
 	arrangement []ArrangementEntry // latest arrangement, shared across handlers
 }
 
@@ -45,11 +46,11 @@ func (h *VizHandler) RegisterRoutes(mux *http.ServeMux) {
 
 // PackManifest is the serializable descriptor of a built-in visualization pack.
 type PackManifest struct {
-	ID          string            `json:"id"`
-	Name        string            `json:"name"`
-	Description string            `json:"description"`
-	Author      string            `json:"author"`
-	Version     string            `json:"version"`
+	ID            string            `json:"id"`
+	Name          string            `json:"name"`
+	Description   string            `json:"description"`
+	Author        string            `json:"author"`
+	Version       string            `json:"version"`
 	DefaultConfig map[string]string `json:"default_config"`
 }
 
@@ -61,11 +62,11 @@ var builtinPacks = []PackManifest{
 		Author:      "chezgoulet",
 		Version:     "1.0.0",
 		DefaultConfig: map[string]string{
-			"ring_color_primary":   "#38BDF8",
-			"ring_color_secondary": "#D946EF",
-			"ring_color_processing":"#22C55E",
-			"rotation_speed":      "0.8",
-			"glow_intensity":      "1.0",
+			"ring_color_primary":    "#38BDF8",
+			"ring_color_secondary":  "#D946EF",
+			"ring_color_processing": "#22C55E",
+			"rotation_speed":        "0.8",
+			"glow_intensity":        "1.0",
 		},
 	},
 	{
