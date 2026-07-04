@@ -358,9 +358,9 @@ func TestPurgeStale(t *testing.T) {
 	r.nodes["serial-001"].LastHeartbeat = time.Now().Add(-5 * time.Minute)
 	r.mu.Unlock()
 
-	count := r.PurgeStale(60 * time.Second)
-	if count != 1 {
-		t.Errorf("expected 1 stale node, got %d", count)
+	stale := r.PurgeStale(60 * time.Second)
+	if len(stale) != 1 || stale[0] != "serial-001" {
+		t.Errorf("expected [serial-001] stale, got %v", stale)
 	}
 
 	n1, _ := r.Get("serial-001")
@@ -379,9 +379,9 @@ func TestPurgeStaleOnlyOnline(t *testing.T) {
 	_ = r.Register("serial-001", "", "")
 
 	// Unpaired node shouldn't be affected by purge
-	count := r.PurgeStale(1 * time.Second)
-	if count != 0 {
-		t.Errorf("expected 0 stale nodes for unpaired, got %d", count)
+	stale := r.PurgeStale(1 * time.Second)
+	if len(stale) != 0 {
+		t.Errorf("expected 0 stale nodes for unpaired, got %v", stale)
 	}
 }
 

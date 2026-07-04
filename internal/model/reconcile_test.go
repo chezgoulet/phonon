@@ -11,10 +11,11 @@ import (
 
 // mockIssuer implements CommandIssuer for testing.
 type mockIssuer struct {
-	pushCommands   []string // deviceID+model
-	loadCommands   []string
-	unloadCommands []string
-	connected      map[string]bool
+	pushCommands    []string // deviceID+model
+	loadCommands    []string
+	unloadCommands  []string
+	promoteCommands []string // deviceID+model
+	connected       map[string]bool
 }
 
 func newMockIssuer() *mockIssuer {
@@ -35,6 +36,11 @@ func (m *mockIssuer) SendModelLoad(deviceID, model, _, _ string) (string, error)
 
 func (m *mockIssuer) SendModelUnload(deviceID string) (string, error) {
 	m.unloadCommands = append(m.unloadCommands, deviceID)
+	return "cmd-" + deviceID, nil
+}
+
+func (m *mockIssuer) SendStandbyPromote(deviceID, model, _, _ string) (string, error) {
+	m.promoteCommands = append(m.promoteCommands, deviceID+":"+model)
 	return "cmd-" + deviceID, nil
 }
 
@@ -267,6 +273,77 @@ func TestReconcileGroup_Standby(t *testing.T) {
 	}
 	if !found {
 		t.Error("expected step for standby phone")
+	}
+}
+
+func TestPromoteStandby_PicksHealthiestConnected(t *testing.T) {
+	reg := registry.New()
+	registerNode(reg, testPhone01, registry.NodeStateOnline, "model", true)
+	registerNode(reg, "standby-hot", registry.NodeStateOnline, "", false)
+	registerNode(reg, "standby-cool", registry.NodeStateOnline, "", false)
+
+	// standby-cool is the better target (lower temperature).
+	if err := reg.UpdateHeartbeat("standby-hot", registry.HealthTelemetry{ThermalTempC: 41, BatteryLevel: 90}); err != nil {
+		t.Fatal(err)
+	}
+	if err := reg.UpdateHeartbeat("standby-cool", registry.HealthTelemetry{ThermalTempC: 30, BatteryLevel: 70}); err != nil {
+		t.Fatal(err)
+	}
+
+	issuer := newMockIssuer()
+	issuer.connected["standby-hot"] = true
+	issuer.connected["standby-cool"] = true
+
+	cache := NewCache(t.TempDir(), nil)
+	cache.Init()
+	cache.mu.Lock()
+	cache.entries["model"] = &CacheEntry{Name: "model", Path: "/fake/path"}
+	cache.mu.Unlock()
+
+	reconciler := NewReconciler(cache, reg, issuer, "http://coord:9876")
+	reconciler.groups = []config.GroupConfig{{
+		Name:    "alpha",
+		Model:   "model",
+		Phones:  []string{testPhone01},
+		Standby: []string{"standby-hot", "standby-cool"},
+	}}
+
+	promoted := reconciler.PromoteStandby("alpha")
+	if promoted != "standby-cool" {
+		t.Fatalf("expected coolest standby promoted, got %q", promoted)
+	}
+	if len(issuer.promoteCommands) != 1 || issuer.promoteCommands[0] != "standby-cool:model" {
+		t.Errorf("expected one promote command for standby-cool, got %v", issuer.promoteCommands)
+	}
+	node, _ := reg.Get("standby-cool")
+	if !node.Promoted {
+		t.Error("promoted node should be marked Promoted in the registry")
+	}
+}
+
+func TestPromoteStandby_NoEligibleStandby(t *testing.T) {
+	reg := registry.New()
+	registerNode(reg, "standby-01", registry.NodeStateOnline, "", false)
+
+	issuer := newMockIssuer() // no connections registered → not eligible
+	cache := NewCache(t.TempDir(), nil)
+	cache.Init()
+	reconciler := NewReconciler(cache, reg, issuer, "http://coord:9876")
+	reconciler.groups = []config.GroupConfig{{
+		Name:    "alpha",
+		Model:   "model",
+		Standby: []string{"standby-01"},
+	}}
+
+	if promoted := reconciler.PromoteStandby("alpha"); promoted != "" {
+		t.Errorf("expected no promotion when standby is disconnected, got %q", promoted)
+	}
+	// Unknown group is a no-op.
+	if promoted := reconciler.PromoteStandby("does-not-exist"); promoted != "" {
+		t.Errorf("expected no promotion for unknown group, got %q", promoted)
+	}
+	if len(issuer.promoteCommands) != 0 {
+		t.Errorf("expected no promote commands, got %v", issuer.promoteCommands)
 	}
 }
 
