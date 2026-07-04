@@ -347,7 +347,6 @@ func (r *Registry) SetPromoted(deviceID string, promoted bool) error {
 }
 
 // PurgeStale marks nodes as offline if their last heartbeat exceeds the timeout.
-// Returns the number of nodes marked offline.
 // It returns the device IDs of nodes that transitioned online → offline in
 // this call (nil if none), so callers can react to the transition (e.g.
 // standby promotion).
