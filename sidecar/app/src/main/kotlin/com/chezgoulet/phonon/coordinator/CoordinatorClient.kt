@@ -420,12 +420,21 @@ class CoordinatorClient(
 
     private fun scheduleReconnect() {
         if (stopped) return
-        val delay = listOf(1000, 2000, 5000, 10000, 30000)
-            .getOrElse(reconnectAttempt) { 60000 }
+        // Exponential backoff with ±25% jitter. Jitter de-synchronizes phones
+        // that all lost the connection at once (e.g. a coordinator restart) so
+        // they don't reconnect in lockstep and overwhelm it. reconnectAttempt
+        // is reset to 0 on a successful connect (see onOpen).
+        val base = backoffBaseMs(reconnectAttempt)
+        val delayMs = jitteredDelayMs(base, Math.random() * 2.0 - 1.0)
         reconnectAttempt++
-        Log.i(tag, "Reconnecting in ${delay}ms (attempt $reconnectAttempt)")
+        val msg = "Reconnecting in ${delayMs}ms (attempt $reconnectAttempt)"
+        if (reconnectAttempt <= RECONNECT_WARN_ATTEMPTS) {
+            Log.w(tag, msg)
+        } else {
+            Log.e(tag, "$msg — coordinator still unreachable")
+        }
         scope.launch {
-            delay(delay.toLong())
+            delay(delayMs)
             registerWithCoordinator()
             connectWebSocket()
         }
@@ -455,5 +464,43 @@ class CoordinatorClient(
 
         /** Must match internal/api/deviceauth.go on the coordinator. */
         private const val DEVICE_TOKEN_HEADER = "X-Phonon-Device-Token"
+
+        /** Reconnect backoff: base delay, growth factor, and ceiling. */
+        const val RECONNECT_BASE_MS = 1_000L
+        const val RECONNECT_MULTIPLIER = 2.0
+        const val RECONNECT_CAP_MS = 60_000L
+
+        /** ±fraction of the base delay applied as random jitter. */
+        const val RECONNECT_JITTER_FRACTION = 0.25
+
+        /** Attempts logged at WARN before escalating to ERROR. */
+        const val RECONNECT_WARN_ATTEMPTS = 5
+
+        /**
+         * Exponential backoff delay (ms) for a 0-based reconnect [attempt]:
+         * `RECONNECT_BASE_MS * RECONNECT_MULTIPLIER^attempt`, capped at
+         * `RECONNECT_CAP_MS`. Deterministic; jitter is applied separately by
+         * [jitteredDelayMs]. Exposed `internal` for unit testing.
+         */
+        internal fun backoffBaseMs(attempt: Int): Long {
+            val safeAttempt = attempt.coerceAtLeast(0)
+            val raw = RECONNECT_BASE_MS.toDouble() *
+                Math.pow(RECONNECT_MULTIPLIER, safeAttempt.toDouble())
+            if (raw >= RECONNECT_CAP_MS.toDouble()) return RECONNECT_CAP_MS
+            return raw.toLong().coerceIn(RECONNECT_BASE_MS, RECONNECT_CAP_MS)
+        }
+
+        /**
+         * Applies ±[RECONNECT_JITTER_FRACTION] jitter to [baseMs]. [jitterRatio]
+         * is a value in [-1.0, 1.0] (e.g. `Random.nextDouble() * 2 - 1`) so the
+         * result spans `baseMs ± RECONNECT_JITTER_FRACTION * baseMs`, never
+         * below zero. Separated from [backoffBaseMs] so tests can assert both
+         * the deterministic curve and the jitter bounds. Exposed for testing.
+         */
+        internal fun jitteredDelayMs(baseMs: Long, jitterRatio: Double): Long {
+            val clamped = jitterRatio.coerceIn(-1.0, 1.0)
+            val spread = (baseMs * RECONNECT_JITTER_FRACTION * clamped).toLong()
+            return (baseMs + spread).coerceAtLeast(0L)
+        }
     }
 }
