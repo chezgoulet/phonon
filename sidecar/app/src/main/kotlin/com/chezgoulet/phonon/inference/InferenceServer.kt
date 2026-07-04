@@ -111,6 +111,33 @@ class InferenceServer(
     companion object {
         const val DEFAULT_PORT = 9876
         const val ENV_INFERENCE_PORT = "PHONON_INFERENCE_PORT"
+
+        /**
+         * Fixed delta size (characters) used for scripts without whitespace
+         * word boundaries (CJK, Thai, …). See [splitDeltas].
+         */
+        const val DELTA_FALLBACK_CHUNK = 4
+
+        /**
+         * Splits generated text into streaming deltas.
+         *
+         * For whitespace-separated scripts this yields word-boundary chunks
+         * (word + trailing whitespace). For text with no whitespace separators
+         * (Chinese, Japanese, Korean, …) the word regex matches the entire
+         * string as a single chunk, which would emit the whole response as one
+         * SSE event — the user waits the full generation time then sees
+         * everything at once. Fall back to fixed-size character chunks so those
+         * languages still stream incrementally.
+         *
+         * Pure and side-effect free; exposed as `internal` for unit testing.
+         */
+        internal fun splitDeltas(text: String): List<String> {
+            val words = Regex("""\S+\s*|\s+""").findAll(text).map { it.value }.toList()
+            if (words.size <= 1 && text.length > DELTA_FALLBACK_CHUNK) {
+                return text.chunked(DELTA_FALLBACK_CHUNK)
+            }
+            return words
+        }
     }
 
     private suspend fun handleConnection(clientSocket: Socket) {
@@ -377,10 +404,6 @@ class InferenceServer(
             sendStreamError(writer, "Inference failed")
         }
     }
-
-    /** Splits generated text into word-boundary chunks (word + trailing whitespace). */
-    private fun splitDeltas(text: String): List<String> =
-        Regex("""\S+\s*|\s+""").findAll(text).map { it.value }.toList()
 
     /** Emits an SSE error event followed by [DONE] and closes the chunk stream. */
     private fun sendStreamError(writer: java.io.OutputStream, message: String) {
