@@ -5,9 +5,10 @@ import PairingFlow from "./components/PairingFlow";
 import HealthDetail from "./components/HealthDetail";
 import ArrangementWidget from "./components/ArrangementWidget";
 import VizPackManager from "./components/VizPackManager";
+import EventLogViewer from "./components/EventLogViewer";
 import type { ClusterNode } from "./lib/api";
 
-type View = "dashboard" | "groups" | "pairing" | "visualizations";
+type View = "dashboard" | "groups" | "pairing" | "visualizations" | "events";
 
 function App() {
   const [view, setView] = useState<View>("dashboard");
@@ -32,6 +33,7 @@ function App() {
               ["groups", "Groups"],
               ["pairing", "Pairing"],
               ["visualizations", "Visualizations"],
+              ["events", "Events"],
             ] as [View, string][]
           ).map(([id, label]) => (
             <button
@@ -108,6 +110,8 @@ function App() {
               )}
             </div>
           </div>
+        ) : view === "events" ? (
+          <EventLogViewer />
         ) : null}
       </main>
     </div>
