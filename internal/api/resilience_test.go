@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/chezgoulet/phonon/internal/registry"
+	"golang.org/x/time/rate"
 )
 
 // resilienceTestRegistry sets up two online phones with the same model.
@@ -182,6 +183,56 @@ func TestBreakerOpensAfterRepeatedHandlerFailures(t *testing.T) {
 	// With both breakers open, selection must fail.
 	if _, _, err := h.selectPhone("test-model"); err == nil {
 		t.Error("selection should fail when all breakers are open")
+	}
+}
+
+// TestRateLimiterRejectionDoesNotTripBreaker verifies the ordering contract
+// between the rate limiter and the circuit breaker. The limiter sits OUTSIDE
+// the OpenAI handler in the middleware chain, so a 429 is returned before the
+// handler (and therefore the breaker) ever runs: the phone never received the
+// request, so it must not count as a phone failure.
+//
+// This guards against a future refactor that accidentally wires the limiter
+// inside the handler chain (after the breaker), which would make 429s under
+// load open every device's breaker and make the whole cluster look unhealthy.
+func TestRateLimiterRejectionDoesNotTripBreaker(t *testing.T) {
+	reg := resilienceTestRegistry(t)
+	h := NewOpenAIHandler(reg)
+	h.AddModel("test-model", "test")
+
+	proxyCalls := 0
+	h.inferenceProxy = func(string, PhoneInferenceRequest) (*PhoneInferenceResponse, error) {
+		proxyCalls++
+		return &PhoneInferenceResponse{Text: "should never be produced", Tokens: 1}, nil
+	}
+
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	// A rate limiter with an empty bucket: both primary and reserve buckets
+	// hold zero tokens (limit 0, burst 0), so every request is shed with 429.
+	rl := NewRateLimiter(1, 1)
+	rl.primary = rate.NewLimiter(0, 0)
+	rl.reserve = rate.NewLimiter(0, 0)
+	handler := rl.Middleware(mux)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(testChatBody))
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected 429 from the rate limiter, got %d: %s", w.Code, w.Body.String())
+	}
+	if proxyCalls != 0 {
+		t.Fatalf("inference proxy must not run when rate-limited, got %d call(s)", proxyCalls)
+	}
+
+	// The request never reached a phone, so no failure was recorded: every
+	// device's breaker must remain closed.
+	for _, id := range []string{"phone-01", "phone-02"} {
+		if st := h.breaker.State(id); st != BreakerClosed {
+			t.Errorf("%s breaker must stay closed after a rate-limit rejection, got %s", id, st)
+		}
 	}
 }
 
