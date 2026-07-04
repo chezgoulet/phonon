@@ -519,6 +519,16 @@ func main() {
 
 	// Start background subsystems now that the HTTP server is running
 	healthMonitor.Start()
+
+	// Surface the inference port the coordinator will probe and dispatch to.
+	// It must match PHONON_INFERENCE_PORT on the sidecars; a mismatch makes
+	// every phone appear unreachable for inference (health probes and
+	// inference POSTs fail while WS heartbeats still succeed). See #281 and
+	// docs/PHONE-API.md "Port configuration".
+	logger.Info("inference port configured",
+		"port", cfg.Cluster.InferencePort,
+		"sidecar_env", "PHONON_INFERENCE_PORT",
+	)
 	if err := discoveryMgr.Start(ctx); err != nil {
 		logger.Error("failed to start discovery manager", "error", err)
 	}
