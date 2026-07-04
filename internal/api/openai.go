@@ -38,7 +38,7 @@ type ChatCompletionRequest struct {
 
 // Message represents a single message in the chat history.
 type Message struct {
-	Role    string `json:"role"`    // "system", "user", "assistant"
+	Role    string `json:"role"` // "system", "user", "assistant"
 	Content string `json:"content"`
 }
 
@@ -114,9 +114,9 @@ type PhoneInferenceResponse struct {
 
 // OpenAIHandler manages the OpenAI-compatible API endpoints.
 type OpenAIHandler struct {
-	reg    *registry.Registry
-	log    *slog.Logger
-	models map[string]ModelInfo // available models (from cache/registry)
+	reg      *registry.Registry
+	log      *slog.Logger
+	models   map[string]ModelInfo // available models (from cache/registry)
 	modelsMu sync.RWMutex
 
 	// inferenceProxy sends requests to phones. Override for testing.
@@ -771,12 +771,40 @@ func (h *OpenAIHandler) defaultInferenceProxy(phoneURL string, req PhoneInferenc
 		return nil, fmt.Errorf("phone returned HTTP %d: %s", resp.StatusCode, string(body))
 	}
 
-	var phoneResp PhoneInferenceResponse
+	// The sidecar returns an OpenAI-compatible chat.completion object
+	// (choices[].message.content, usage.completion_tokens). A flat
+	// {text,tokens,duration_ms} shape is also accepted for back-compat with
+	// any phone/proxy that emits it. See docs/PHONE-API.md.
+	var phoneResp struct {
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+		Usage struct {
+			CompletionTokens int `json:"completion_tokens"`
+		} `json:"usage"`
+		Text     string `json:"text"`
+		Tokens   int    `json:"tokens"`
+		Duration int    `json:"duration_ms"`
+	}
 	if err := json.NewDecoder(resp.Body).Decode(&phoneResp); err != nil {
 		return nil, fmt.Errorf("decode phone response: %w", err)
 	}
 
-	return &phoneResp, nil
+	out := &PhoneInferenceResponse{
+		Text:     phoneResp.Text,
+		Tokens:   phoneResp.Tokens,
+		Duration: phoneResp.Duration,
+	}
+	// Prefer the OpenAI chat.completion shape the sidecar actually emits.
+	if len(phoneResp.Choices) > 0 && phoneResp.Choices[0].Message.Content != "" {
+		out.Text = phoneResp.Choices[0].Message.Content
+		if phoneResp.Usage.CompletionTokens > 0 {
+			out.Tokens = phoneResp.Usage.CompletionTokens
+		}
+	}
+	return out, nil
 }
 
 func (h *OpenAIHandler) handleStreamingChatCompletion(w http.ResponseWriter, r *http.Request, req *ChatCompletionRequest) {
