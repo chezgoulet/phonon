@@ -46,13 +46,13 @@ func (h *PairingHandler) RegisterOperatorRoutes(mux *http.ServeMux) {
 // --- Sidecar-facing: pairing request ---
 
 type pairRequestJSON struct {
-	DeviceID    string `json:"device_id"`
-	DeviceModel string `json:"device_model"`
+	DeviceID     string `json:"device_id"`
+	DeviceModel  string `json:"device_model"`
 	DevicePubKey string `json:"device_pubkey"` // hex-encoded Ed25519 public key
 }
 
 type pairRequestResponse struct {
-	Status string `json:"status"` // "pending" or "already_paired"
+	Status string `json:"status"`         // "pending" or "already_paired"
 	Code   string `json:"code,omitempty"` // 6-digit code, only for phones with a screen
 }
 
@@ -176,8 +176,8 @@ func (h *PairingHandler) handlePairStatus(w http.ResponseWriter, r *http.Request
 
 type confirmRequest struct {
 	DeviceID string `json:"device_id"`
-	Code     string `json:"code"`     // 6-digit code shown on the phone (empty = auto-approve for headless)
-	Name     string `json:"name"`     // optional human-friendly name override
+	Code     string `json:"code"` // 6-digit code shown on the phone (empty = auto-approve for headless)
+	Name     string `json:"name"` // optional human-friendly name override
 }
 
 type confirmResponse struct {

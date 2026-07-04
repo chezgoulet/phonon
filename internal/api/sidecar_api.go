@@ -13,8 +13,8 @@ import (
 
 // SidecarHandler handles REST API endpoints for sidecar communication.
 type SidecarHandler struct {
-	reg  *registry.Registry
-	log  *slog.Logger
+	reg         *registry.Registry
+	log         *slog.Logger
 	coordPubKey string // hex-encoded coordinator Ed25519 public key (for pairing info)
 
 	// deviceAuth enforces per-device token auth for paired devices.
@@ -51,11 +51,11 @@ func (h *SidecarHandler) RegisterRoutes(mux *http.ServeMux) {
 // --- Registration ---
 
 type registerRequest struct {
-	DeviceID        string `json:"device_id"`
-	DeviceModel     string `json:"device_model"`
-	DevicePubKey    string `json:"device_pubkey,omitempty"` // hex-encoded Ed25519 public key (pairing)
-	AndroidVersion  string `json:"android_version"`
-	IPAddress       string `json:"ip_address"`
+	DeviceID         string `json:"device_id"`
+	DeviceModel      string `json:"device_model"`
+	DevicePubKey     string `json:"device_pubkey,omitempty"` // hex-encoded Ed25519 public key (pairing)
+	AndroidVersion   string `json:"android_version"`
+	IPAddress        string `json:"ip_address"`
 	NetworkInterface string `json:"network_interface"`
 }
 
@@ -65,7 +65,7 @@ type registerResponse struct {
 	AssignedTo      string `json:"assigned_to,omitempty"`
 	PairingRequired bool   `json:"pairing_required,omitempty"` // true if pubkey was sent but device isn't paired
 	PairingEndpoint string `json:"pairing_endpoint,omitempty"` // URL for pair request
-	CoordinatorKey  string `json:"coordinator_key,omitempty"` // coordinator's public key hex
+	CoordinatorKey  string `json:"coordinator_key,omitempty"`  // coordinator's public key hex
 }
 
 func (h *SidecarHandler) handleRegister(w http.ResponseWriter, r *http.Request) {
@@ -156,14 +156,14 @@ type modelInfo struct {
 }
 
 type heartbeatRequest struct {
-	DeviceID   string            `json:"device_id"`
-	Battery    batteryTelemetry  `json:"battery"`
-	Thermal    thermalTelemetry  `json:"thermal"`
-	Storage    storageTelemetry  `json:"storage"`
-	Model      *modelInfo        `json:"model,omitempty"`
-	QueueDepth int               `json:"queue_depth"`
-	Network    string            `json:"network"`
-	Timestamp  string            `json:"timestamp"`
+	DeviceID   string           `json:"device_id"`
+	Battery    batteryTelemetry `json:"battery"`
+	Thermal    thermalTelemetry `json:"thermal"`
+	Storage    storageTelemetry `json:"storage"`
+	Model      *modelInfo       `json:"model,omitempty"`
+	QueueDepth int              `json:"queue_depth"`
+	Network    string           `json:"network"`
+	Timestamp  string           `json:"timestamp"`
 }
 
 func (h *SidecarHandler) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
@@ -263,8 +263,6 @@ type auditInfo struct {
 	BootloaderLocked  bool   `json:"bootloader_locked"`
 	AndroidVersion    string `json:"android_version"`
 }
-
-
 
 // --- Helpers ---
 

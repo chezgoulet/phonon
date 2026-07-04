@@ -99,7 +99,7 @@ type WSHandler struct {
 	log *slog.Logger
 
 	mu      sync.RWMutex
-	devices map[string]*deviceConn              // device_id → active connection
+	devices map[string]*deviceConn                // device_id → active connection
 	pending map[string]map[string]*pendingCommand // device_id → command_id → state
 
 	upgrader websocket.Upgrader

@@ -9,10 +9,10 @@ import (
 
 func TestCheckOrigin(t *testing.T) {
 	tests := []struct {
-		name     string
-		host     string
-		origin   string
-		want     bool
+		name   string
+		host   string
+		origin string
+		want   bool
 	}{
 		// Empty origin (app clients)
 		{"empty origin", "example.com:8080", "", true},
@@ -57,7 +57,7 @@ func TestCheckOrigin(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Build a request with the given Host header and Origin
 			req := &http.Request{
-				Host: tt.host,
+				Host:   tt.host,
 				Header: make(http.Header),
 			}
 			req.Header.Set("Origin", tt.origin)

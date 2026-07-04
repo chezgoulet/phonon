@@ -39,26 +39,26 @@ func (h *PreflightHandler) RegisterRoutes(mux *http.ServeMux) {
 
 // PreflightResponse is the full pre-flight report.
 type PreflightResponse struct {
-	Overall   string                     `json:"overall"`   // "ready", "not_ready"
-	Timestamp time.Time                  `json:"timestamp"`
+	Overall   string                      `json:"overall"` // "ready", "not_ready"
+	Timestamp time.Time                   `json:"timestamp"`
 	Groups    map[string]GroupCheckResult `json:"groups"`
-	Errors    []string                   `json:"errors,omitempty"`
+	Errors    []string                    `json:"errors,omitempty"`
 }
 
 // GroupCheckResult captures readiness for a single group.
 type GroupCheckResult struct {
-	Name    string          `json:"name"`
-	Model   string          `json:"model"`
-	Status  string          `json:"status"`  // "ready", "not_ready", "unknown"
-	Checks  []CheckDetail   `json:"checks"`
-	Summary string          `json:"summary"`
+	Name    string        `json:"name"`
+	Model   string        `json:"model"`
+	Status  string        `json:"status"` // "ready", "not_ready", "unknown"
+	Checks  []CheckDetail `json:"checks"`
+	Summary string        `json:"summary"`
 }
 
 // CheckDetail is a single check result within a group.
 type CheckDetail struct {
-	Check   string `json:"check"`   // e.g. "phones_registered", "model_cached", "node_online"
-	Status  string `json:"status"`  // "pass", "fail", "warn"
-	Detail  string `json:"detail,omitempty"`
+	Check  string `json:"check"`  // e.g. "phones_registered", "model_cached", "node_online"
+	Status string `json:"status"` // "pass", "fail", "warn"
+	Detail string `json:"detail,omitempty"`
 }
 
 func (h *PreflightHandler) handlePreflight(w http.ResponseWriter, r *http.Request) {

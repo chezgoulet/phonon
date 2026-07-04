@@ -206,8 +206,8 @@ func TestChatCompletionWithGroupHeader(t *testing.T) {
 	if v := w.Header().Get("X-Phonon-Group"); v != "pool-prime" {
 		t.Errorf("expected X-Phonon-Group: pool-prime, got %s", v)
 	}
-	if v := w.Header().Get("X-Phonon-Queue-Depth"); v != "0" {
-		t.Errorf("expected X-Phonon-Queue-Depth: 0, got %s", v)
+	if v := w.Header().Get("X-Phonon-In-Flight"); v != "0" {
+		t.Errorf("expected X-Phonon-In-Flight: 0, got %s", v)
 	}
 }
 
