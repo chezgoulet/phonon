@@ -259,18 +259,29 @@ func (m *Monitor) Check() {
 // checkStaleNodes marks nodes as offline if they haven't sent a heartbeat and
 // fires ActionNodeOffline for each online → offline transition so registered
 // actions (event log, standby promotion) can react.
+// After marking stale nodes offline, evicts nodes that have been offline for
+// 3× the offline timeout (complete removal, not just state change) to prevent
+// registry memory growth.
 func (m *Monitor) checkStaleNodes(ctx context.Context) {
 	stale := m.reg.PurgeStale(m.cfg.OfflineTimeout)
-	if len(stale) == 0 {
-		return
-	}
-	m.log.Info("marked stale nodes offline", "count", len(stale))
-	for _, id := range stale {
-		node, ok := m.reg.Get(id)
-		if !ok {
-			continue
+	if len(stale) > 0 {
+		m.log.Info("marked stale nodes offline", "count", len(stale))
+		for _, id := range stale {
+			node, ok := m.reg.Get(id)
+			if !ok {
+				continue
+			}
+			m.fireActions(ctx, &node, ActionNodeOffline)
 		}
-		m.fireActions(ctx, &node, ActionNodeOffline)
+	}
+
+	// Evict nodes offline for 3× the timeout (complete removal, closing the
+	// memory-growth DoS vector). The multiplier avoids thrashing: a temporary
+	// network blip marks offline; 3× gives plenty of time to recover before
+	// the node forgets its identity.
+	evicted := m.reg.EvictStale(m.cfg.OfflineTimeout * 3)
+	if len(evicted) > 0 {
+		m.log.Info("evicted stale nodes from registry", "count", len(evicted))
 	}
 }
 
@@ -491,6 +502,9 @@ func (m *Monitor) updateMetrics() {
 
 	m.metrics.NodesOnline.Reset()
 	m.metrics.NodesOffline.Reset()
+	m.metrics.BatteryLevel.Reset()
+	m.metrics.ThermalTempC.Reset()
+	m.metrics.QueueDepth.Reset()
 
 	m.mu.Lock()
 	inFlightDepth := m.inFlightDepth

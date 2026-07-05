@@ -372,3 +372,123 @@ func (r *Registry) PurgeStale(timeout time.Duration) []string {
 
 	return staleIDs
 }
+
+// Remove deletes a node from the registry entirely. Returns ErrNotFound if
+// the device doesn't exist.
+func (r *Registry) Remove(deviceID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if _, exists := r.nodes[deviceID]; !exists {
+		return fmt.Errorf("%w: %s", ErrNotFound, deviceID)
+	}
+
+	delete(r.nodes, deviceID)
+
+	if r.eventLog != nil {
+		_ = r.eventLog.Write(log.EventNodeLeft, deviceID, log.SeverityInfo, "node evicted from registry")
+	}
+
+	return nil
+}
+
+// EvictStale removes nodes that have been offline for longer than the given
+// duration. Returns the device IDs of evicted nodes. This is the real eviction
+// counterpart to PurgeStale (which only marks offline) — it prevents the
+// registry from accumulating stale node entries over time, closing the
+// memory-growth DoS vector.
+func (r *Registry) EvictStale(offlineTimeout time.Duration) []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	deadline := time.Now().Add(-offlineTimeout)
+	var evicted []string
+
+	for id, node := range r.nodes {
+		if node.State == NodeStateOffline && node.LastHeartbeat.Before(deadline) {
+			delete(r.nodes, id)
+			evicted = append(evicted, id)
+		}
+	}
+
+	if len(evicted) > 0 && r.eventLog != nil {
+		for _, id := range evicted {
+			_ = r.eventLog.Write(log.EventNodeLeft, id, log.SeverityInfo, "node evicted (offline beyond timeout)")
+		}
+	}
+
+	return evicted
+}
+
+// SnapshotNode captures durable node state for snapshot persistence.
+// It excludes volatile telemetry that comes from heartbeats.
+type SnapshotNode struct {
+	DeviceID     string           `json:"device_id"`
+	Name         string           `json:"name"`
+	DeviceModel  string           `json:"device_model"`
+	Group        string           `json:"group"`
+	State        NodeState        `json:"state"`
+	ModelStatus  ModelStatus      `json:"model_status"`
+	IPAddress    string           `json:"ip_address,omitempty"`
+	RegisteredAt time.Time        `json:"registered_at"`
+	PairedAt     time.Time        `json:"paired_at,omitempty"`
+	Promoted     bool             `json:"promoted,omitempty"`
+}
+
+// Snapshot returns the durable state of all nodes. Unpaired nodes and
+// nodes that were evicted before registering a heartbeat are excluded
+// (they will re-register via mDNS or sidecar registration after restart).
+func (r *Registry) Snapshot() []SnapshotNode {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	result := make([]SnapshotNode, 0, len(r.nodes))
+	for _, n := range r.nodes {
+		// Skip unpaired nodes — they'll re-register on their own.
+		if n.State == NodeStateUnpaired {
+			continue
+		}
+		result = append(result, SnapshotNode{
+			DeviceID:     n.DeviceID,
+			Name:         n.Name,
+			DeviceModel:  n.DeviceModel,
+			Group:        n.Group,
+			State:        n.State,
+			ModelStatus:  n.ModelStatus,
+			IPAddress:    n.IPAddress,
+			RegisteredAt: n.RegisteredAt,
+			PairedAt:     n.PairedAt,
+			Promoted:     n.Promoted,
+		})
+	}
+	return result
+}
+
+// RestoreNode adds a snapshot node back into the registry. The node is
+// set to offline state so the health monitor's next purge cycle correctly
+// handles stale heartbeats — the phone must send a heartbeat before it
+// returns to online/active routing.
+func (r *Registry) RestoreNode(sn SnapshotNode) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	// Don't overwrite an existing registration (e.g. from mDNS during startup).
+	if _, exists := r.nodes[sn.DeviceID]; exists {
+		return
+	}
+
+	n := &Node{
+		DeviceID:     sn.DeviceID,
+		Name:         sn.Name,
+		DeviceModel:  sn.DeviceModel,
+		Group:        sn.Group,
+		State:        NodeStateOffline, // start offline; heartbeat transitions to online
+		ModelStatus:  sn.ModelStatus,
+		IPAddress:    sn.IPAddress,
+		RegisteredAt: sn.RegisteredAt,
+		PairedAt:     sn.PairedAt,
+		Promoted:     sn.Promoted,
+		LastHeartbeat: time.Now(), // prevent immediate eviction
+	}
+	r.nodes[sn.DeviceID] = n
+}
