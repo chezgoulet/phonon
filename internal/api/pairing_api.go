@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/chezgoulet/phonon/internal/pair"
@@ -95,6 +96,13 @@ func (h *PairingHandler) handlePairRequest(w http.ResponseWriter, r *http.Reques
 	code, err := h.pm.StartPairing(req.DeviceID, req.DeviceModel, ip, pubKey)
 	if err != nil {
 		h.log.Error("failed to start pairing", "device_id", req.DeviceID, "error", err)
+		if strings.Contains(err.Error(), "already has a pending pairing") ||
+			strings.Contains(err.Error(), "already paired") {
+			writeJSON(w, http.StatusConflict, map[string]string{
+				"error": err.Error(),
+			})
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "pairing failed")
 		return
 	}

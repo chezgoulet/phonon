@@ -249,7 +249,7 @@ func (c *Cache) downloadOnce(ctx context.Context, url, dest, expectedSHA string)
 		flag = os.O_CREATE | os.O_WRONLY | os.O_TRUNC
 	}
 
-	f, err := os.OpenFile(dest, flag, 0o644)
+	f, err := c.openFileForDownload(dest, flag)
 	if err != nil {
 		return err
 	}
@@ -350,6 +350,65 @@ var ErrChecksumMismatch = fmt.Errorf("SHA-256 checksum mismatch")
 // ErrTooLarge is returned by Put when the upload exceeds maxBytes.
 var ErrTooLarge = fmt.Errorf("model file exceeds size limit")
 
+// safeCreateFile opens a file for writing, refusing to follow symlinks.
+// After opening, it verifies the resolved real path is within the cache
+// root directory to prevent symlink-escape attacks (#246).
+func (c *Cache) safeCreateFile(path string) (*os.File, error) {
+	// The tmp dir must already exist — created before calling this.
+	// Use O_EXCL to fail if the file exists (prevents symlink following).
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0o644)
+	if err != nil {
+		return nil, fmt.Errorf("create %s: %w", path, err)
+	}
+
+	// Resolve symlinks and verify the file is within the cache root.
+	realPath, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		f.Close()
+		os.Remove(path)
+		return nil, fmt.Errorf("resolve symlinks for %s: %w", path, err)
+	}
+	realRoot, err := filepath.EvalSymlinks(c.rootDir)
+	if err != nil {
+		f.Close()
+		os.Remove(path)
+		return nil, fmt.Errorf("resolve cache root symlinks: %w", err)
+	}
+	if !strings.HasPrefix(realPath, realRoot) {
+		f.Close()
+		os.Remove(path)
+		return nil, fmt.Errorf("file %q resolves outside cache root %q (symlink attack?)", realPath, realRoot)
+	}
+	return f, nil
+}
+
+func (c *Cache) openFileForDownload(path string, flag int) (*os.File, error) {
+	f, err := os.OpenFile(path, flag, 0o644)
+	if err != nil {
+		return nil, err
+	}
+	// Verify the file's real path is within the cache root, preventing
+	// an attacker-controlled symlink from redirecting the write.
+	realPath, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		f.Close()
+		os.Remove(path)
+		return nil, fmt.Errorf("resolve symlinks for %s: %w", path, err)
+	}
+	realRoot, err := filepath.EvalSymlinks(c.rootDir)
+	if err != nil {
+		f.Close()
+		os.Remove(path)
+		return nil, fmt.Errorf("resolve cache root symlinks: %w", err)
+	}
+	if !strings.HasPrefix(realPath, realRoot) {
+		f.Close()
+		os.Remove(path)
+		return nil, fmt.Errorf("file %q resolves outside cache root %q (symlink attack?)", realPath, realRoot)
+	}
+	return f, nil
+}
+
 // Put streams a model file from r into the cache under name, hashing while
 // writing. If expectedSHA is non-empty, the computed SHA-256 must match
 // (case-insensitively) or the upload is discarded with ErrChecksumMismatch.
@@ -372,7 +431,7 @@ func (c *Cache) Put(name string, r io.Reader, expectedSHA string, maxBytes int64
 		return nil, fmt.Errorf("create models dir: %w", err)
 	}
 
-	f, err := os.Create(tmpDest)
+	f, err := c.safeCreateFile(tmpDest)
 	if err != nil {
 		return nil, fmt.Errorf("create upload tmp file: %w", err)
 	}
