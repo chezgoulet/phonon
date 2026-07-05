@@ -171,6 +171,80 @@ func TestListNodesWithGroupFilter(t *testing.T) {
 	}
 }
 
+func TestListNodesInFlight(t *testing.T) {
+	reg := registry.New()
+
+	reg.Register("phone-01", "a", "10.0.0.1")
+	reg.Pair("phone-01")
+	reg.UpdateHeartbeat("phone-01", registry.HealthTelemetry{})
+
+	reg.Register("phone-02", "b", "10.0.0.2")
+	reg.Pair("phone-02")
+	reg.UpdateHeartbeat("phone-02", registry.HealthTelemetry{})
+
+	// Drive the real tracker so phone-01 has two in-flight requests and
+	// phone-02 has none. The dashboard must read this coordinator-owned count.
+	tracker := newInflightTracker()
+	tracker.acquire("phone-01")
+	tracker.acquire("phone-01")
+
+	h := NewClusterHandler(reg, WithInFlightSource(tracker.depth))
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/cluster/nodes", http.NoBody)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	var resp struct {
+		Data []ListNodeResponse `json:"data"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	got := map[string]int{}
+	for _, n := range resp.Data {
+		got[n.DeviceID] = n.InFlight
+	}
+	if got["phone-01"] != 2 {
+		t.Errorf("phone-01 in_flight = %d, want 2", got["phone-01"])
+	}
+	if got["phone-02"] != 0 {
+		t.Errorf("phone-02 in_flight = %d, want 0", got["phone-02"])
+	}
+}
+
+func TestListNodesInFlightNoSource(t *testing.T) {
+	// Without a source wired, in_flight defaults to 0 and the field is present.
+	reg := registry.New()
+	reg.Register("phone-01", "a", "10.0.0.1")
+	reg.Pair("phone-01")
+	reg.UpdateHeartbeat("phone-01", registry.HealthTelemetry{})
+
+	h := NewClusterHandler(reg)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/cluster/nodes", http.NoBody)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	var resp struct {
+		Data []ListNodeResponse `json:"data"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(resp.Data) != 1 || resp.Data[0].InFlight != 0 {
+		t.Errorf("expected single node with in_flight=0, got %+v", resp.Data)
+	}
+}
+
 func TestChatCompletionWithGroupHeader(t *testing.T) {
 	reg := registry.New()
 
