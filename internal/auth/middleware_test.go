@@ -2,10 +2,16 @@ package auth
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
+
+	gojwt "github.com/golang-jwt/jwt/v5"
 )
 
 const testSecureStatus = "secure"
@@ -284,6 +290,50 @@ func TestConfigurationModes(t *testing.T) {
 	if ModeNone != "none" {
 		t.Errorf("expected none, got %s", ModeNone)
 	}
+}
+
+// TestVerifyIDToken_RejectsHS256Forgery ensures that an attacker who knows
+// the RS256 public key cannot forge a token using the HS256 algorithm with
+// that public key as the HMAC secret (#243).
+func TestVerifyIDToken_RejectsHS256Forgery(t *testing.T) {
+	// Generate an RSA key pair for the legitimate server
+	rsaKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("GenerateKey: %v", err)
+	}
+
+	// The public key is public — an attacker knows it
+	rsaPub := &rsaKey.PublicKey
+
+	// Attacker forges a token using HS256 with the public key as the HMAC secret
+	// This is the classic JWT algorithm confusion attack
+	forgedToken := gojwt.NewWithClaims(gojwt.SigningMethodHS256, gojwt.MapClaims{
+		"sub": "forged",
+		"iss": "attacker",
+		"exp": time.Now().Add(24 * time.Hour).Unix(),
+	})
+
+	// Sign with the RSA public key bytes as HMAC secret
+	pubDER, err := x509.MarshalPKIXPublicKey(rsaPub)
+	if err != nil {
+		t.Fatalf("MarshalPKIXPublicKey: %v", err)
+	}
+	tokenStr, err := forgedToken.SignedString(pubDER)
+	if err != nil {
+		t.Fatalf("SignedString: %v", err)
+	}
+
+	// Server tries to verify the token using the RSA public key
+	keyFunc := func(token *gojwt.Token) (interface{}, error) {
+		return rsaPub, nil
+	}
+
+	var claims gojwt.MapClaims
+	err = verifyIDToken(tokenStr, keyFunc, &claims)
+	if err == nil {
+		t.Fatal("HS256 forgery accepted — algorithm confusion vulnerability still open")
+	}
+	t.Logf("HS256 forgery correctly rejected: %v", err)
 }
 
 // ─── PSK edge case tests ─────────────────────────────────────────
