@@ -28,6 +28,7 @@ class HealthReporter(
     private val coordinatorClient: CoordinatorClient,
     private val isModelRunning: () -> Boolean,
     private val activeBackend: () -> String? = { null },
+    private val queueDepth: () -> Int = { 0 },
     private val onTelemetry: ((batteryLevel: Double, batteryTemp: Double, isCharging: Boolean) -> Unit)? = null
 ) {
     private val tag = "HealthReporter"
@@ -114,7 +115,7 @@ class HealthReporter(
             storageFreeGb = Math.round(freeGb * 10.0) / 10.0,
             modelLoaded = if (isModelRunning()) "running" else null,
             modelBackend = if (isModelRunning()) activeBackend() else null,
-            queueDepth = 0,
+            queueDepth = queueDepth(),
             network = "wlan0", // TODO: detect active network interface
             timestamp = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", java.util.Locale.US).apply {
                 timeZone = java.util.TimeZone.getTimeZone("UTC")

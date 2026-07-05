@@ -6,8 +6,6 @@ import com.chezgoulet.phonon.model.ModelManager
 import com.chezgoulet.phonon.models.InferenceRequest
 import com.chezgoulet.phonon.models.InferenceResponse
 import kotlinx.coroutines.*
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import org.json.JSONObject
 import java.io.BufferedReader
 import java.io.InputStreamReader
@@ -54,8 +52,9 @@ class InferenceServer(
     // Max request body in bytes — 1 MB is generous for any chat prompt
     private val maxBodyBytes = 1_048_576
 
-    // Serialize access to the shared LiteRT-LM Engine
-    private val engineMutex = Mutex()
+    // Serializes access to the shared LiteRT-LM Engine and tracks the real
+    // inference queue depth reported in the heartbeat.
+    private val engine = EngineQueue()
 
     // Secondary constructor for backward compatibility
     constructor(context: Context) : this(context, ModelManager(context))
@@ -107,6 +106,13 @@ class InferenceServer(
      * Port being listened on.
      */
     val port: Int get() = serverSocket?.localPort ?: listenPort
+
+    /**
+     * Current inference queue depth — the number of requests holding or
+     * waiting on the shared engine. This is the phone's real load signal,
+     * reported to the coordinator in each heartbeat.
+     */
+    val queueDepth: Int get() = engine.depth
 
     companion object {
         const val DEFAULT_PORT = 9876
@@ -292,7 +298,7 @@ class InferenceServer(
             val prompt = buildPrompt(request)
 
             // Serialize access to the shared LiteRT-LM Engine
-            val text = engineMutex.withLock {
+            val text = engine.withEngine {
                 modelManager.generate(prompt)
             }
 
@@ -363,8 +369,8 @@ class InferenceServer(
      * ~10ms intervals.
      *
      * TODO(litert-lm): switch to the SDK's incremental generation API
-     * (token callback / async stream) as soon as one ships, and hold
-     * engineMutex across the whole generation instead of pre-generating.
+     * (token callback / async stream) as soon as one ships, and hold the
+     * engine lock across the whole generation instead of pre-generating.
      */
     private suspend fun handleStreamingInference(writer: java.io.OutputStream, request: InferenceRequest) = coroutineScope {
         val prompt = buildPrompt(request)
@@ -374,7 +380,7 @@ class InferenceServer(
         sendChunkedHeader(writer, "text/event-stream")
 
         val generation = async(Dispatchers.Default) {
-            engineMutex.withLock {
+            engine.withEngine {
                 modelManager.generate(prompt)
             }
         }
