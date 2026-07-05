@@ -103,6 +103,13 @@ type PhoneInferenceRequest struct {
 	// body) so the phone can verify the request came from its paired
 	// coordinator. Populated via the WithDeviceTokenLookup option.
 	AuthToken string `json:"-"`
+
+	// RequestContext is the client's HTTP request context, threaded through
+	// so a client disconnect cancels the outbound phone call and frees the
+	// inference slot immediately rather than waiting for the full timeout.
+	// Populated by handleChatCompletion / handleStreamingChatCompletion.
+	// Nil-safe: proxies fall back to context.Background() when unset.
+	RequestContext context.Context `json:"-"`
 }
 
 // PhoneInferenceResponse is returned by the phone after inference.
@@ -520,6 +527,7 @@ func (h *OpenAIHandler) handleChatCompletion(w http.ResponseWriter, r *http.Requ
 			TimeoutMs:   int(timeout / time.Millisecond),
 			TraceID:     traceID,
 			AuthToken:   authToken,
+			RequestContext: r.Context(),
 		})
 		// The request to this phone is done (success or failure): free the slot.
 		release()
@@ -789,7 +797,10 @@ func (h *OpenAIHandler) defaultInferenceProxy(phoneURL string, req PhoneInferenc
 		return nil, fmt.Errorf("marshal inference request: %w", err)
 	}
 
-	ctx := context.Background()
+	ctx := req.RequestContext
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if req.TimeoutMs > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, time.Duration(req.TimeoutMs)*time.Millisecond)
@@ -983,6 +994,7 @@ func (h *OpenAIHandler) handleStreamingChatCompletion(w http.ResponseWriter, r *
 			TimeoutMs:   int(timeout / time.Millisecond),
 			TraceID:     traceID,
 			AuthToken:   authToken,
+			RequestContext: r.Context(),
 		}, func(content string) {
 			if skip > 0 {
 				if len(content) <= skip {
@@ -1085,7 +1097,10 @@ func (h *OpenAIHandler) defaultStreamInferenceProxy(phoneURL string, req PhoneIn
 		return "", fmt.Errorf("marshal inference request: %w", err)
 	}
 
-	ctx := context.Background()
+	ctx := req.RequestContext
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if req.TimeoutMs > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, time.Duration(req.TimeoutMs)*time.Millisecond)
