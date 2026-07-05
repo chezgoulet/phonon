@@ -20,6 +20,17 @@ type SidecarHandler struct {
 	// deviceAuth enforces per-device token auth for paired devices.
 	// Nil disables enforcement (tests only).
 	deviceAuth DeviceAuthorizer
+
+	// groupMap maps device_id → group name, populated from config groups.
+	// When non-nil, register and heartbeat handlers call reg.AssignToGroup
+	// so pool-scoped routing and health counts actually work.
+	groupMap map[string]string
+
+	// maxUnpaired caps the number of unpaired devices in the registry.
+	// When exceeded, handleRegister rejects new registrations with 429
+	// to prevent memory-growth DoS from unbounded sidecar registration.
+	// 0 means unlimited (default, for backward compatibility).
+	maxUnpaired int
 }
 
 // NewSidecarHandler creates a new handler with the given node registry.
@@ -39,6 +50,22 @@ func (h *SidecarHandler) SetCoordinatorKey(pubKeyHex string) {
 // devices on heartbeat and model-status endpoints.
 func (h *SidecarHandler) SetDeviceAuthorizer(a DeviceAuthorizer) {
 	h.deviceAuth = a
+}
+
+// SetGroupMapping sets the device_id → group name mapping derived from
+// config groups. When set, every register and heartbeat handler call
+// reg.AssignToGroup so pool-scoped routing (GetHealthyByGroup) and the
+// X-Phonon-Group header reflect actual groups instead of empty strings.
+func (h *SidecarHandler) SetGroupMapping(m map[string]string) {
+	h.groupMap = m
+}
+
+// SetMaxUnpaired caps the number of unpaired devices the registry will
+// accept. When exceeded, new registrations return 429. 0 means unlimited.
+// Set this to, e.g., 2× the configured phone count to allow for pairing
+// churn without opening a memory-DoS vector.
+func (h *SidecarHandler) SetMaxUnpaired(n int) {
+	h.maxUnpaired = n
 }
 
 // RegisterRoutes registers all sidecar REST endpoints on the given mux.
@@ -78,6 +105,29 @@ func (h *SidecarHandler) handleRegister(w http.ResponseWriter, r *http.Request) 
 	if req.DeviceID == "" {
 		writeError(w, http.StatusBadRequest, "device_id is required")
 		return
+	}
+
+	// Gate: if maxUnpaired is set, reject new registrations for unknown
+	// devices when the registry has too many unpaired nodes. Already-known
+	// devices always pass through (they're re-registering).
+	if h.maxUnpaired > 0 {
+		if _, exists := h.reg.Get(req.DeviceID); !exists {
+			unpaired := 0
+			for _, n := range h.reg.List() {
+				if n.State == registry.NodeStateUnpaired {
+					unpaired++
+				}
+			}
+			if unpaired >= h.maxUnpaired {
+				h.log.Warn("register rejected: too many unpaired devices",
+					"unpaired", unpaired, "max", h.maxUnpaired)
+				writeJSON(w, http.StatusTooManyRequests, map[string]any{
+					"error":   "too many unpaired devices",
+					"message": "pair existing devices before registering new ones",
+				})
+				return
+			}
+		}
 	}
 
 	// Auto-generate name: device_model + last 4 of device_id
@@ -128,7 +178,25 @@ func (h *SidecarHandler) handleRegister(w http.ResponseWriter, r *http.Request) 
 
 	h.log.Info("sidecar registered", "device_id", req.DeviceID, "name", autoName,
 		"pairing_required", resp.PairingRequired)
+	h.assignGroup(req.DeviceID)
 	writeJSON(w, http.StatusCreated, resp)
+}
+
+// assignGroup looks up the device ID in the group mapping and assigns it
+// if found. Best-effort (logs failures, never returns an error) so grouping
+// is additive and never blocks registration or heartbeat processing.
+func (h *SidecarHandler) assignGroup(deviceID string) {
+	if h.groupMap == nil {
+		return
+	}
+	group, ok := h.groupMap[deviceID]
+	if !ok || group == "" {
+		return
+	}
+	if err := h.reg.AssignToGroup(deviceID, group); err != nil {
+		h.log.Warn("group assignment failed",
+			"device_id", deviceID, "group", group, "error", err)
+	}
 }
 
 // --- Heartbeat ---
@@ -194,6 +262,11 @@ func (h *SidecarHandler) handleHeartbeat(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusNotFound, err.Error())
 		return
 	}
+
+	// Re-apply group assignment on heartbeat so nodes that register before
+	// the handler has its group mapping (e.g. early mDNS discovery) get their
+	// group on the next heartbeat cycle.
+	h.assignGroup(req.DeviceID)
 
 	// Persist model status from heartbeat if present
 	if req.Model != nil && req.Model.Loaded != "" {

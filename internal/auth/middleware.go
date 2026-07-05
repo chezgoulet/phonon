@@ -273,7 +273,7 @@ func extractBearerToken(r *http.Request) (string, error) {
 // token verification in non-OIDC modes or for testing.
 func verifyIDToken(tokenStr string, keyFunc gojwt.Keyfunc, claims interface{}) error {
 	token, err := gojwt.Parse(tokenStr, keyFunc,
-		gojwt.WithValidMethods([]string{"RS256", "RS384", "RS512", "ES256", "ES384", "ES512", "HS256", "HS384", "HS512"}),
+		gojwt.WithValidMethods([]string{"RS256", "RS384", "RS512", "ES256", "ES384", "ES512"}),
 		gojwt.WithLeeway(30*time.Second),
 	)
 	if err != nil {

@@ -378,6 +378,12 @@ class InferenceServer(
      * TODO(litert-lm): switch to the SDK's incremental generation API
      * (token callback / async stream) as soon as one ships, and hold the
      * engine lock across the whole generation instead of pre-generating.
+     *
+     * UPDATE 2026-Q3: LiteRT-LM now ships sendMessageAsync() returning
+     * kotlinx.coroutines.flow.Flow for incremental token delivery.
+     * See https://developers.google.com/edge/litert-lm/android and
+     * https://github.com/google-ai-edge/LiteRT-LM/blob/main/docs/api/kotlin/getting_started.md
+     * Tracked in #XXX — wire this in the next sidecar sprint.
      */
     private suspend fun handleStreamingInference(writer: java.io.OutputStream, request: InferenceRequest) = coroutineScope {
         val startTime = System.currentTimeMillis()

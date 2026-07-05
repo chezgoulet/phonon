@@ -219,10 +219,31 @@ func NewManager(coordKeyPath string, store Store) (*Manager, error) {
 // StartPairing initiates a pairing request for a device.
 // Returns the 6-digit code the device should display to the user.
 // The code expires after CodeExpiry.
+// Returns an error if a pending pairing already exists for this device ID
+// (the operator must explicitly cancel the old one or wait for it to expire)
+// to prevent pubkey/counter overwrite attacks (#244).
 func (m *Manager) StartPairing(deviceID, deviceModel, ipAddress string, devicePubKey []byte) (string, error) {
 	if len(devicePubKey) != ed25519.PublicKeySize {
 		return "", fmt.Errorf("invalid device public key length: got %d, want %d", len(devicePubKey), ed25519.PublicKeySize)
 	}
+
+	// Reject if already paired
+	m.mu.RLock()
+	if _, ok := m.paired[deviceID]; ok {
+		m.mu.RUnlock()
+		return "", fmt.Errorf("device %q is already paired", deviceID)
+	}
+	m.mu.RUnlock()
+
+	// Check for existing pending pairing under write lock to prevent
+	// race between two concurrent StartPairing calls for the same device.
+	m.mu.Lock()
+	if p, ok := m.pending[deviceID]; ok && !p.Expired() {
+		m.mu.Unlock()
+		return "", fmt.Errorf("device %q already has a pending pairing (expires at %s)",
+			deviceID, p.ExpiresAt.Format(time.RFC3339))
+	}
+	m.mu.Unlock()
 
 	code, err := generateCode()
 	if err != nil {
