@@ -276,6 +276,7 @@ class PhononService : Service() {
             coordinatorClient = coordinatorClient,
             isModelRunning = { modelManager.isRunning() },
             activeBackend = { modelManager.currentBackend() },
+            queueDepth = { inferenceServer.queueDepth },
             onTelemetry = { level, temp, charging ->
                 batteryLevel = level
                 batteryTempC = temp
