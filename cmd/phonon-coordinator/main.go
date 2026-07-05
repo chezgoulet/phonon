@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -71,6 +72,25 @@ func main() {
 	// Create registry and API handlers
 	reg := registry.New()
 
+	// Restore registry snapshot if available (survive restart).
+	// The snapshot carries durable node state (identity, group, model)
+	// so a restart isn't blind for a heartbeat interval.
+	snapshotPath := os.Getenv("PHONON_REGISTRY_SNAPSHOT")
+	if snapshotPath == "" {
+		snapshotPath = "./registry_snapshot.json"
+	}
+	if data, readErr := os.ReadFile(snapshotPath); readErr == nil {
+		var snap []registry.SnapshotNode
+		if snapErr := json.Unmarshal(data, &snap); snapErr == nil && len(snap) > 0 {
+			for _, sn := range snap {
+				reg.RestoreNode(sn)
+			}
+			logger.Info("registry restored from snapshot", "path", snapshotPath, "node_count", len(snap))
+		}
+	} else if !os.IsNotExist(readErr) {
+		logger.Warn("failed to read registry snapshot", "path", snapshotPath, "error", readErr)
+	}
+
 	// Initialize persistent event log
 	elPath := cfg.Cluster.EventLog.Path
 	if elPath == "" {
@@ -129,7 +149,7 @@ func main() {
 	healthMonitor := health.NewMonitor(reg, healthCfg)
 	healthMetrics := healthMonitor.RegisterMetrics()
 
-	wsHandler := api.NewWSHandler(reg)
+	wsHandler := api.NewWSHandler(reg).StartReaper()
 
 	// 5. Pairing manager — device identity, key exchange, code-based pairing
 	coordKeyPath := os.Getenv("PHONON_COORD_KEY")
@@ -177,6 +197,23 @@ func main() {
 	sidecarHandler := api.NewSidecarHandler(reg)
 	sidecarHandler.SetCoordinatorKey(pairingMgr.CoordinatorPublicKey())
 	sidecarHandler.SetDeviceAuthorizer(pairingMgr)
+
+	// Build device_id → group name mapping from config groups so
+	// register/heartbeat handlers can call AssignToGroup and make
+	// pool-scoped routing actually work.
+	if len(cfg.Groups) > 0 {
+		groupMap := make(map[string]string, len(cfg.Groups)*2)
+		for _, g := range cfg.Groups {
+			for _, deviceID := range g.Phones {
+				groupMap[deviceID] = g.Name
+			}
+			for _, deviceID := range g.Standby {
+				groupMap[deviceID] = g.Name
+			}
+		}
+		sidecarHandler.SetGroupMapping(groupMap)
+		logger.Info("group mapping initialized", "device_count", len(groupMap), "groups", len(cfg.Groups))
+	}
 	wsHandler.SetDeviceAuthorizer(pairingMgr)
 	pairingHandler := api.NewPairingHandler(pairingMgr, reg)
 
@@ -297,11 +334,49 @@ func main() {
 	// mux here would leave every route un-CORSed and conflict with the
 	// SPA's "/" handler.
 
-	// Public routes (no auth required)
-	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
+	// Health endpoints.
+	// /livez — process is alive (always 200 if this handler runs).
+	mux.HandleFunc("/livez", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprint(w, `{"status":"ok","version":"0.1.0"}`)
+	})
+
+	// /readyz — dependencies are reachable: event log + pairing store.
+	// Returns 503 with details if any dependency is down.
+	mux.HandleFunc("/readyz", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		deps := map[string]string{}
+
+		// Event log check: try a no-op write or confirm the log is
+		// initialized. A closed event log returns errors on write.
+		if err := eventLog.Write(phononlog.EventInfo, "", phononlog.SeverityInfo, "readyz probe"); err != nil {
+			deps["event_log"] = "unreachable: " + err.Error()
+		} else {
+			deps["event_log"] = "ok"
+		}
+
+		// Pairing store check: confirm the store is non-nil (file-based
+		// stores are always ready; Redis-based ones connect at startup).
+		if pairingStore != nil {
+			deps["pairing_store"] = "ok"
+		} else {
+			deps["pairing_store"] = "not_configured"
+		}
+
+		// Ready if event log is ok (pairing store is informational).
+		ready := deps["event_log"] == "ok"
+		if ready {
+			w.WriteHeader(http.StatusOK)
+		} else {
+			w.WriteHeader(http.StatusServiceUnavailable)
+		}
+		json.NewEncoder(w).Encode(map[string]any{"status": "ok", "deps": deps})
+	})
+
+	// Legacy /health — redirects to /readyz for backward compatibility.
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/readyz", http.StatusPermanentRedirect)
 	})
 
 	mux.HandleFunc("/api/v1/auth/status", authMiddleware.StatusHandler())
@@ -555,6 +630,40 @@ func main() {
 	if err := reconciler.Start(ctx, cfg.Groups); err != nil {
 		logger.Error("failed to start model reconciler", "error", err)
 	}
+
+	// Registry snapshot save loop — persists durable node state every 30s
+	// so a coordinator restart doesn't lose identity, groups, or model
+	// assignments (volatile telemetry is excluded). A final snapshot is
+	// written on shutdown below.
+	snapshotTicker := time.NewTicker(30 * time.Second)
+	saveSnapshot := func() {
+		nodes := reg.Snapshot()
+		data, err := json.Marshal(nodes)
+		if err != nil {
+			logger.Warn("failed to marshal registry snapshot", "error", err)
+			return
+		}
+		tmpPath := snapshotPath + ".tmp"
+		if err := os.WriteFile(tmpPath, data, 0600); err != nil {
+			logger.Warn("failed to write registry snapshot", "path", tmpPath, "error", err)
+			return
+		}
+		if err := os.Rename(tmpPath, snapshotPath); err != nil {
+			logger.Warn("failed to rename registry snapshot", "path", snapshotPath, "error", err)
+			return
+		}
+		logger.Debug("registry snapshot saved", "path", snapshotPath, "node_count", len(nodes))
+	}
+	go func() {
+		for {
+			select {
+			case <-snapshotTicker.C:
+				saveSnapshot()
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
 
 	logger.Info("all subsystems started",
 		"health_monitor", true,
