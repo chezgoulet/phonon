@@ -193,14 +193,19 @@ func main() {
 		api.WithEventLog(eventLog),
 		api.WithMetrics(healthMonitor.Metrics()),
 	)
-	clusterHandler := api.NewClusterHandler(reg)
+	clusterHandler := api.NewClusterHandler(reg,
+		api.WithInFlightSource(openaiHandler.InFlightDepth),
+	)
+
+	// Publish real in-flight concurrency to the queue-depth Prometheus gauge
+	// instead of a hardcoded 0.
+	healthMonitor.SetInFlightSource(openaiHandler.InFlightDepth)
 
 	// The inference proxy now routes to phones via HTTP on the default
 	// sidecar port (9876). The phone must be running the Phonon sidecar
 	// with an active model load for inference to succeed.
 	logger.Info("inference proxy ready — routing to phones via HTTP",
 		"component", "openai")
-
 
 	// Create auth middleware
 	// Resolve PSK: env var overrides config file for security (avoids
@@ -672,5 +677,3 @@ func serveUI(mux *http.ServeMux, log *slog.Logger) {
 
 	log.Info("UI served at /ui/")
 }
-
-

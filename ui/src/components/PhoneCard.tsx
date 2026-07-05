@@ -79,10 +79,10 @@ export default function PhoneCard({ node, onClick }: Props) {
           <span>{Math.round(t.thermal_temp_c)}°C</span>
         </span>
 
-        {/* Queue depth */}
-        {t.queue_depth > 0 && (
-          <span className="text-phonon-muted" title="Pending requests">
-            📨 {t.queue_depth}
+        {/* In-flight requests (coordinator's real-time count) */}
+        {node.in_flight > 0 && (
+          <span className="text-phonon-muted" title="In-flight requests">
+            📨 {node.in_flight}
           </span>
         )}
       </div>

@@ -15,6 +15,7 @@ export interface ClusterNode {
   state: "online" | "offline" | "paired" | "unpaired";
   ip_address: string;
   telemetry: NodeTelemetry;
+  in_flight: number; // coordinator's real-time in-flight request count (the true queue signal)
   model_loaded: string;
   backend: string;
   uptime: string;

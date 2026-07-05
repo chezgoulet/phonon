@@ -111,6 +111,11 @@ type Monitor struct {
 	// registry) on the monitor's 5-second loop.
 	checkHooks []func()
 
+	// inFlightDepth returns the coordinator's own in-flight request count for
+	// a device — the real load signal published to the queue-depth gauge.
+	// Nil when no source is wired (gauge falls back to 0).
+	inFlightDepth func(deviceID string) int
+
 	// probeFn performs one sidecar health probe. Overridable in tests.
 	probeFn func(ctx context.Context, url string) error
 
@@ -147,6 +152,15 @@ func (m *Monitor) AddAction(a Action) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.actions = append(m.actions, a)
+}
+
+// SetInFlightSource wires the coordinator's per-device in-flight request count
+// (e.g. OpenAIHandler.InFlightDepth) into the queue-depth Prometheus gauge, so
+// it reports real concurrency instead of a hardcoded 0.
+func (m *Monitor) SetInFlightSource(fn func(deviceID string) int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.inFlightDepth = fn
 }
 
 // AddCheckHook registers a function invoked at the end of every check
@@ -478,13 +492,21 @@ func (m *Monitor) updateMetrics() {
 	m.metrics.NodesOnline.Reset()
 	m.metrics.NodesOffline.Reset()
 
+	m.mu.Lock()
+	inFlightDepth := m.inFlightDepth
+	m.mu.Unlock()
+
 	totalOverheating := 0
 
 	for i := range nodes {
 		n := &nodes[i]
 		m.metrics.BatteryLevel.WithLabelValues(n.DeviceID).Set(n.Telemetry.BatteryLevel)
 		m.metrics.ThermalTempC.WithLabelValues(n.DeviceID).Set(n.Telemetry.ThermalTempC)
-		m.metrics.QueueDepth.WithLabelValues(n.DeviceID).Set(0)
+		queueDepth := 0.0
+		if inFlightDepth != nil {
+			queueDepth = float64(inFlightDepth(n.DeviceID))
+		}
+		m.metrics.QueueDepth.WithLabelValues(n.DeviceID).Set(queueDepth)
 
 		if n.State == registry.NodeStateOnline && n.ExcludeReason == reasonOverheating {
 			totalOverheating++

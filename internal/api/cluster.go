@@ -15,14 +15,32 @@ const statusDegraded = "degraded"
 type ClusterHandler struct {
 	reg *registry.Registry
 	log *slog.Logger
+
+	// inFlight returns the coordinator's own in-flight request count for a
+	// device (the real-time load signal). Nil when no source is wired.
+	inFlight func(deviceID string) int
+}
+
+// ClusterOption configures a ClusterHandler.
+type ClusterOption func(*ClusterHandler)
+
+// WithInFlightSource wires the coordinator's per-device in-flight request count
+// (e.g. OpenAIHandler.InFlightDepth) into the node list so the dashboard can
+// show real concurrency instead of the phone-reported queue depth.
+func WithInFlightSource(fn func(deviceID string) int) ClusterOption {
+	return func(h *ClusterHandler) { h.inFlight = fn }
 }
 
 // NewClusterHandler creates a cluster health handler.
-func NewClusterHandler(reg *registry.Registry) *ClusterHandler {
-	return &ClusterHandler{
+func NewClusterHandler(reg *registry.Registry, opts ...ClusterOption) *ClusterHandler {
+	h := &ClusterHandler{
 		reg: reg,
 		log: slog.With("component", "cluster"),
 	}
+	for _, opt := range opts {
+		opt(h)
+	}
+	return h
 }
 
 // RegisterRoutes adds cluster health endpoints to the given mux.
@@ -103,6 +121,7 @@ type ListNodeResponse struct {
 	State        string                   `json:"state"`
 	IPAddress    string                   `json:"ip_address"`
 	Telemetry    registry.HealthTelemetry `json:"telemetry"`
+	InFlight     int                      `json:"in_flight"` // coordinator's real-time in-flight request count
 	ModelLoaded  string                   `json:"model_loaded,omitempty"`
 	Backend      string                   `json:"backend,omitempty"` // active accelerator: npu/gpu/cpu
 	Uptime       string                   `json:"uptime,omitempty"`
@@ -144,6 +163,11 @@ func (h *ClusterHandler) handleListNodes(w http.ResponseWriter, r *http.Request)
 			uptime = time.Since(node.RegisteredAt).Truncate(time.Second).String()
 		}
 
+		inFlight := 0
+		if h.inFlight != nil {
+			inFlight = h.inFlight(node.DeviceID)
+		}
+
 		items = append(items, ListNodeResponse{
 			DeviceID:     node.DeviceID,
 			Name:         node.Name,
@@ -152,6 +176,7 @@ func (h *ClusterHandler) handleListNodes(w http.ResponseWriter, r *http.Request)
 			State:        string(node.State),
 			IPAddress:    node.IPAddress,
 			Telemetry:    node.Telemetry,
+			InFlight:     inFlight,
 			ModelLoaded:  modelLoaded,
 			Backend:      node.ModelStatus.Backend,
 			Uptime:       uptime,

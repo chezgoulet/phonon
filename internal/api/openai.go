@@ -184,6 +184,15 @@ func NewOpenAIHandler(reg *registry.Registry, opts ...OpenAIOption) *OpenAIHandl
 	return h
 }
 
+// InFlightDepth returns the coordinator's own count of in-flight inference
+// requests currently dispatched to a device but not yet completed. This is the
+// real, real-time load signal — unlike the phone-reported queue depth in
+// HealthTelemetry, which the sidecar historically hardcodes to 0 and which lags
+// a heartbeat behind reality. Surfaced to the cluster API / dashboard.
+func (h *OpenAIHandler) InFlightDepth(deviceID string) int {
+	return h.inflight.depth(deviceID)
+}
+
 // OpenAIOption configures an OpenAIHandler.
 type OpenAIOption func(*OpenAIHandler)
 

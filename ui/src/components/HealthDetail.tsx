@@ -44,7 +44,7 @@ export default function HealthDetail({ node, onBack }: Props) {
     {
       battery: node.telemetry.battery_level,
       temp: node.telemetry.thermal_temp_c,
-      queue: node.telemetry.queue_depth,
+      queue: node.in_flight,
     },
   ]);
   const deviceId = node.device_id;
@@ -68,7 +68,7 @@ export default function HealthDetail({ node, onBack }: Props) {
             {
               battery: fresh.telemetry.battery_level,
               temp: fresh.telemetry.thermal_temp_c,
-              queue: fresh.telemetry.queue_depth,
+              queue: fresh.in_flight,
             },
           ];
           return next.length > HISTORY_MAX ? next.slice(next.length - HISTORY_MAX) : next;
@@ -122,9 +122,9 @@ export default function HealthDetail({ node, onBack }: Props) {
         rangeMax: 60,
       },
       {
-        label: "Queue Depth",
-        value: String(t.queue_depth),
-        detail: "Pending requests · last 5 min",
+        label: "In-Flight",
+        value: String(live.in_flight),
+        detail: "Active requests (coordinator) · last 5 min",
         bar: 0, // no bar for queue
         barColor: "",
         series: queueSeries,
@@ -133,7 +133,7 @@ export default function HealthDetail({ node, onBack }: Props) {
         rangeMax: undefined,
       },
     ],
-    [t, batterySeries, tempSeries, queueSeries]
+    [t, live.in_flight, batterySeries, tempSeries, queueSeries]
   );
 
   return (
