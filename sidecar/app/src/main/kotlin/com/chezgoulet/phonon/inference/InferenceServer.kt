@@ -33,7 +33,13 @@ class InferenceServer(
      * inference is refused — the phone only takes inference orders from
      * its paired coordinator.
      */
-    private val tokenProvider: () -> String? = { null }
+    private val tokenProvider: () -> String? = { null },
+    /**
+     * Invoked once each inference finishes generating, with the estimated
+     * completion-token count and the generation duration (ms). Drives the
+     * on-phone tokens/sec viz telemetry. No-op by default.
+     */
+    private val onInferenceComplete: (tokens: Int, durationMs: Long) -> Unit = { _, _ -> }
 ) {
     private val tag = "InferenceServer"
     private var serverSocket: ServerSocket? = null
@@ -304,6 +310,7 @@ class InferenceServer(
 
             val elapsed = (System.currentTimeMillis() - startTime).toInt()
             val estimatedTokens = text.length / 4 // rough estimate
+            onInferenceComplete(estimatedTokens, elapsed.toLong())
 
             val response = InferenceResponse(
                 text = text,
@@ -373,6 +380,7 @@ class InferenceServer(
      * engine lock across the whole generation instead of pre-generating.
      */
     private suspend fun handleStreamingInference(writer: java.io.OutputStream, request: InferenceRequest) = coroutineScope {
+        val startTime = System.currentTimeMillis()
         val prompt = buildPrompt(request)
 
         // Commit to SSE before generation so the coordinator sees bytes
@@ -397,6 +405,10 @@ class InferenceServer(
                     sendChunk(writer, ": keepalive\n\n")
                 }
             }
+
+            // Generation finished — report throughput before replaying deltas,
+            // so tokens/sec reflects real generation time, not the ~10ms replay.
+            onInferenceComplete(text.length / 4, System.currentTimeMillis() - startTime)
 
             // Emit word-boundary deltas at ~10ms intervals.
             for (piece in splitDeltas(text)) {

@@ -229,7 +229,12 @@ class PhononService : Service() {
         // Inference server — local HTTP server backed by LiteRT-LM.
         // Refuses all inference until paired; afterwards only requests
         // carrying the coordinator's token are served.
-        inferenceServer = InferenceServer(this, modelManager) { pairingClient?.authToken }
+        inferenceServer = InferenceServer(
+            context = this,
+            modelManager = modelManager,
+            tokenProvider = { pairingClient?.authToken },
+            onInferenceComplete = { tokens, durationMs -> reportInference(tokens, durationMs) }
+        )
         inferenceServer.start()
 
         // Coordinator client — REST + WebSocket
@@ -294,13 +299,17 @@ class PhononService : Service() {
     private fun startVizStateLoop() {
         vizStateJob = scope.launch {
             while (isActive) {
-                // Update tokens-per-second from inference throughput
+                // Poll the inference server's real load: queueDepth is the
+                // number of requests holding/waiting on the engine, and we are
+                // "processing" whenever at least one is in flight. These drive
+                // the viz packs (LcarsPack, CyberHudPack, …).
+                queueDepth = inferenceServer.queueDepth
+                isProcessing = queueDepth > 0
+
+                // Update tokens-per-second from the last completed inference.
                 if (isProcessing && lastInferenceTimeMs > 0) {
                     val elapsed = System.currentTimeMillis() - lastInferenceTimeMs
-                    if (elapsed > 0) {
-                        lastTokensPerSecond = (lastInferenceTokens.toFloat() / elapsed * 1000f)
-                            .coerceAtMost(200f) // sanity cap
-                    }
+                    lastTokensPerSecond = tokensPerSecond(lastInferenceTokens, elapsed)
                 } else if (!isProcessing) {
                     lastTokensPerSecond = 0f
                 }
@@ -362,5 +371,19 @@ class PhononService : Service() {
     companion object {
         private const val CHANNEL_ID = "phonon_worker_status"
         private const val NOTIFICATION_ID = 1001
+
+        // Sanity cap on the displayed tokens/sec, guarding against spikes from
+        // tiny elapsed durations.
+        const val CAP_TOKENS_PER_SEC = 200f
+
+        /**
+         * Tokens/sec for a completed inference of [tokens] tokens that took
+         * [elapsedMs] ms, capped at [CAP_TOKENS_PER_SEC]. Returns 0 for a
+         * non-positive duration. Pure and unit-testable (no Android deps).
+         */
+        fun tokensPerSecond(tokens: Int, elapsedMs: Long): Float {
+            if (elapsedMs <= 0L) return 0f
+            return (tokens.toFloat() / elapsedMs * 1000f).coerceAtMost(CAP_TOKENS_PER_SEC)
+        }
     }
 }
