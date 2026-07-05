@@ -27,9 +27,24 @@ const (
 	// considering the connection dead.
 	wsPongWait = 30 * time.Second
 
+	// wsPingInterval is how often the coordinator sends a ping to keep
+	// the connection alive. Set to half of wsPongWait so at least one
+	// ping-pong exchange fits within the deadline window.
+	wsPingInterval = 15 * time.Second
+
 	// wsWriteTimeout is applied to each WriteJSON call to prevent a slow
 	// consumer from stalling the handler while holding mu.
 	wsWriteTimeout = 10 * time.Second
+
+	// pendingCommandTTL is how long a command can sit in "sent" or
+	// "accepted" status before being automatically reaped. If the
+	// phone reconnects, unacknowledged commands are re-sent anyway,
+	// so stale entries just leak memory.
+	pendingCommandTTL = 5 * time.Minute
+
+	// pendingReapInterval is how often the cleanup loop checks for
+	// stale pending commands.
+	pendingReapInterval = 1 * time.Minute
 )
 
 // Command types sent from coordinator to sidecar.
@@ -260,9 +275,10 @@ func (h *WSHandler) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	dc := &deviceConn{conn: conn, deviceID: deviceID}
 
-	// Enforce read limits and deadline — no anonymous pong handler needed
-	// because the gorilla/websocket library fires pongs automatically for
-	// every received pong frame; we just need to reset the deadline.
+	// Enforce read limits and deadline. The pong handler resets the read
+	// deadline on every received pong, and a ping ticker sends periodic
+	// pings so the phone doesn't drop the connection after wsPongWait
+	// of silence.
 	conn.SetReadLimit(wsReadLimit)
 	conn.SetPongHandler(func(string) error {
 		return conn.SetReadDeadline(time.Now().Add(wsPongWait))
@@ -270,6 +286,27 @@ func (h *WSHandler) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	if err := conn.SetReadDeadline(time.Now().Add(wsPongWait)); err != nil {
 		h.log.Warn("failed to set ws read deadline", "device_id", deviceID, "error", err)
 	}
+
+	// Background ping ticker keeps the connection alive. If the phone
+	// doesn't respond within wsPongWait the read deadline expires and
+	// ReadMessage in the main loop returns an error, which triggers
+	// the deferred cleanup.
+	pingStop := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(wsPingInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				if err := conn.WriteControl(websocket.PingMessage, []byte{}, time.Now().Add(wsWriteTimeout)); err != nil {
+					// Connection is dead — the read loop will notice imminently.
+					return
+				}
+			case <-pingStop:
+				return
+			}
+		}
+	}()
 
 	h.mu.Lock()
 	// Close any stale connection for this device
@@ -290,6 +327,7 @@ func (h *WSHandler) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 			delete(h.devices, deviceID)
 		}
 		h.mu.Unlock()
+		close(pingStop)
 		conn.Close()
 		h.log.Info("websocket disconnected", "device_id", deviceID)
 	}()
@@ -563,4 +601,42 @@ func (h *WSHandler) ConnectedDevices() []string {
 		devices = append(devices, id)
 	}
 	return devices
+}
+
+// reapStalePending removes pending commands whose status is "sent" or
+// "accepted" and whose SentAt exceeds pendingCommandTTL. If the phone
+// reconnects later, unacknowledged commands are re-sent by resendPending,
+// so stale entries just waste memory. Must not be called with mu held.
+func (h *WSHandler) reapStalePending() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	deadline := time.Now().Add(-pendingCommandTTL)
+	for deviceID, cmds := range h.pending {
+		for cmdID, pc := range cmds {
+			if (pc.Status == "sent" || pc.Status == AckAccepted) && pc.SentAt.Before(deadline) {
+				delete(cmds, cmdID)
+				h.log.Debug("reaped stale pending command",
+					"device_id", deviceID, "command_id", cmdID,
+					"status", pc.Status, "age", time.Since(pc.SentAt).Round(time.Second))
+			}
+		}
+		// Clean up empty device maps
+		if len(cmds) == 0 {
+			delete(h.pending, deviceID)
+		}
+	}
+}
+
+// StartReaper starts a background goroutine that periodically reaps stale
+// pending commands. Call StopReaper to terminate it.
+func (h *WSHandler) StartReaper() *WSHandler {
+	go func() {
+		ticker := time.NewTicker(pendingReapInterval)
+		defer ticker.Stop()
+		for range ticker.C {
+			h.reapStalePending()
+		}
+	}()
+	return h
 }
