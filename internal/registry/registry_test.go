@@ -508,3 +508,40 @@ func TestListOnline_Empty(t *testing.T) {
 		t.Errorf("expected 0 online nodes, got %d", len(online))
 	}
 }
+
+func TestSetCircuitState(t *testing.T) {
+	reg := New()
+	reg.Register("d1", "name", "")
+
+	// Set breaker state to open
+	if err := reg.SetCircuitState("d1", BreakerOpen); err != nil {
+		t.Fatalf("SetCircuitState error: %v", err)
+	}
+	node, _ := reg.Get("d1")
+	if node.Telemetry.CircuitState != BreakerOpen {
+		t.Errorf("expected CircuitState BreakerOpen, got %s", node.Telemetry.CircuitState)
+	}
+
+	// Update to half-open
+	if err := reg.SetCircuitState("d1", BreakerHalfOpen); err != nil {
+		t.Fatalf("SetCircuitState error: %v", err)
+	}
+	node, _ = reg.Get("d1")
+	if node.Telemetry.CircuitState != BreakerHalfOpen {
+		t.Errorf("expected CircuitState BreakerHalfOpen, got %s", node.Telemetry.CircuitState)
+	}
+
+	// Clear by setting empty value
+	if err := reg.SetCircuitState("d1", ""); err != nil {
+		t.Fatalf("SetCircuitState (clear) error: %v", err)
+	}
+	node, _ = reg.Get("d1")
+	if node.Telemetry.CircuitState != "" {
+		t.Errorf("expected empty CircuitState, got %s", node.Telemetry.CircuitState)
+	}
+
+	// Nonexistent node
+	if err := reg.SetCircuitState("nonexistent", BreakerClosed); err == nil {
+		t.Error("expected error for nonexistent device")
+	}
+}

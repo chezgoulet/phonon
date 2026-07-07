@@ -283,6 +283,15 @@ func (r *Registry) SetModelStatus(deviceID string, status ModelStatus) error {
 	})
 }
 
+// SetCircuitState records the inference circuit breaker state (BreakerClosed,
+// BreakerOpen, BreakerHalfOpen) in the node's telemetry so it is visible in the
+// UI and cluster status. An empty value clears it.
+func (r *Registry) SetCircuitState(deviceID string, state BreakerState) error {
+	return r.updateField(deviceID, func(n *Node) {
+		n.Telemetry.CircuitState = state
+	})
+}
+
 // updateField is a helper that locks, looks up the node, and applies a mutation.
 func (r *Registry) updateField(deviceID string, fn func(*Node)) error {
 	r.mu.Lock()
