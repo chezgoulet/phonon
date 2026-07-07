@@ -12,6 +12,22 @@ const (
 	NodeStateOffline  NodeState = "offline"
 )
 
+// BreakerState is the state of a device's inference circuit breaker. It lives
+// here (rather than in internal/api) so the circuit breaker and the registry
+// telemetry that stores it reference a single compiler-enforced type. If the
+// state set grows (e.g. Degraded, Isolated), both sides update together.
+type BreakerState string
+
+const (
+	// BreakerClosed — device is healthy, requests flow normally. The empty
+	// value is treated as closed/untracked.
+	BreakerClosed BreakerState = "closed"
+	// BreakerOpen — device recently failed repeatedly; no routing.
+	BreakerOpen BreakerState = "open"
+	// BreakerHalfOpen — cooldown elapsed; a single probe request is allowed.
+	BreakerHalfOpen BreakerState = "half-open"
+)
+
 // HealthTelemetry captures battery, thermal, and queue state from heartbeats.
 type HealthTelemetry struct {
 	BatteryLevel       float64   `json:"battery_level"`
@@ -20,6 +36,11 @@ type HealthTelemetry struct {
 	IsCharging         bool      `json:"is_charging"`
 	QueueDepth         int       `json:"queue_depth"`
 	HeartbeatRecorded  time.Time `json:"-"`
+
+	// CircuitState is the inference circuit breaker state for this device,
+	// maintained by the coordinator (not reported by the phone). Empty means
+	// closed/untracked.
+	CircuitState BreakerState `json:"circuit_breaker_state,omitempty"`
 }
 
 // ModelStatus describes what model is loaded and its state.
