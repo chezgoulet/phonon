@@ -2,14 +2,40 @@
 
 ## Overview
 
-Phonon uses GitHub Actions for CI and release automation. Three workflows are
-defined in `.github/workflows/`:
+Phonon uses GitHub Actions for CI, release, and promotion automation. Four
+workflows are defined in `.github/workflows/`:
 
 | Workflow | Trigger | Purpose |
 |---|---|---|
-| `ci.yml` | PR to `main`, push to `main` | Lint, test, build all layers. Upload artifacts. |
+| `ci.yml` | PR to `main`/`testing`, push to `main`/`testing` | Lint, test, build all layers. Upload artifacts. |
 | `release.yml` | Tag push `v*` | Build coordinator binaries, attach to GitHub Release. |
 | `docker.yml` | Tag push `v*` | Build and push multi-arch Docker image to Docker Hub. |
+| `promote.yml` | `workflow_dispatch` (manual) | Promote `testing` → `main` as a release candidate PR. |
+
+## Promotion Workflow (`promote.yml`)
+
+Run manually from the GitHub Actions UI or CLI:
+
+```sh
+# Dry-run (validate + run CI, skip PR creation)
+gh workflow run promote.yml -f rc_version=v0.2.0-rc.1 -f dry_run=true
+
+# Full promotion: validate, run CI, create PR
+gh workflow run promote.yml -f rc_version=v0.2.0-rc.1
+```
+
+The workflow:
+1. Validates the version format (`vX.Y.Z[-rc.N]`)
+2. Runs the full CI suite (reuses `ci.yml`)
+3. Creates a PR from `testing` → `main` with auto-generated release notes
+4. Labels the PR `release-candidate`
+
+After the PR merges, tag `main` to trigger the release and docker workflows:
+
+```sh
+git tag v0.2.0
+git push origin v0.2.0
+```
 
 ## CI Pipeline (`ci.yml`)
 

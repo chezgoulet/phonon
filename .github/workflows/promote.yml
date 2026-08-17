@@ -1,0 +1,121 @@
+# Promotion workflow: testing → main release candidate
+#
+# Triggered manually to promote the current state of `testing` into `main`
+# as a release candidate. Runs the full CI suite, then creates a PR against
+# `main` with auto-generated release notes.
+#
+# After the PR merges, tag it with a release candidate version to trigger
+# the release and docker workflows.
+#
+# Usage:
+#   gh workflow run promote.yml -f rc_version=v0.2.0-rc.1
+#
+# Or via GitHub UI: Actions → Promote → Run workflow
+
+name: Promote
+
+on:
+  workflow_dispatch:
+    inputs:
+      rc_version:
+        description: "Release candidate version (e.g. v0.2.0-rc.1)"
+        required: true
+        type: string
+      dry_run:
+        description: "Validate without creating PR (true/false)"
+        required: false
+        default: "false"
+        type: string
+
+concurrency:
+  group: promote-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ─── Validation ─────────────────────────────────────────────────────
+  validate:
+    name: Validate RC version
+    runs-on: ubuntu-24.04
+    outputs:
+      valid: ${{ steps.check.outputs.valid }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: testing
+
+      - name: Check version format
+        id: check
+        run: |
+          VERSION="${{ inputs.rc_version }}"
+          echo "version: $VERSION"
+          if [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$ ]]; then
+            echo "valid=true" >> "$GITHUB_OUTPUTS"
+            echo "Format OK"
+          else
+            echo "valid=false" >> "$GITHUB_OUTPUTS"
+            echo "::error::Invalid version format: $VERSION (expected vX.Y.Z[-rc.N])"
+            exit 1
+          fi
+
+  # ─── Full CI ────────────────────────────────────────────────────────
+  ci:
+    name: CI
+    needs: [validate]
+    uses: ./.github/workflows/ci.yml
+    secrets: inherit
+
+  # ─── Promotion PR ───────────────────────────────────────────────────
+  promote:
+    name: Create promotion PR
+    needs: [validate, ci]
+    if: ${{ inputs.dry_run != 'true' }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: testing
+          fetch-depth: 0
+
+      - name: Generate release notes
+        id: notes
+        run: |
+          PREV_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          if [ -n "$PREV_TAG" ]; then
+            NOTES=$(git log --oneline --no-decorate "$PREV_TAG..testing" 2>/dev/null || echo "No changes since $PREV_TAG")
+          else
+            NOTES=$(git log --oneline --no-decorate testing --not main 2>/dev/null || echo "Initial release")
+          fi
+          {
+            echo "NOTES<<EOF"
+            echo "$NOTES"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUTS"
+
+      - name: Create or update PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Check if a promote PR already exists
+          EXISTING=$(gh pr list --base main --head testing --json number --jq '.[0].number' 2>/dev/null || echo "")
+
+          if [ -n "$EXISTING" ]; then
+            echo "Updating existing PR #$EXISTING"
+            gh pr edit "$EXISTING" \
+              --title "Release candidate: ${{ inputs.rc_version }}" \
+              --body "${{ steps.notes.outputs.NOTES }}"
+          else
+            echo "Creating new promotion PR"
+            gh pr create \
+              --base main \
+              --head testing \
+              --title "Release candidate: ${{ inputs.rc_version }}" \
+              --body "${{ steps.notes.outputs.NOTES }}" \
+              --label release-candidate
+          fi
+
+          echo "PR ready for review. After merge, tag with:"
+          echo "  git tag ${{ inputs.rc_version }} main"
+          echo "  git push origin ${{ inputs.rc_version }}"
