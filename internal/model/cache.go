@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 )
 
 // Default cache subdirectories.
@@ -524,6 +525,11 @@ func sanitizeName(name string) string {
 	// another model's file via Put's rename.
 	const hashSuffixLen = 1 + 2*8
 	prefix := maxSanitizedNameLen - hashSuffixLen
+	// Don't split a multi-byte rune at the cut point: walk back over any
+	// continuation bytes so the prefix stays valid UTF-8.
+	for prefix > 0 && !utf8.RuneStart(s[prefix]) {
+		prefix--
+	}
 	return fmt.Sprintf("%s-%x", s[:prefix], sum[:8])
 }
 

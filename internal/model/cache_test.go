@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 var testFilePerm os.FileMode = 0o644
@@ -215,6 +216,48 @@ func TestSanitizeNameOverlongNamesStayDistinct(t *testing.T) {
 		if suffix[0] != '-' || strings.Trim(suffix[1:], "0123456789abcdef") != "" {
 			t.Errorf("sanitized %s has malformed 64-bit hash suffix %q: %q", name, suffix, s)
 		}
+	}
+}
+
+// TestSanitizeNameTruncatesOnRuneBoundary ensures the byte-level truncation
+// of overlong names never splits a multi-byte UTF-8 rune.
+func TestSanitizeNameTruncatesOnRuneBoundary(t *testing.T) {
+	tests := []struct {
+		name     string
+		model    string
+		wantHead string // runes that must survive intact before the hash suffix
+	}{
+		{
+			// 260 bytes of 2-byte runes: raw cut at byte 223 would split
+			// rune 111; expect it walked back to a whole-rune boundary.
+			name:     "two-byte runes",
+			model:    strings.Repeat("é", 130),
+			wantHead: strings.Repeat("é", 111),
+		},
+		{
+			// 270 bytes of 3-byte runes: raw cut at byte 223 would split
+			// rune 74; expect truncation back to 74 whole runes.
+			name:     "three-byte runes",
+			model:    strings.Repeat("日", 90),
+			wantHead: strings.Repeat("日", 74),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if len(tt.model) <= maxSanitizedNameLen {
+				t.Fatalf("test name must exceed %d bytes", maxSanitizedNameLen)
+			}
+			got := sanitizeName(tt.model)
+			if !utf8.ValidString(got) {
+				t.Fatalf("sanitized name splits a rune: %q", got)
+			}
+			if len(got) > maxSanitizedNameLen {
+				t.Errorf("len=%d exceeds %d", len(got), maxSanitizedNameLen)
+			}
+			if !strings.HasPrefix(got, tt.wantHead) || got[len(tt.wantHead)] != '-' {
+				t.Errorf("unexpected truncation point: %q", got)
+			}
+		})
 	}
 }
 
