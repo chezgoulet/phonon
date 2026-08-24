@@ -362,6 +362,58 @@ func TestModelUploadChecksumFieldOverLimitRejected(t *testing.T) {
 	}
 }
 
+// TestModelUploadTruncatedFieldNotReportedAsTooLarge ensures raw I/O errors
+// (aborted/truncated bodies) surface as malformed multipart bodies rather
+// than the misleading "exceeds 4096 byte limit" overflow message.
+func TestModelUploadTruncatedFieldNotReportedAsTooLarge(t *testing.T) {
+	for _, field := range []string{"name", "checksum"} {
+		t.Run(field, func(t *testing.T) {
+			cache, _ := uploadTestCache(t)
+			h := NewModelUploadHandler(cache)
+			mux := http.NewServeMux()
+			h.RegisterRoutes(mux)
+
+			var buf bytes.Buffer
+			mw := multipart.NewWriter(&buf)
+			fw, err := mw.CreateFormField(field)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := fw.Write([]byte(strings.Repeat("n", 512))); err != nil {
+				t.Fatal(err)
+			}
+			mw.Close()
+
+			// Cut the body mid-field so the field read fails without
+			// ever seeing the boundary.
+			truncated := buf.Bytes()[:buf.Len()/2]
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/models/upload", bytes.NewReader(truncated))
+			req.Header.Set("Content-Type", mw.FormDataContentType())
+			req.Header.Set(ChecksumHeader, sha([]byte("bytes")))
+			w := httptest.NewRecorder()
+			mux.ServeHTTP(w, req)
+
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("expected 400 for truncated body, got %d: %s", w.Code, w.Body.String())
+			}
+			var resp struct {
+				Error struct {
+					Message string `json:"message"`
+				} `json:"error"`
+			}
+			if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(resp.Error.Message, "byte limit") {
+				t.Errorf("I/O failure misreported as overflow: %q", resp.Error.Message)
+			}
+			if !strings.Contains(resp.Error.Message, "malformed multipart body") {
+				t.Errorf("truncated body should map to malformed-body error: %q", resp.Error.Message)
+			}
+		})
+	}
+}
+
 func TestCachePutConcurrentWithReads(t *testing.T) {
 	cache, _ := uploadTestCache(t)
 	payload := []byte("payload")

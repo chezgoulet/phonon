@@ -143,14 +143,14 @@ func (h *ModelUploadHandler) handleUpload(w http.ResponseWriter, r *http.Request
 		case part.FileName() == "" && part.FormName() == "name":
 			val, ferr := readSmallField(part)
 			if ferr != nil {
-				writeFieldTooLarge(w, "name")
+				writeSmallFieldError(w, "name", ferr)
 				return
 			}
 			name = val
 		case part.FileName() == "" && part.FormName() == "checksum":
 			val, ferr := readSmallField(part)
 			if ferr != nil {
-				writeFieldTooLarge(w, "checksum")
+				writeSmallFieldError(w, "checksum", ferr)
 				return
 			}
 			checksum = strings.TrimSpace(val)
@@ -238,8 +238,15 @@ func (h *ModelUploadHandler) writePutError(w http.ResponseWriter, name string, e
 // maxFormFieldLen caps small form field values (name, checksum) at 4 KiB.
 const maxFormFieldLen = 4096
 
+// errFieldTooLarge marks a genuine overflow: the field value itself exceeded
+// maxFormFieldLen. Any other error from readSmallField is a transport or
+// framing failure (malformed body, aborted request) and must not be
+// reported as "exceeds limit".
+var errFieldTooLarge = errors.New("form field exceeds limit")
+
 // readSmallField reads a form field value of at most maxFormFieldLen bytes.
-// Larger values yield an error rather than being silently truncated.
+// Values over the limit yield errFieldTooLarge; other errors are raw I/O or
+// multipart-framing failures.
 func readSmallField(p *multipart.Part) (string, error) {
 	defer p.Close()
 	b, err := io.ReadAll(io.LimitReader(p, maxFormFieldLen+1))
@@ -247,9 +254,25 @@ func readSmallField(p *multipart.Part) (string, error) {
 		return "", err
 	}
 	if len(b) > maxFormFieldLen {
-		return "", fmt.Errorf("form field exceeds %d byte limit", maxFormFieldLen)
+		return "", errFieldTooLarge
 	}
 	return string(b), nil
+}
+
+// writeSmallFieldError maps readSmallField failures: genuine overflows get
+// the dedicated too-large message, everything else falls into the existing
+// malformed-body 400 path alongside NextPart errors.
+func writeSmallFieldError(w http.ResponseWriter, field string, err error) {
+	if errors.Is(err, errFieldTooLarge) {
+		writeFieldTooLarge(w, field)
+		return
+	}
+	writeJSON(w, http.StatusBadRequest, map[string]any{
+		"error": map[string]string{
+			"message": "malformed multipart body: " + err.Error(),
+			"type":    "invalid_request_error",
+		},
+	})
 }
 
 // writeFieldTooLarge rejects requests whose form fields exceed the limit.
