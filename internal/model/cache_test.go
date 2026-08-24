@@ -443,3 +443,73 @@ func TestCacheGetFromCache(t *testing.T) {
 		t.Errorf("unexpected path: %q", path)
 	}
 }
+
+// TestCachePutSurvivesRestartWithLongName verifies the name→file mapping of
+// Put survives a restart: a fresh cache scanning the same directory must
+// resolve an overlong model name (stored under a sanitized filename) back
+// to its file.
+func TestCachePutSurvivesRestartWithLongName(t *testing.T) {
+	dir := t.TempDir()
+	payload := []byte("restart-round-trip-payload")
+
+	c1 := NewCache(dir, nil)
+	if err := c1.Init(); err != nil {
+		t.Fatalf("first Init: %v", err)
+	}
+	longName := strings.Repeat("model-", 45) + "end.gguf" // 278 bytes
+	if len(longName) <= maxSanitizedNameLen {
+		t.Fatalf("test name must exceed %d bytes", maxSanitizedNameLen)
+	}
+	if _, err := c1.Put(longName, bytes.NewReader(payload), "", 0); err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+
+	c2 := NewCache(dir, nil)
+	if err := c2.Init(); err != nil {
+		t.Fatalf("Init after restart: %v", err)
+	}
+	if !c2.Has(longName) {
+		t.Fatal("model lost after restart: Has() is false for the original name")
+	}
+	path, err := c2.Get(context.Background(), longName, "", "")
+	if err != nil {
+		t.Fatalf("Get after restart: %v", err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, payload) {
+		t.Errorf("payload mismatch after restart: got %q", got)
+	}
+}
+
+// TestCachePutSurvivesRestartWithSanitizedName covers the other mapping-loss
+// case: names whose separators are rewritten ("/"→"_") also differ from
+// their on-disk filename.
+func TestCachePutSurvivesRestartWithSanitizedName(t *testing.T) {
+	dir := t.TempDir()
+	payload := []byte("org-repo-model")
+
+	c1 := NewCache(dir, nil)
+	c1.Init()
+	if _, err := c1.Put("org/repo:model.gguf", bytes.NewReader(payload), "", 0); err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+
+	c2 := NewCache(dir, nil)
+	if err := c2.Init(); err != nil {
+		t.Fatalf("Init after restart: %v", err)
+	}
+	path, err := c2.Get(context.Background(), "org/repo:model.gguf", "", "")
+	if err != nil {
+		t.Fatalf("Get after restart: %v", err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, payload) {
+		t.Errorf("payload mismatch after restart: got %q", got)
+	}
+}

@@ -84,13 +84,20 @@ func (c *Cache) scan() error {
 		if e.IsDir() {
 			continue
 		}
+		name := e.Name()
 		fi, err := e.Info()
 		if err != nil {
 			continue
 		}
-		name := e.Name()
-		c.entries[name] = &CacheEntry{
-			Name:      name,
+		// Prefer the persisted original name: sanitized filenames lose
+		// information (rewritten separators, hash-suffixed truncation),
+		// so without it Get would not find the model after a restart.
+		key := name
+		if orig := c.originalName(name); orig != "" {
+			key = orig
+		}
+		c.entries[key] = &CacheEntry{
+			Name:      key,
 			Path:      filepath.Join(modelsDir, name),
 			SizeBytes: fi.Size(),
 			CachedAt:  fi.ModTime(),
@@ -127,6 +134,9 @@ func (c *Cache) Get(ctx context.Context, modelName, upstreamURL, expectedSHA str
 	// Atomically rename
 	if err := os.Rename(tmpDest, dest); err != nil {
 		return "", fmt.Errorf("rename %s: %w", modelName, err)
+	}
+	if san := sanitizeName(modelName); san != modelName {
+		c.persistOriginalName(dest, modelName)
 	}
 
 	fi, err := os.Stat(dest)
@@ -330,6 +340,9 @@ func (c *Cache) Remove(name string) error {
 	if err := os.Remove(entry.Path); err != nil {
 		return err
 	}
+	// Sidecar cleanup is best effort; a leftover sidecar without its file
+	// is ignored by scan.
+	os.Remove(filepath.Join(c.rootDir, cacheNamesDir, filepath.Base(entry.Path)))
 	return nil
 }
 
@@ -471,6 +484,9 @@ func (c *Cache) Put(name string, r io.Reader, expectedSHA string, maxBytes int64
 		os.Remove(tmpDest)
 		return nil, fmt.Errorf("rename upload into cache: %w", err)
 	}
+	if san := sanitizeName(name); san != name {
+		c.persistOriginalName(dest, name)
+	}
 
 	entry := &CacheEntry{
 		Name:      name,
@@ -510,6 +526,43 @@ func ResolveHuggingFaceURL(modelID string) string {
 // maxSanitizedNameLen caps sanitized model names below the common 255-byte
 // filesystem filename limit, leaving room for temp-file suffixes.
 const maxSanitizedNameLen = 240
+
+// cacheNamesDir holds per-file sidecars recording the original model name
+// of sanitized files ("<models>/.names/<basename>"). Sanitization loses
+// information — separators become underscores and overlong names are
+// replaced by a hash-suffixed prefix — so the original name must be
+// persisted for Get to resolve models after a restart. Keeping sidecars in
+// their own directory means scan never mistakes one for a model file.
+const cacheNamesDir = "models/.names"
+
+// persistOriginalName records the original model name beside its sanitized
+// cache file. Best effort: a missing or unreadable sidecar only degrades
+// restart lookups to on-disk-name keying, never correctness of Put/Get
+// within a running process.
+func (c *Cache) persistOriginalName(dest, name string) {
+	dir := filepath.Join(c.rootDir, cacheNamesDir)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		c.log.Warn("persist original model name", "error", err)
+		return
+	}
+	sidecar := filepath.Join(dir, filepath.Base(dest))
+	if err := os.WriteFile(sidecar, []byte(name), 0o644); err != nil {
+		c.log.Warn("persist original model name", "error", err)
+	}
+}
+
+// originalName returns the persisted original model name for an on-disk
+// file basename, or "" when none was recorded.
+func (c *Cache) originalName(basename string) string {
+	raw, err := os.ReadFile(filepath.Join(c.rootDir, cacheNamesDir, basename))
+	if err != nil {
+		return ""
+	}
+	if orig := strings.TrimSpace(string(raw)); orig != "" {
+		return orig
+	}
+	return ""
+}
 
 // sanitizeName replaces path separators in model names. Overlong names are
 // shortened with a hash suffix so they stay storable and unique instead of
