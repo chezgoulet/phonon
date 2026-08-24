@@ -96,7 +96,14 @@ func (d pinnedDir) openRead(name string) (*os.File, error) {
 
 // statSize reports the size of name if it exists as a regular file, or 0
 // when there is nothing resumable (missing, symlink, or special file).
+// bareName is enforced like every other pinned-dir op: on this platform it
+// keeps filepath.Join from resolving a separator-bearing name OUT of the
+// emulated dir — fail closed instead (#327; the unix implementation gets
+// the same guarantee via openRead's bareName check).
 func (d pinnedDir) statSize(name string) (int64, error) {
+	if err := bareName(name); err != nil {
+		return 0, err
+	}
 	full := filepath.Join(d.disp, name)
 	fi, err := os.Lstat(full)
 	if err != nil {

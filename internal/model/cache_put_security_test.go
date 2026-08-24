@@ -93,9 +93,12 @@ func TestPut_NameSanitizationStillApplies(t *testing.T) {
 		}
 	}
 
-	// "../../etc/passwd" folds to the single component ".._.._etc_passwd":
-	// legal since #310 (it merely contains ".."), but it must land INSIDE
-	// the models dir and nowhere else.
+	// "../../etc/passwd" folds to the single component ".._.._etc_passwd"
+	// plus a hash suffix — sanitizeName appends "-<16 hex>" whenever the
+	// fold changed the name, so the stored basename is
+	// ".._.._etc_passwd-<16hex>" (see sanitizeName's doc): legal since #310
+	// (it merely contains ".."), but it must land INSIDE the models dir and
+	// nowhere else.
 	const sneaky = "../../etc/passwd"
 	if _, err := cache.Put(sneaky, bytes.NewReader(payload), "", 0); err != nil {
 		t.Fatalf("Put(%q): %v", sneaky, err)

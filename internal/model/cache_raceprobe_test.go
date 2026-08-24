@@ -98,6 +98,7 @@ func TestProbe_RenameRace_GetEscapesRoot(t *testing.T) {
 	const maxTrials = 600
 	escapes := 0
 	refusals := 0
+	totalFlips := 0
 	for trial := 0; trial < maxTrials && escapes < 3; trial++ {
 		base := t.TempDir()
 		root := filepath.Join(base, "cache")
@@ -115,6 +116,7 @@ func TestProbe_RenameRace_GetEscapesRoot(t *testing.T) {
 		tg := startToggler(modelsDir, evilModels, 40*time.Microsecond, 40*time.Microsecond)
 		_, err := cache.Get(context.Background(), "victim.gguf", srv.URL, "")
 		tg.halt(modelsDir)
+		totalFlips += tg.flips
 
 		if err != nil {
 			refusals++
@@ -126,7 +128,14 @@ func TestProbe_RenameRace_GetEscapesRoot(t *testing.T) {
 			t.Logf("TRIAL %d: ESCAPE — downloaded model renamed OUTSIDE cache root (%s)", trial, evilModels)
 		}
 	}
-	t.Logf("trials=%d clean-refusals=%d ESCAPES=%d (toggler flips/trial≈%d)", maxTrials, refusals, escapes, 0)
+	// Real flips/trial ratio (#324): totalFlips is the sum of the toggler's
+	// per-trial flip counts (each dir swap increments tg.flips), maxTrials the
+	// attempted attack iterations — a hardcoded 0 would misstate the pressure.
+	flipsPerTrial := 0.0
+	if totalFlips > 0 {
+		flipsPerTrial = float64(totalFlips) / float64(maxTrials)
+	}
+	t.Logf("trials=%d clean-refusals=%d ESCAPES=%d (toggler flips=%d, flips/trial≈%.1f)", maxTrials, refusals, escapes, totalFlips, flipsPerTrial)
 	if escapes > 0 {
 		t.Errorf("RENAME RACE CONFIRMED: %d/%d attempts landed model files outside the cache root", escapes, refusals+escapes)
 	}

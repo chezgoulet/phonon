@@ -605,8 +605,14 @@ func (c *Cache) Remove(name string) error {
 		return err
 	}
 	// Sidecar cleanup is best effort; a leftover sidecar without its file
-	// is ignored by scan.
-	_ = os.Remove(filepath.Join(c.rootDir, cacheNamesDir, base))
+	// is ignored by scan. Unlink through the pinned .names dirfd (bare-
+	// filename unlinkat), not a path string, so removal cannot be
+	// redirected either — mirroring persistOriginalName's pinned write
+	// and originalName's pinned read (#325).
+	if np, err := c.pinNamesDir(); err == nil {
+		_ = np.remove(base)
+		closePinned(&np)
+	}
 	return nil
 }
 
@@ -1017,9 +1023,23 @@ func (c *Cache) persistOriginalName(dest, name string) {
 }
 
 // originalName returns the persisted original model name for an on-disk
-// file basename, or "" when none was recorded.
+// file basename, or "" when none was recorded. The sidecar is read through
+// a pinned .names dirfd (bare-filename openat) — the read counterpart of
+// persistOriginalName's pinned write (#325): path-string resolution here
+// would leave open the same serve-side symlink window #313 closed for
+// writes. Best effort: pin failure or unreadable entry yields "".
 func (c *Cache) originalName(basename string) string {
-	raw, err := os.ReadFile(filepath.Join(c.rootDir, cacheNamesDir, basename))
+	np, err := c.pinNamesDir()
+	if err != nil {
+		return ""
+	}
+	defer closePinned(&np)
+	f, err := np.openRead(basename)
+	if err != nil {
+		return ""
+	}
+	raw, err := io.ReadAll(f)
+	f.Close()
 	if err != nil {
 		return ""
 	}
