@@ -81,6 +81,46 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
+  # ─── Sidecar instrumented tests (real AndroidKeyStore) ────────────
+  # Runs the androidTest source set (KeystoreSeedCipherTest) against a real
+  # device/emulator. There is no GitHub-hosted Android device fleet, so this
+  # targets a self-hosted runner labeled "android" — Christopher must
+  # register one (USB-attached device or emulator host):
+  #   repo Settings → Actions → Runners → New self-hosted runner, with labels
+  #   ["self-hosted", "android"].
+  # HONEST CAVEAT: until such a runner exists, the job cannot start. It is
+  # marked continue-on-error so its absence doesn't wedge CI; REMOVE that
+  # flag once a runner is registered so instrumented failures gate merges.
+  sidecar-instrumented:
+    name: Sidecar instrumented (device)
+    runs-on: [self-hosted, android]
+    continue-on-error: true # remove once an [android] device runner is registered
+    defaults:
+      run:
+        working-directory: sidecar
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Run instrumented tests
+        run: ./gradlew connectedDebugAndroidTest --no-daemon --console=plain
+
+      - name: Upload instrumented test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sidecar-instrumented-reports
+          path: sidecar/app/build/reports/androidTests/
+          if-no-files-found: ignore
+          retention-days: 7
+
   # ─── Coordinator (Go) ─────────────────────────────────────────────
   coordinator:
     name: Coordinator
