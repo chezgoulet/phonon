@@ -146,25 +146,33 @@ class PhononService : Service() {
         ThemeEngine.initializeWithDefaults()
         ThemeEngine.setLocalDeviceId(app.deviceId)
 
-        // Start components. An identity failure (e.g. TransientUnsealException
-        // from an early-boot Keystore outage) must degrade LOUDLY — error log
-        // plus a degraded notification — rather than propagate out of
-        // onStartCommand: a throw here crashes the process, START_STICKY then
-        // recreates the service into the same failure, and the foreground
-        // service crash-loops. Returning START_NOT_STICKY stops the tight
-        // restart cycle; retry happens on explicit start / next boot, matching
-        // IdentitySeedStore's retry-on-next-boot semantics.
-        try {
-            startComponents()
-            componentsStarted = true
+        // #321: START_STICKY foreground services receive onStartCommand more
+        // than once (rebind, stale-intent re-delivery, explicit re-start). Do
+        // NOT re-run startComponents() — that would construct NEW instances of
+        // mdnsAnnouncer/inferenceServer/coordinatorClient/healthReporter each
+        // time and leak all but the latest. If already started, just keep the
+        // existing instances and re-assert foreground/wakelock.
+        if (!componentsStarted) {
+            // Start components. An identity failure (e.g. TransientUnsealException
+            // from an early-boot Keystore outage) must degrade LOUDLY — error log
+            // plus a degraded notification — rather than propagate out of
+            // onStartCommand: a throw here crashes the process, START_STICKY then
+            // recreates the service into the same failure, and the foreground
+            // service crash-loops. Returning START_NOT_STICKY stops the tight
+            // restart cycle; retry happens on explicit start / next boot, matching
+            // IdentitySeedStore's retry-on-next-boot semantics.
+            try {
+                startComponents()
+                componentsStarted = true
 
-            // Start VizState update loop (~10fps)
-            startVizStateLoop()
-        } catch (e: Exception) {
-            startupError = (e.message ?: e.javaClass.simpleName).take(120)
-            Log.e(tag, "Sidecar startup failed; degraded until next start/boot: $startupError", e)
-            updateNotification()
-            return START_NOT_STICKY
+                // Start VizState update loop (~10fps)
+                startVizStateLoop()
+            } catch (e: Exception) {
+                startupError = (e.message ?: e.javaClass.simpleName).take(120)
+                Log.e(tag, "Sidecar startup failed; degraded until next start/boot: $startupError", e)
+                updateNotification()
+                return START_NOT_STICKY
+            }
         }
 
         // If killed, restart
