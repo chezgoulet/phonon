@@ -66,12 +66,15 @@ func (d pinnedDir) openSub(name string) (pinnedDir, error) {
 // ELOOP failure BEFORE any O_CREATE/O_TRUNC/O_APPEND side effect can reach
 // anything outside the held directory inode. Single-component resolution
 // through a dirfd cannot traverse a swapped ancestor because no ancestor
-// is ever resolved from a path string.
+// is ever resolved from a path string. oNonBlock is added to every open
+// (write-opens included) so a swapped-in FIFO cannot block the goroutine on
+// O_WRONLY|O_TRUNC|O_APPEND with no reader present; it is a no-op for
+// regular files.
 func (d pinnedDir) openFile(name string, flag int, perm os.FileMode) (*os.File, error) {
 	if err := bareName(name); err != nil {
 		return nil, err
 	}
-	fd, err := syscall.Openat(d.fd, name, flag|syscall.O_CLOEXEC|openNoFollow, uint32(perm.Perm()))
+	fd, err := syscall.Openat(d.fd, name, flag|syscall.O_CLOEXEC|openNoFollow|oNonBlock, uint32(perm.Perm()))
 	if err != nil {
 		return nil, &os.PathError{Op: "openat", Path: filepath.Join(d.disp, name), Err: err}
 	}
@@ -79,8 +82,7 @@ func (d pinnedDir) openFile(name string, flag int, perm os.FileMode) (*os.File, 
 }
 
 // openRead opens an existing entry read-only through the pinned dir.
-// Non-blocking so a planted FIFO at a destination name cannot hang the
-// download loop (O_NONBLOCK is a no-op for regular files).
+// (O_NONBLOCK comes from openFile itself.)
 func (d pinnedDir) openRead(name string) (*os.File, error) {
 	return d.openFile(name, os.O_RDONLY|oNonBlock, 0)
 }
