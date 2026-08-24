@@ -273,10 +273,26 @@ func (c *Cache) Get(ctx context.Context, modelName, upstreamURL, expectedSHA str
 			return 0, err
 		}
 		defer closePinned(&sp)
-		return sp.statSize(base)
+		// statSize maps ENOENT to (0, nil) for the resume probe; after a
+		// successful promote the model MUST exist. Probe explicitly so a
+		// vanished entry is a wrapped error instead of SizeBytes=0 with a
+		// dangling Path.
+		f, err := sp.openRead(base)
+		if err != nil {
+			return 0, fmt.Errorf("probe promoted model %q: %w", base, err)
+		}
+		defer f.Close()
+		fi, err := f.Stat()
+		if err != nil {
+			return 0, fmt.Errorf("stat promoted model %q: %w", base, err)
+		}
+		if !fi.Mode().IsRegular() {
+			return 0, fmt.Errorf("promoted model %q is not a regular file", base)
+		}
+		return fi.Size(), nil
 	}()
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("size probe %s: %w", modelName, err)
 	}
 
 	entry = &CacheEntry{
