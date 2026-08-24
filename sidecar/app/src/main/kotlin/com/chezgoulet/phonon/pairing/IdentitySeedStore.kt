@@ -150,7 +150,9 @@ class IdentitySeedStore(
             // hence transient rather than corrupt.
             throw TransientUnsealException("failed reading ${wrappedFile.name}", e)
         }
-        // Sanity floor: version byte + IV + auth tag for an AEAD blob.
+        // Sanity floor before unsealing: 1 version byte + 16-byte GCM IV +
+        // 16-byte auth tag minimum. A blob shorter than this cannot be a valid
+        // sealed envelope; the exact layout is validated by the cipher.
         if (blob.size < MIN_BLOB_BYTES || blob[0] != BLOB_VERSION_1) return failCorrupt()
         val seed = try {
             cipher.unseal(blob.copyOfRange(1, blob.size))

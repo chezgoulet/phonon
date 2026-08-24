@@ -84,6 +84,11 @@ class PhononService : Service() {
 
     /** True once [startComponents] finished successfully. */
     private var componentsStarted = false
+
+    /** True once the mDNS announcer was started; onDestroy stops it on this
+     *  independent of [componentsStarted] so a degraded startup cannot leak a
+     *  ghost _phonon._tcp advertisement (issue #308). */
+    private var mdnsAnnouncerStarted = false
     @Volatile
     var loadedModel: String? = null
         private set
@@ -183,13 +188,18 @@ class PhononService : Service() {
     override fun onDestroy() {
         vizStateJob?.cancel()
         scope.cancel()
+        // The mDNS announcer may have started even if a later component
+        // (identity/pairing) failed; stop it independently so a degraded
+        // startup cannot leak a ghost advertisement (issue #308).
+        if (mdnsAnnouncerStarted) {
+            mdnsAnnouncer.stop()
+        }
         // Components may never have started (degraded startup path); their
         // fields are lateinit and must not be touched then.
         if (componentsStarted) {
             inferenceServer.stop()
             healthReporter.stop()
             coordinatorClient.stop()
-            mdnsAnnouncer.stop()
         }
         wakeLock?.release()
         stopForeground(STOP_FOREGROUND_REMOVE)
@@ -242,6 +252,7 @@ class PhononService : Service() {
         // mDNS announcer — announces this phone on _phonon._tcp
         mdnsAnnouncer = MDNSAnnouncer(this, app.deviceId, app.deviceModel)
         mdnsAnnouncer.start()
+        mdnsAnnouncerStarted = true
 
         // Model manager — loads .litertlm models via LiteRT-LM SDK
         modelManager = ModelManager(this)
