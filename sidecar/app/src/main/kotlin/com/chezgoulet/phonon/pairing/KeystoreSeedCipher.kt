@@ -17,10 +17,19 @@ import javax.crypto.spec.GCMParameterSpec
  * Holds an AES-256-GCM key inside the AndroidKeyStore provider (TEE or
  * StrongBox when available and supported by the device). The key is
  * non-exportable: it never leaves secure hardware, and its private material
- * is unreachable even on rooted devices. Sealed blobs are
- * `iv(12) || ciphertext+tag(128-bit)`, authenticated by GCM — tampering or
- * truncation fails decryption with [GeneralSecurityException], which the
- * caller treats as "invalidate and regenerate".
+ * is unreachable even on rooted devices.
+ *
+ * Wire format of a sealed blob: `iv(12) || ciphertext+tag(128-bit)`. The
+ * AEAD envelope (the plaintext GCM authenticates) is
+ * `formatVersion(1) || seed`, so the format version is authenticated INSIDE
+ * the tag, not just framing outside it. Additionally the associated data
+ * (AAD) is `"alias|version|filename"`: blobs are cryptographically bound to
+ * this wrapping key's alias and to the storage filename, so a blob swapped
+ * in from another alias/file/location fails authentication with
+ * [javax.crypto.AEADBadTagException] — tampering, truncation,
+ * cross-blob-splicing, and misfiling all fail closed with
+ * [GeneralSecurityException], which the caller classifies as "invalidate
+ * and regenerate".
  *
  * Note the honest scope of this protection (issue C-06): Android Keystore
  * offers no stable public Ed25519 keygen/sign algorithm across our range
@@ -37,20 +46,34 @@ class KeystoreSeedCipher(
     override fun seal(plaintext: ByteArray): ByteArray {
         val cipher = Cipher.getInstance(TRANSFORMATION)
         cipher.init(Cipher.ENCRYPT_MODE, obtainKey())
-        val ciphertext = cipher.doFinal(plaintext)
+        cipher.updateAAD(aad())
+        // Format-version byte lives INSIDE the authenticated envelope.
+        val ciphertext = cipher.doFinal(byteArrayOf(FORMAT_VERSION) + plaintext)
         return cipher.iv + ciphertext
     }
 
     override fun unseal(sealed: ByteArray): ByteArray {
-        if (sealed.size <= GCM_IV_BYTES) {
+        if (sealed.size <= GCM_IV_BYTES + FORMAT_VERSION_BYTES) {
             throw GeneralSecurityException("wrapped identity blob too short")
         }
         val iv = sealed.copyOfRange(0, GCM_IV_BYTES)
         val ciphertext = sealed.copyOfRange(GCM_IV_BYTES, sealed.size)
         val cipher = Cipher.getInstance(TRANSFORMATION)
         cipher.init(Cipher.DECRYPT_MODE, obtainKey(), GCMParameterSpec(GCM_TAG_BITS, iv))
-        return cipher.doFinal(ciphertext)
+        cipher.updateAAD(aad())
+        // Wrong key, wrong alias/filename AAD, or any tampering fails HERE
+        // with AEADBadTagException — never returns unauthenticated bytes.
+        val envelope = cipher.doFinal(ciphertext)
+        if (envelope.isEmpty() || envelope[0] != FORMAT_VERSION) {
+            throw GeneralSecurityException("unexpected envelope format version")
+        }
+        return envelope.copyOfRange(FORMAT_VERSION_BYTES, envelope.size)
     }
+
+    /** Domain-separation binding: blob belongs to THIS alias + version + file. */
+    private fun aad(): ByteArray =
+        "$alias|${FORMAT_VERSION.toInt()}|${IdentitySeedStore.WRAPPED_FILE_NAME}"
+            .toByteArray(Charsets.UTF_8)
 
     /** Returns the wrapping key from Keystore, generating it on first use. */
     private fun obtainKey(): SecretKey {
@@ -91,5 +114,9 @@ class KeystoreSeedCipher(
         private const val WRAP_KEY_BITS = 256
         private const val GCM_IV_BYTES = 12
         private const val GCM_TAG_BITS = 128
+
+        /** Envelope format version, authenticated inside the AEAD tag. */
+        internal const val FORMAT_VERSION: Byte = IdentitySeedStore.BLOB_VERSION_1
+        private const val FORMAT_VERSION_BYTES = 1
     }
 }
