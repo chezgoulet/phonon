@@ -84,7 +84,7 @@ func (d pinnedDir) openFile(name string, flag int, perm os.FileMode) (*os.File, 
 // openRead opens an existing entry read-only through the pinned dir.
 // (O_NONBLOCK comes from openFile itself.)
 func (d pinnedDir) openRead(name string) (*os.File, error) {
-	return d.openFile(name, os.O_RDONLY|oNonBlock, 0)
+	return d.openFile(name, os.O_RDONLY, 0)
 }
 
 // statSize reports the size of name if it exists as a regular file within

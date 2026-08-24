@@ -509,11 +509,13 @@ func (c *Cache) downloadOnceAt(ctx context.Context, url string, destDir pinnedDi
 // diagnoseOpenFailure upgrades a failed pinned-dir open to a
 // containment-class error when the final component is a planted symlink.
 // Diagnosis only: containment itself comes from openat + O_NOFOLLOW, which
-// failed the open before any side effect.
+// failed the open before any side effect. The original err (carrying the
+// real ELOOP from the openat) is wrapped on BOTH branches so errors.Is
+// keeps working on the diagnosed message too.
 func (c *Cache) diagnoseOpenFailure(d pinnedDir, name string, err error) error {
 	full := filepath.Join(d.disp, name)
 	if fi, lerr := os.Lstat(full); lerr == nil && fi.Mode()&os.ModeSymlink != 0 {
-		return fmt.Errorf("refusing to open %q: destination is a symlink resolving outside cache root (symlink attack?)", full)
+		return fmt.Errorf("refusing to open %q: destination is a symlink resolving outside cache root (symlink attack?): %w", full, err)
 	}
 	return fmt.Errorf("open %s: %w", full, err)
 }
@@ -675,6 +677,14 @@ func (c *Cache) verifyDestinationForWrite(path string) error {
 	}
 	realParent, err := filepath.EvalSymlinks(filepath.Dir(path))
 	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			// Parent (e.g. the models dir) was removed while running —
+			// steady-state churn, not an attack: a symlink cannot exist
+			// inside a missing directory. Fall through so the pinned-dir
+			// path's gated recreate+re-pin (pinCacheSubdir) rebuilds and
+			// revalidates it; containment checks stay untouched.
+			return nil
+		}
 		return fmt.Errorf("resolve parent of %s: %w", path, err)
 	}
 	if !containsPath(realRoot, realParent) {
