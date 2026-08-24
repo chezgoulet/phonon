@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -99,6 +98,68 @@ func (c *Cache) scan() error {
 	return nil
 }
 
+// bareName enforces that names handed to pinned-dir operations are single
+// path components. sanitizeName guarantees this for model names ("/" and
+// ":" replaced); the check makes the invariant load-bearing at every
+// pinned-fd call site instead of trusting callers.
+func bareName(name string) error {
+	if name == "" || name == "." || name == ".." ||
+		strings.ContainsRune(name, '/') || strings.ContainsRune(name, filepath.Separator) {
+		return fmt.Errorf("refusing name %q: pinned-dir operations take bare filenames only", name)
+	}
+	return nil
+}
+
+// pinCacheSubdir pins one of the known constant subdirs below a pinned
+// root: openat(rootFd, name, O_RDONLY|O_DIRECTORY|O_NOFOLLOW). If anyone
+// replaced the subdir with a symlink this FAILS (ELOOP/ENOTDIR), which is
+// the correct containment behavior. A subdir removed after Init is
+// recreated and re-pinned once.
+func (c *Cache) pinCacheSubdir(root *pinnedDir, name string) (pinnedDir, error) {
+	d, err := root.openSub(name)
+	if err == nil {
+		return d, nil
+	}
+	if mkErr := os.MkdirAll(filepath.Join(c.rootDir, name), 0o755); mkErr != nil {
+		// Surface the original pin failure — recreating is best-effort.
+		return pinnedDir{}, err
+	}
+	// Retry once; if the entry is now a symlink the retry fails again.
+	return root.openSub(name)
+}
+
+// pinDestination splits dest into (dir, base) and pins dir:
+//   - cache-managed subdirs (<root>/models, <root>/.tmp) are pinned through
+//     a freshly pinned cache-root fd — race-free by construction;
+//   - foreign destinations fall back to path-based pinning with the
+//     residual race documented in pinForeignDir (production never uses
+//     them; direct downloadOnce callers in tools/tests may).
+//
+// The returned pinnedDir must be released with closePinned.
+func (c *Cache) pinDestination(dest string) (pinnedDir, string, error) {
+	base := filepath.Base(dest)
+	dir := filepath.Dir(dest)
+
+	sub := ""
+	switch dir {
+	case filepath.Join(c.rootDir, cacheModelsDir):
+		sub = cacheModelsDir
+	case filepath.Join(c.rootDir, cacheTmpDir):
+		sub = cacheTmpDir
+	}
+	if sub != "" {
+		root, err := pinRootDir(c.rootDir)
+		if err != nil {
+			return pinnedDir{}, "", err
+		}
+		defer closePinned(&root) // subdirs stay valid after the root fd closes
+		d, err := c.pinCacheSubdir(&root, sub)
+		return d, base, err
+	}
+	d, err := pinForeignDir(dir)
+	return d, base, err
+}
+
 // Get returns the local path for the given model. If not cached, it downloads
 // from the upstream URL. The SHA is optionally verified after download.
 func (c *Cache) Get(ctx context.Context, modelName, upstreamURL, expectedSHA string) (string, error) {
@@ -122,36 +183,98 @@ func (c *Cache) Get(ctx context.Context, modelName, upstreamURL, expectedSHA str
 		}
 	}
 
-	// Download
-	dest := filepath.Join(c.rootDir, cacheModelsDir, sanitizeName(modelName))
-	tmpDest := filepath.Join(c.rootDir, cacheTmpDir, sanitizeName(modelName)+".downloading")
+	base := sanitizeName(modelName)
+	tmpBase := base + ".downloading"
 
-	if err := c.download(ctx, upstreamURL, tmpDest, expectedSHA); err != nil {
+	// Pinned-directory discipline — race-free by construction:
+	//
+	//  1. Resolve the cache root ONCE per operation and pin it
+	//     (O_RDONLY|O_DIRECTORY|O_NOFOLLOW after EvalSymlinks of the root).
+	//  2. Pin the constant subdirs (.tmp, models) via openat(rootFd, ...,
+	//     O_NOFOLLOW|O_DIRECTORY): a swapped-in symlink FAILS here.
+	//  3. Do every file operation through those fds using BARE FILENAMES
+	//     ONLY (sanitizeName never leaves "/"). Single-component resolution
+	//     against held inodes cannot traverse a swapped ancestor because no
+	//     ancestor is ever resolved from a path string — so neither the
+	//     write-open nor the atomic promote can escape the real cache dirs,
+	//     no matter how fast an attacker toggles entries under the root.
+	rootPin, err := pinRootDir(c.rootDir)
+	if err != nil {
 		return "", fmt.Errorf("download %s: %w", modelName, err)
 	}
+	defer closePinned(&rootPin)
 
-	// Same containment guard as Put(): rename(2) follows symlinked
-	// directory components of dest, so verify before renaming.
-	if err := c.verifyDestinationForWrite(dest); err != nil {
-		os.Remove(tmpDest)
+	tmpPin, err := c.pinCacheSubdir(&rootPin, cacheTmpDir)
+	if err != nil {
+		return "", fmt.Errorf("download %s: %w", modelName, err)
+	}
+	defer closePinned(&tmpPin)
+
+	destPath := filepath.Join(c.rootDir, cacheModelsDir, base)
+
+	// Defense-in-depth ONLY (round-1 checks kept where cheap): on unix the
+	// pinned-fd discipline below carries correctness by construction, so
+	// this runs once up-front as a cheap pre-flight (diagnosing a swapped
+	// models dir before spending the download); it remains load-bearing on
+	// non-unix fallbacks where renameAt resolves paths (see
+	// cache_pindir_other.go).
+	if err := c.verifyDestinationForWrite(destPath); err != nil {
 		return "", fmt.Errorf("rename target: %w", err)
 	}
 
-	// Atomically rename
-	if err := os.Rename(tmpDest, dest); err != nil {
+	// Remove any stale tmp file left by an interrupted prior attempt
+	// (unlinkat through the pinned tmp dir — contained by construction).
+	_ = tmpPin.remove(tmpBase)
+
+	if err := c.download(ctx, upstreamURL, tmpPin, tmpBase, expectedSHA); err != nil {
+		return "", fmt.Errorf("download %s: %w", modelName, err)
+	}
+
+	// Atomic promote INSIDE pinned dirs: renameat(tmpFd, tmpBase,
+	// modelsFd, base). os.Rename would resolve two attacker-swappable path
+	// strings; renameat resolves two bare filenames against held inodes.
+	//
+	// The models dir is re-pinned per attempt: if it was removed and
+	// recreated mid-download (benign churn or an attacker toggle), the
+	// first pin may reference an unlinked inode (ENOENT). Every re-pin
+	// revalidates via openat(rootFd, ..., O_NOFOLLOW|O_DIRECTORY) — a
+	// swapped-in symlink still refuses (ELOOP) — so the retry cannot
+	// weaken containment.
+	promote := func() error {
+		mp, err := c.pinCacheSubdir(&rootPin, cacheModelsDir)
+		if err != nil {
+			return err
+		}
+		defer closePinned(&mp)
+		return renameAt(tmpPin, tmpBase, mp, base)
+	}
+
+	err = promote()
+	if err != nil {
+		err = promote()
+	}
+	if err != nil {
+		tmpPin.remove(tmpBase)
 		return "", fmt.Errorf("rename %s: %w", modelName, err)
 	}
 
-	fi, err := os.Stat(dest)
+	size, err := func() (int64, error) {
+		sp, err := c.pinCacheSubdir(&rootPin, cacheModelsDir)
+		if err != nil {
+			return 0, err
+		}
+		defer closePinned(&sp)
+		return sp.statSize(base)
+	}()
 	if err != nil {
 		return "", err
 	}
 
 	entry = &CacheEntry{
 		Name:      modelName,
-		Path:      dest,
+		Path:      destPath,
 		SHA256:    expectedSHA,
-		SizeBytes: fi.Size(),
+		SizeBytes: size,
 		CachedAt:  time.Now(),
 	}
 
@@ -159,24 +282,18 @@ func (c *Cache) Get(ctx context.Context, modelName, upstreamURL, expectedSHA str
 	c.entries[modelName] = entry
 	c.mu.Unlock()
 
-	c.log.Info("model cached", "model", modelName, "size", fi.Size())
-	return dest, nil
+	c.log.Info("model cached", "model", modelName, "size", size)
+	return destPath, nil
 }
 
-// download fetches a file from url, writing to dest, with retry and optional
-// SHA-256 verification. Uses exponential backoff (3 attempts).
-func (c *Cache) download(ctx context.Context, url, dest, expectedSHA string) error {
+// download fetches a file from url into destDir under destBase (a bare
+// filename), with retry and optional SHA-256 verification. Uses exponential
+// backoff (3 attempts). destDir must already be pinned; the tmp subdir is
+// created by Init (re-pinned on demand via pinCacheSubdir).
+func (c *Cache) download(ctx context.Context, url string, destDir pinnedDir, destBase, expectedSHA string) error {
 	if url == "" {
 		return fmt.Errorf("no download URL for model")
 	}
-
-	// Ensure tmp dir exists
-	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
-		return err
-	}
-
-	// Remove any stale tmp file
-	os.Remove(dest)
 
 	backoff := c.backoff
 	if len(backoff) == 0 {
@@ -196,7 +313,7 @@ func (c *Cache) download(ctx context.Context, url, dest, expectedSHA string) err
 			}
 		}
 
-		lastErr = c.downloadOnce(ctx, url, dest, expectedSHA)
+		lastErr = c.downloadOnceAt(ctx, url, destDir, destBase, expectedSHA)
 		if lastErr == nil {
 			return nil
 		}
@@ -206,18 +323,37 @@ func (c *Cache) download(ctx context.Context, url, dest, expectedSHA string) err
 	return fmt.Errorf("download failed after %d attempts: %w", maxAttempts+1, lastErr)
 }
 
-// downloadOnce performs a single download attempt with HTTP Range resume support.
-// If a partial file exists, it sends a Range header to resume from the existing size.
+// downloadOnce performs a single download attempt into a caller-provided
+// destination PATH. Kept for direct callers (tools/tests); it pins the
+// destination directory via pinDestination — cache-managed subdirs are
+// pinned through the cache-root fd, foreign dirs take the documented
+// legacy fallback — and delegates to downloadOnceAt.
 func (c *Cache) downloadOnce(ctx context.Context, url, dest, expectedSHA string) error {
+	destDir, base, err := c.pinDestination(dest)
+	if err != nil {
+		return err
+	}
+	defer closePinned(&destDir)
+	return c.downloadOnceAt(ctx, url, destDir, base, expectedSHA)
+}
+
+// downloadOnceAt performs a single download attempt with HTTP Range resume
+// support, writing destBase inside the PINNED dir destDir. Every file
+// operation (size probe, write-open, resume-hash read, cleanup unlink,
+// complete-file hash) resolves one bare filename against the held
+// directory inode — there is no path resolution left to race.
+func (c *Cache) downloadOnceAt(ctx context.Context, url string, destDir pinnedDir, destBase, expectedSHA string) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
 	if err != nil {
 		return err
 	}
 
-	// Check for partial download to resume from
+	// Check for partial download to resume from (probed through the pinned
+	// dir; O_NOFOLLOW makes a planted symlink report as "nothing resumable"
+	// and the later write-open refuse it outright).
 	var existingSize int64
-	if fi, statErr := os.Stat(dest); statErr == nil && fi.Size() > 0 {
-		existingSize = fi.Size()
+	if size, statErr := destDir.statSize(destBase); statErr == nil && size > 0 {
+		existingSize = size
 		req.Header.Set("Range", fmt.Sprintf("bytes=%d-", existingSize))
 		c.log.Debug("resuming partial download", "url", url, "existing_bytes", existingSize)
 	}
@@ -238,15 +374,16 @@ func (c *Cache) downloadOnce(ctx context.Context, url, dest, expectedSHA string)
 		// Server supports Range — resume from existing size
 		resumeOffset = existingSize
 	case http.StatusRequestedRangeNotSatisfiable:
-		// File is already complete — verify checksum and return
+		// File is already complete — verify checksum and return. The hash
+		// reads through the pinned dir too.
 		c.log.Debug("file already complete, verifying", "url", url, "size", existingSize)
 		if expectedSHA != "" {
-			got, err := fileSHA256(dest)
+			got, err := hashFileAt(destDir, destBase)
 			if err != nil {
 				return fmt.Errorf("hash complete file: %w", err)
 			}
 			if !strings.EqualFold(got, expectedSHA) {
-				os.Remove(dest)
+				destDir.remove(destBase)
 				return fmt.Errorf("SHA-256 mismatch: expected %s, got %s", expectedSHA, got)
 			}
 		}
@@ -255,7 +392,9 @@ func (c *Cache) downloadOnce(ctx context.Context, url, dest, expectedSHA string)
 		return fmt.Errorf("HTTP %d from %s", resp.StatusCode, url)
 	}
 
-	// Open file: append if resuming, truncate if starting fresh
+	// Open file through the pinned dir: append if resuming, truncate if
+	// starting fresh. O_NOFOLLOW makes a planted final-component symlink
+	// fail with ELOOP before any truncate/append side effect.
 	var flag int
 	if resumeOffset > 0 {
 		flag = os.O_CREATE | os.O_WRONLY | os.O_APPEND
@@ -263,15 +402,16 @@ func (c *Cache) downloadOnce(ctx context.Context, url, dest, expectedSHA string)
 		flag = os.O_CREATE | os.O_WRONLY | os.O_TRUNC
 	}
 
-	f, err := c.openFileForDownload(dest, flag)
+	f, err := destDir.openFile(destBase, flag, 0o644)
 	if err != nil {
-		return err
+		return c.diagnoseOpenFailure(destDir, destBase, err)
 	}
 
-	// Hash verification: if resuming, hash the existing content too
+	// Hash verification: if resuming, hash the existing content too (read
+	// through the same pinned dir).
 	hasher := sha256.New()
 	if resumeOffset > 0 {
-		existing, err := os.Open(dest)
+		existing, err := destDir.openRead(destBase)
 		if err != nil {
 			f.Close()
 			return fmt.Errorf("open existing for hash: %w", err)
@@ -289,12 +429,14 @@ func (c *Cache) downloadOnce(ctx context.Context, url, dest, expectedSHA string)
 	_, err = io.Copy(writer, resp.Body)
 	if err != nil {
 		f.Close()
-		os.Remove(dest)
+		// Cleanup unlinks INSIDE the pinned dir — it can never touch an
+		// outside victim even if directory entries were swapped mid-flight.
+		destDir.remove(destBase)
 		return fmt.Errorf("write body: %w", err)
 	}
 
 	if err := f.Close(); err != nil {
-		os.Remove(dest)
+		destDir.remove(destBase)
 		return err
 	}
 
@@ -302,12 +444,39 @@ func (c *Cache) downloadOnce(ctx context.Context, url, dest, expectedSHA string)
 	if expectedSHA != "" {
 		got := hex.EncodeToString(hasher.Sum(nil))
 		if !strings.EqualFold(got, expectedSHA) {
-			os.Remove(dest)
+			destDir.remove(destBase)
 			return fmt.Errorf("SHA-256 mismatch: expected %s, got %s (downloaded %d bytes, resumed %d)", expectedSHA, got, resp.ContentLength, resumeOffset)
 		}
 	}
 
 	return nil
+}
+
+// diagnoseOpenFailure upgrades a failed pinned-dir open to a
+// containment-class error when the final component is a planted symlink.
+// Diagnosis only: containment itself comes from openat + O_NOFOLLOW, which
+// failed the open before any side effect.
+func (c *Cache) diagnoseOpenFailure(d pinnedDir, name string, err error) error {
+	full := filepath.Join(d.disp, name)
+	if fi, lerr := os.Lstat(full); lerr == nil && fi.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("refusing to open %q: destination is a symlink resolving outside cache root (symlink attack?)", full)
+	}
+	return fmt.Errorf("open %s: %w", full, err)
+}
+
+// hashFileAt hashes destBase within the pinned dir (read-only openat).
+func hashFileAt(dir pinnedDir, name string) (string, error) {
+	f, err := dir.openRead(name)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+
+	hasher := sha256.New()
+	if _, err := io.Copy(hasher, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(hasher.Sum(nil)), nil
 }
 
 // Has returns true if the model is in the local cache.
@@ -340,10 +509,14 @@ func (c *Cache) Remove(name string) error {
 	delete(c.entries, name)
 	c.mu.Unlock()
 
-	if err := os.Remove(entry.Path); err != nil {
+	// Unlink through the pinned models dir when possible so removal cannot
+	// be redirected by swapped directory entries either.
+	d, base, err := c.pinDestination(entry.Path)
+	if err != nil {
 		return err
 	}
-	return nil
+	defer closePinned(&d)
+	return d.remove(base)
 }
 
 // ModelPath returns the local path for a cached model.
@@ -377,16 +550,19 @@ func containsPath(root, p string) bool {
 	return strings.HasPrefix(p, root+string(filepath.Separator))
 }
 
-// verifyDestinationForWrite runs the containment checks that MUST happen
-// before a write-open, so no create/truncate/append side effect can land on
-// anything outside the cache root:
-//   - the final path component must not be a symlink (a planted link would
-//     otherwise be followed by O_CREATE|O_TRUNC, destroying the target);
-//   - every directory component must resolve inside the cache root (catches
-//     e.g. the models/.tmp dir itself being replaced by a symlink).
+// verifyDestinationForWrite runs the round-1 containment checks:
+//   - the final path component must not be a symlink;
+//   - every directory component must resolve inside the cache root.
 //
-// The caller still performs the post-open EvalSymlinks verification as a
-// belt-and-braces TOCTOU backstop.
+// ROLE CHANGE since the pinned-directory-fd redesign: on unix, correctness
+// no longer depends on these checks — Get/Put pin the cache root once per
+// operation, open the constant subdirs via openat(rootFd, ..., O_NOFOLLOW)
+// (a swapped-in subdir symlink fails there), and do all file work through
+// those dirfds with bare filenames, so nothing is resolved from attacker-
+// swappable path strings at all. This function is kept as cheap
+// defense-in-depth before the promote rename, and remains load-bearing
+// only on non-unix platforms whose syscall package lacks openat/renameat
+// (see cache_pindir_other.go for the documented residual race there).
 func (c *Cache) verifyDestinationForWrite(path string) error {
 	if fi, err := os.Lstat(path); err == nil && fi.Mode()&os.ModeSymlink != 0 {
 		return fmt.Errorf("refusing to write %q: destination is a symlink resolving outside cache root (symlink attack?)", path)
@@ -405,100 +581,14 @@ func (c *Cache) verifyDestinationForWrite(path string) error {
 	return nil
 }
 
-// safeCreateFile opens a file for writing, refusing to follow symlinks.
-// After opening, it verifies the resolved real path is within the cache
-// root directory to prevent symlink-escape attacks (#246).
-func (c *Cache) safeCreateFile(path string) (*os.File, error) {
-	// Refuse before opening: a planted symlink (final component or a
-	// directory component) must not cause any create/write outside the
-	// cache root (#246).
-	if err := c.verifyDestinationForWrite(path); err != nil {
-		return nil, err
-	}
-
-	// The tmp dir must already exist — created before calling this.
-	// Use O_EXCL to fail if the file exists (prevents symlink following).
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_EXCL|openNoFollow, 0o644)
-	if err != nil {
-		if errors.Is(err, os.ErrExist) {
-			// O_EXCL refused to create through an existing entry — most
-			// notably a planted symlink pointing outside the cache root.
-			// Diagnose it as the containment failure it is (#246).
-			if fi, lerr := os.Lstat(path); lerr == nil && fi.Mode()&os.ModeSymlink != 0 {
-				return nil, fmt.Errorf("refusing to write %q: destination is a symlink resolving outside cache root (symlink attack?)", path)
-			}
-		}
-		return nil, fmt.Errorf("create %s: %w", path, err)
-	}
-
-	// Resolve symlinks and verify the file is within the cache root.
-	realPath, err := filepath.EvalSymlinks(path)
-	if err != nil {
-		f.Close()
-		os.Remove(path)
-		return nil, fmt.Errorf("resolve symlinks for %s: %w", path, err)
-	}
-	realRoot, err := filepath.EvalSymlinks(c.rootDir)
-	if err != nil {
-		f.Close()
-		os.Remove(path)
-		return nil, fmt.Errorf("resolve cache root symlinks: %w", err)
-	}
-	if !containsPath(realRoot, realPath) {
-		f.Close()
-		os.Remove(path)
-		return nil, fmt.Errorf("file %q resolves outside cache root %q (symlink attack?)", realPath, realRoot)
-	}
-	return f, nil
-}
-
-func (c *Cache) openFileForDownload(path string, flag int) (*os.File, error) {
-	// Refuse before opening: O_TRUNC/O_APPEND must never reach a symlink's
-	// target — the write side effect would escape even though a post-open
-	// check later refuses the streamed body (#246).
-	if err := c.verifyDestinationForWrite(path); err != nil {
-		return nil, err
-	}
-
-	f, err := os.OpenFile(path, flag|openNoFollow, 0o644)
-	if err != nil {
-		// Under O_NOFOLLOW a planted final-component symlink fails the
-		// open itself (ELOOP) with zero side effects; diagnose it as the
-		// containment failure it is.
-		if fi, lerr := os.Lstat(path); lerr == nil && fi.Mode()&os.ModeSymlink != 0 {
-			return nil, fmt.Errorf("refusing to open %q: destination is a symlink resolving outside cache root (symlink attack?)", path)
-		}
-		return nil, fmt.Errorf("open %s: %w", path, err)
-	}
-	// Verify the file's real path is within the cache root, preventing
-	// an attacker-controlled symlink from redirecting the write.
-	realPath, err := filepath.EvalSymlinks(path)
-	if err != nil {
-		f.Close()
-		os.Remove(path)
-		return nil, fmt.Errorf("resolve symlinks for %s: %w", path, err)
-	}
-	realRoot, err := filepath.EvalSymlinks(c.rootDir)
-	if err != nil {
-		f.Close()
-		os.Remove(path)
-		return nil, fmt.Errorf("resolve cache root symlinks: %w", err)
-	}
-	if !containsPath(realRoot, realPath) {
-		f.Close()
-		os.Remove(path)
-		return nil, fmt.Errorf("file %q resolves outside cache root %q (symlink attack?)", realPath, realRoot)
-	}
-	return f, nil
-}
-
 // Put streams a model file from r into the cache under name, hashing while
 // writing. If expectedSHA is non-empty, the computed SHA-256 must match
 // (case-insensitively) or the upload is discarded with ErrChecksumMismatch.
 // If maxBytes > 0, uploads exceeding it are discarded with ErrTooLarge.
-// The file is written to the cache tmp dir and atomically renamed into the
-// models dir on success — mirroring download() — so concurrent readers and
-// the reconciler never observe a partial file.
+// The file is written into the pinned tmp dir and atomically renamed
+// (renameat between pinned dirfds) into the pinned models dir on success —
+// mirroring download() — so concurrent readers and the reconciler never
+// observe a partial file.
 func (c *Cache) Put(name string, r io.Reader, expectedSHA string, maxBytes int64) (*CacheEntry, error) {
 	if name == "" {
 		return nil, fmt.Errorf("model name required")
@@ -507,23 +597,34 @@ func (c *Cache) Put(name string, r io.Reader, expectedSHA string, maxBytes int64
 		return nil, fmt.Errorf("model name %q rejected: path traversal sequences are not allowed", name)
 	}
 
-	dest := filepath.Join(c.rootDir, cacheModelsDir, sanitizeName(name))
-	tmpDest := filepath.Join(c.rootDir, cacheTmpDir, sanitizeName(name)+".uploading")
+	base := sanitizeName(name)
+	tmpBase := base + ".uploading"
+	destPath := filepath.Join(c.rootDir, cacheModelsDir, base)
 
-	if err := os.MkdirAll(filepath.Dir(tmpDest), 0o755); err != nil {
-		return nil, fmt.Errorf("create tmp dir: %w", err)
-	}
-	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
-		return nil, fmt.Errorf("create models dir: %w", err)
-	}
-
-	f, err := c.safeCreateFile(tmpDest)
+	// Same pinned-directory discipline as Get(): root resolved once,
+	// constant subdirs pinned via openat(rootFd, ..., O_NOFOLLOW|O_DIRECTORY)
+	// (a swapped-in symlink FAILS here), every file op by bare filename.
+	rootPin, err := pinRootDir(c.rootDir)
 	if err != nil {
 		return nil, fmt.Errorf("create upload tmp file: %w", err)
 	}
+	defer closePinned(&rootPin)
+
+	tmpPin, err := c.pinCacheSubdir(&rootPin, cacheTmpDir)
+	if err != nil {
+		return nil, fmt.Errorf("create upload tmp file: %w", err)
+	}
+	defer closePinned(&tmpPin)
+
+	// O_EXCL|O_NOFOLLOW through the pinned tmp dir: a planted final-
+	// component symlink fails the open with zero side effects.
+	f, err := tmpPin.openFile(tmpBase, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	if err != nil {
+		return nil, fmt.Errorf("create upload tmp file: %w", c.diagnoseOpenFailure(tmpPin, tmpBase, err))
+	}
 	cleanup := func() {
 		f.Close()
-		os.Remove(tmpDest)
+		tmpPin.remove(tmpBase)
 	}
 
 	hasher := sha256.New()
@@ -542,31 +643,47 @@ func (c *Cache) Put(name string, r io.Reader, expectedSHA string, maxBytes int64
 		return nil, fmt.Errorf("%w: got more than %d bytes", ErrTooLarge, maxBytes)
 	}
 	if err := f.Close(); err != nil {
-		os.Remove(tmpDest)
+		tmpPin.remove(tmpBase)
 		return nil, fmt.Errorf("close upload tmp file: %w", err)
 	}
 
 	got := hex.EncodeToString(hasher.Sum(nil))
 	if expectedSHA != "" && !strings.EqualFold(got, expectedSHA) {
-		os.Remove(tmpDest)
+		tmpPin.remove(tmpBase)
 		return nil, fmt.Errorf("%w: expected %s, got %s", ErrChecksumMismatch, expectedSHA, got)
 	}
 
-	// rename(2) follows symlinked DIRECTORY components of dest: if the
-	// models dir itself was replaced by a symlink, the renamed file would
-	// land outside the cache root. Verify the destination before renaming.
-	if err := c.verifyDestinationForWrite(dest); err != nil {
-		os.Remove(tmpDest)
+	// Defense-in-depth (round-1 checks kept where cheap): correctness on
+	// unix is carried by renameAt between pinned dirfds below; this stays
+	// load-bearing only for non-unix fallbacks.
+	if err := c.verifyDestinationForWrite(destPath); err != nil {
+		tmpPin.remove(tmpBase)
 		return nil, fmt.Errorf("rename target: %w", err)
 	}
-	if err := os.Rename(tmpDest, dest); err != nil {
-		os.Remove(tmpDest)
+
+	// Atomic promote INSIDE pinned dirs; models dir re-pinned per attempt
+	// so benign churn (dir removed/recreated mid-upload) costs one retry,
+	// while every re-pin still refuses a swapped-in symlink (ELOOP).
+	promote := func() error {
+		mp, err := c.pinCacheSubdir(&rootPin, cacheModelsDir)
+		if err != nil {
+			return err
+		}
+		defer closePinned(&mp)
+		return renameAt(tmpPin, tmpBase, mp, base)
+	}
+	err = promote()
+	if err != nil {
+		err = promote()
+	}
+	if err != nil {
+		tmpPin.remove(tmpBase)
 		return nil, fmt.Errorf("rename upload into cache: %w", err)
 	}
 
 	entry := &CacheEntry{
 		Name:      name,
-		Path:      dest,
+		Path:      destPath,
 		SHA256:    got,
 		SizeBytes: written,
 		CachedAt:  time.Now(),
@@ -602,19 +719,4 @@ func ResolveHuggingFaceURL(modelID string) string {
 // sanitizeName replaces path separators in model names.
 func sanitizeName(name string) string {
 	return strings.NewReplacer("/", "_", ":", "_").Replace(name)
-}
-
-// fileSHA256 computes the hex SHA-256 hash of a file.
-func fileSHA256(path string) (string, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return "", err
-	}
-	defer f.Close()
-
-	hasher := sha256.New()
-	if _, err := io.Copy(hasher, f); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(hasher.Sum(nil)), nil
 }
