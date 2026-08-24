@@ -15,6 +15,17 @@ import java.security.GeneralSecurityException
 class PairingIdentityContractTest {
 
     // RFC 8032 §7.1 TEST 1 — guards against accidental curve/derivation changes.
+    //
+    // DRIFT RISK: this fixture is hardcoded here AND the coordinator pins
+    // the same wire contract independently in internal/pair/deviceauth.go
+    // (PairStatusSigPrefix constant + TestVerifyPairStatusSignature). The
+    // message format itself is asserted against the literal string below.
+    // Sharing one cross-language fixture (Go embed + Kotlin resource fed
+    // from a single file) requires a build change and is deliberately out
+    // of scope for this branch — until then, any edit to the prefix or
+    // vectors MUST be mirrored on both sides in the same change.
+    // TODO(security): extract a shared Ed25519/pair-status fixture consumed
+    // by both this test and internal/pair/deviceauth_test.go.
     private val rfc8032Seed = hex(
         "9d61b19deffd5a60ba844af492ec2cc4" +
             "4449c5697b326919703bac031cae7f60",
