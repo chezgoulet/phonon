@@ -705,6 +705,16 @@ func containsPath(root, p string) bool {
 // defense-in-depth before the promote rename, and remains load-bearing
 // only on non-unix platforms whose syscall package lacks openat/renameat
 // (see cache_pindir_other.go for the documented residual race there).
+//
+// ERRNO CONTRACT (#320): this function's refusals intentionally carry NO
+// errno where none exists — the "destination is a symlink" and "resolves
+// outside cache root" messages are produced by successful Lstat/EvalSymlinks
+// probes plus a boolean containment comparison, so there is no failed
+// syscall to wrap and inventing one would be wrong. Errors that DO have an
+// underlying cause are wrapped with %w (the EvalSymlinks failures below).
+// Callers wanting errno-based classification (errors.Is(err, ELOOP)) must
+// rely on the openat layer, where diagnoseOpenFailure preserves the real
+// errno via %w.
 func (c *Cache) verifyDestinationForWrite(path string) error {
 	if fi, err := os.Lstat(path); err == nil && fi.Mode()&os.ModeSymlink != 0 {
 		return fmt.Errorf("refusing to write %q: destination is a symlink resolving outside cache root (symlink attack?)", path)
@@ -716,11 +726,12 @@ func (c *Cache) verifyDestinationForWrite(path string) error {
 	realParent, err := filepath.EvalSymlinks(filepath.Dir(path))
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
-			// Parent (e.g. the models dir) was removed while running —
-			// steady-state churn, not an attack: a symlink cannot exist
-			// inside a missing directory. Fall through so the pinned-dir
-			// path's gated recreate+re-pin (pinCacheSubdir) rebuilds and
-			// revalidates it; containment checks stay untouched.
+			// Parent (e.g. the models dir) was removed while running, or is a
+			// DANGLING symlink — both surface as fs.ErrNotExist. The safety
+			// net is NOT this check but the downstream pinCacheSubdir
+			// recreate+re-pin, which refuses a swapped-in symlink with
+			// ELOOP/ENOTDIR (openat O_NOFOLLOW). This fall-through only lets
+			// the recreate path run; it does not itself contain anything.
 			return nil
 		}
 		return fmt.Errorf("resolve parent of %s: %w", path, err)

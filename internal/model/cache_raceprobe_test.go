@@ -21,12 +21,10 @@ package model
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 )
@@ -190,14 +188,16 @@ func TestProbe_OpenDirSwapRace_TruncatesAndDeletesVictim(t *testing.T) {
 }
 
 // eloopClassRefusal reports whether err is an O_NOFOLLOW/ELOOP-class refusal
-// of a planted final-component symlink. The PRIMARY signal is the wrapped
-// errno from the openat itself (diagnoseOpenFailure preserves it via %w);
-// the diagnosed "symlink" containment message remains a secondary safety net.
-// Requiring this class (not merely err != nil) is what keeps the probe
-// non-vacuous: a failure upstream of openat (bad URL, dead server) would not
-// qualify. eloopErrno is build-tag mapped so this compiles on plan9 too.
+// of a planted final-component symlink. Classification is delegated to the
+// build-tagged eloopClassRefusalBase (#318): on !plan9 it is STRICTLY
+// errno-primary — errors.Is(err, eloopErrno), no string fallback — which is
+// sound because diagnoseOpenFailure preserves the real openat errno via %w;
+// on plan9 (no ELOOP errno exists, sentinel never matches) the diagnosed
+// "symlink" containment message remains as fallback. Requiring this class
+// (not merely err != nil) is what keeps the probe non-vacuous: a failure
+// upstream of openat (bad URL, dead server) would not qualify.
 func eloopClassRefusal(err error) bool {
-	return errors.Is(err, eloopErrno) || strings.Contains(err.Error(), "symlink")
+	return eloopClassRefusalBase(err)
 }
 
 // Control: with the final component swapped to a symlink mid-flight (dir stays real),
