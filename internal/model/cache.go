@@ -220,9 +220,9 @@ func (c *Cache) pinDestination(dest string) (pinnedDir, string, error) {
 // Get returns the local path for the given model. If not cached, it downloads
 // from the upstream URL. The SHA is optionally verified after download.
 func (c *Cache) Get(ctx context.Context, modelName, upstreamURL, expectedSHA string) (string, error) {
-	// Entry-point symmetry with Put(): reject traversal sequences before
-	// they can reach path construction.
-	if strings.Contains(modelName, "..") {
+	// Entry-point symmetry with Put(): reject traversal names before they
+	// can reach path construction.
+	if rejectTraversalName(modelName) {
 		return "", fmt.Errorf("model name %q rejected: path traversal sequences are not allowed", modelName)
 	}
 
@@ -621,13 +621,22 @@ func (c *Cache) ModelPath(name string) (string, error) {
 	return entry.Path, nil
 }
 
+// rejectTraversalName reports whether a model name is a path-traversal /
+// special-component value that must not reach path construction. A model name
+// is a SINGLE path component (sanitizeName replaces '/' and ':'), so only the
+// exact values "." and ".." are dangerous — not names merely containing ".."
+// (e.g. "my..model" is a legal filename and must be servable, per #310).
+func rejectTraversalName(name string) bool {
+	return name == "" || name == "." || name == ".."
+}
+
 // OpenModel opens a model file for reading THROUGH the pinned models-dir fd,
 // by its bare on-disk base name, so the serve path never resolves an
 // attacker-swappable path string. This closes the TOCTOU window that
 // os.Open(entry.Path) left on the download path (#304). The returned
 // *os.File must be closed by the caller.
 func (c *Cache) OpenModel(name string) (*os.File, os.FileInfo, error) {
-	if strings.Contains(name, "..") {
+	if rejectTraversalName(name) {
 		return nil, nil, fmt.Errorf("model name %q rejected: path traversal sequences are not allowed", name)
 	}
 	c.mu.RLock()
@@ -734,7 +743,10 @@ func (c *Cache) Put(name string, r io.Reader, expectedSHA string, maxBytes int64
 	if name == "" {
 		return nil, fmt.Errorf("model name required")
 	}
-	if strings.Contains(name, "..") {
+	// Entry-point symmetry with Get()/OpenModel(): reject only the exact
+	// special components — names merely CONTAINING ".." (e.g. "my..model")
+	// are legal filenames once sanitizeName folds their separators (#310).
+	if rejectTraversalName(name) {
 		return nil, fmt.Errorf("model name %q rejected: path traversal sequences are not allowed", name)
 	}
 

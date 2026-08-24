@@ -75,8 +75,10 @@ func TestPut_RejectsTmpSymlinkEscape(t *testing.T) {
 	}
 }
 
-// TestPut_OversizedNameRejected pins that sanitizeName cannot be defeated
-// by a name that collapses to empty or a traversal after sanitization.
+// TestPut_NameSanitizationStillApplies pins that sanitizeName cannot be
+// defeated by a dangerous name: exact special components stay rejected, and
+// separator-laden names are folded to ONE contained component — nothing ever
+// lands outside the cache root.
 func TestPut_NameSanitizationStillApplies(t *testing.T) {
 	dir := t.TempDir()
 	cache := NewCache(dir, nil)
@@ -85,9 +87,37 @@ func TestPut_NameSanitizationStillApplies(t *testing.T) {
 	}
 
 	payload := []byte("data")
-	for _, name := range []string{"../../etc/passwd", "..", ""} {
+	for _, name := range []string{"..", ".", ""} {
 		if _, err := cache.Put(name, bytes.NewReader(payload), "", 0); err == nil {
 			t.Errorf("Put accepted dangerous model name %q", name)
 		}
+	}
+
+	// "../../etc/passwd" folds to the single component ".._.._etc_passwd":
+	// legal since #310 (it merely contains ".."), but it must land INSIDE
+	// the models dir and nowhere else.
+	const sneaky = "../../etc/passwd"
+	if _, err := cache.Put(sneaky, bytes.NewReader(payload), "", 0); err != nil {
+		t.Fatalf("Put(%q): %v", sneaky, err)
+	}
+	stored := filepath.Join(dir, cacheModelsDir, sanitizeName(sneaky))
+	if _, err := os.Stat(stored); err != nil {
+		t.Errorf("folded name not stored inside models dir: %v", err)
+	}
+	var escaped []string
+	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if !info.IsDir() && !strings.HasPrefix(path, filepath.Join(dir, cacheModelsDir)+string(filepath.Separator)) {
+			escaped = append(escaped, path)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk: %v", err)
+	}
+	if len(escaped) > 0 {
+		t.Errorf("files written outside cache models dir: %v", escaped)
 	}
 }

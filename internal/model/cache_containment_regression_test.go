@@ -209,19 +209,30 @@ func assertEvilTreeEmpty(t *testing.T, dir string) {
 	}
 }
 
-// TestGet_RejectsTraversalNames pins entry-point symmetry with Put(): names
-// containing ".." are rejected before reaching path construction (#246).
+// TestGet_RejectsTraversalNames pins entry-point symmetry with Put(): the
+// EXACT special components are rejected before reaching path construction.
+// Since #310, names merely CONTAINING ".." (e.g. "../escape.gguf") are no
+// longer traversal-rejected: sanitizeName folds their separators into a
+// single contained component (".._escape.gguf"), and every file op uses bare
+// filenames through pinned dirfds, so they cannot escape. Exact ".." (and
+// "." and "") stay hard-rejected.
 func TestGet_RejectsTraversalNames(t *testing.T) {
 	dir := t.TempDir()
 	cache := NewCache(dir, nil)
 	if err := cache.Init(); err != nil {
 		t.Fatalf("Init: %v", err)
 	}
-	for _, name := range []string{"../escape.gguf", "a/../b.gguf", ".."} {
+	for _, name := range []string{"..", ".", ""} {
 		if _, err := cache.Get(context.Background(), name, "", ""); err == nil {
 			t.Errorf("Get accepted dangerous model name %q", name)
 		} else if !strings.Contains(err.Error(), "rejected") {
 			t.Errorf("expected traversal rejection for %q, got: %v", name, err)
+		}
+	}
+	// Names containing ".." must NOT be rejected as traversal anymore (#310).
+	for _, name := range []string{"../escape.gguf", "a/../b.gguf"} {
+		if _, err := cache.Get(context.Background(), name, "", ""); err != nil && strings.Contains(err.Error(), "rejected") {
+			t.Errorf("Get over-rejected legal name %q as traversal: %v", name, err)
 		}
 	}
 }
