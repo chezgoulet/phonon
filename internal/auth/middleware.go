@@ -181,6 +181,12 @@ func (m *Middleware) Handler(next http.Handler) http.Handler {
 func (m *Middleware) handleOIDC(w http.ResponseWriter, r *http.Request, next http.Handler) {
 	token, err := extractBearerToken(r)
 	if err != nil {
+		// Belt-and-suspenders (#312): the outermost TraceMiddleware already
+		// strips inbound X-Auth-Claims globally, but keep the defense local
+		// to the auth middleware so this 401 path can never let an
+		// upstream-injected claims header survive even if the outermost-
+		// strip invariant is later broken by a wiring change.
+		r.Header.Del("X-Auth-Claims")
 		http.Error(w, `{"error":"unauthorized","message":"missing or invalid authorization header"}`, http.StatusUnauthorized)
 		return
 	}
@@ -213,6 +219,10 @@ func (m *Middleware) handleOIDC(w http.ResponseWriter, r *http.Request, next htt
 	}
 	if sub.Sub == "" {
 		m.log.Warn("token has no subject; rejecting", "error", "empty sub")
+		// Belt-and-suspenders (#312): reject before any claims are injected,
+		// and drop any inbound X-Auth-Claims locally so the guarantee does
+		// not depend on middleware ordering outside this package.
+		r.Header.Del("X-Auth-Claims")
 		http.Error(w, `{"error":"unauthorized","message":"token has no subject"}`, http.StatusUnauthorized)
 		return
 	}

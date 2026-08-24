@@ -2,9 +2,13 @@ package main
 
 import (
 	"encoding/json"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/chezgoulet/phonon/internal/api"
 )
 
 func TestHealthEndpoint(t *testing.T) {
@@ -38,5 +42,48 @@ func TestHealthEndpoint(t *testing.T) {
 	}
 	if body["version"] != "0.1.0" {
 		t.Errorf("expected version 0.1.0, got %q", body["version"])
+	}
+}
+
+// TestWiring_TraceMiddlewareOutermostStripsAuthClaims pins the #311
+// global-strip invariant at the wiring level. It reconstructs the exact
+// production handler chain from run() (main.go: Handler:
+// api.TraceMiddleware(corsMiddleware(mux, ...))) and asserts that a request
+// carrying an upstream-injected X-Auth-Claims has that header removed before
+// it reaches an auth-free mount shaped like /api/v1/sidecar/*. The strip
+// must NOT depend on auth middleware being present: if this test fails after
+// a wiring change, TraceMiddleware is no longer outermost and the strip is
+// no longer global.
+func TestWiring_TraceMiddlewareOutermostStripsAuthClaims(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	mux := http.NewServeMux()
+	var sawClaims string
+	mux.Handle("/api/v1/sidecar/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sawClaims = r.Header.Get("X-Auth-Claims")
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	// Exact wiring from main.go — TraceMiddleware wraps the whole mux.
+	handler := api.TraceMiddleware(corsMiddleware(mux, []string{"*"}, logger))
+	srv := httptest.NewServer(handler)
+	defer srv.Close()
+
+	req, err := http.NewRequest(http.MethodGet, srv.URL+"/api/v1/sidecar/pair", http.NoBody)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("X-Auth-Claims", `{"sub":"injected-by-upstream-proxy"}`)
+	resp, err := srv.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+	if sawClaims != "" {
+		t.Errorf("#311: X-Auth-Claims survived the top-level handler on an auth-free mount: %q", sawClaims)
 	}
 }

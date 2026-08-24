@@ -142,6 +142,46 @@ func TestHandleOIDC_RejectsEmptySub(t *testing.T) {
 	}
 }
 
+// TestHandleOIDC_StripsInboundClaimsOn401 verifies #312: the belt-and-
+// suspenders local strip in handleOIDC removes any upstream-injected
+// X-Auth-Claims before writing a 401, on BOTH rejection paths (missing
+// token and empty sub), so the defense holds even without the outermost
+// TraceMiddleware strip.
+func TestHandleOIDC_StripsInboundClaimsOn401(t *testing.T) {
+	m, key, issuer := startTestOIDC(t)
+
+	reached := false
+	handler := m.Handler(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		reached = true
+	}))
+
+	// Path 1: missing Authorization header entirely.
+	req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
+	req.Header.Set("X-Auth-Claims", `{"sub":"injected-by-proxy"}`)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != http.StatusUnauthorized || reached {
+		t.Fatalf("missing token: expected 401 without reaching downstream, got %d reached=%v", w.Code, reached)
+	}
+	if got := req.Header.Get("X-Auth-Claims"); got != "" {
+		t.Errorf("missing-token 401 left X-Auth-Claims=%q", got)
+	}
+
+	// Path 2: validly-signed token with an empty sub.
+	token := signIDToken(t, key, issuer, gojwt.MapClaims{"sub": ""})
+	req2 := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
+	req2.Header.Set("Authorization", "Bearer "+token)
+	req2.Header.Set("X-Auth-Claims", `{"sub":"injected-by-proxy"}`)
+	w2 := httptest.NewRecorder()
+	handler.ServeHTTP(w2, req2)
+	if w2.Code != http.StatusUnauthorized || reached {
+		t.Fatalf("empty sub: expected 401 without reaching downstream, got %d reached=%v", w2.Code, reached)
+	}
+	if got := req2.Header.Get("X-Auth-Claims"); got != "" {
+		t.Errorf("empty-sub 401 left X-Auth-Claims=%q", got)
+	}
+}
+
 // TestHandleOIDC_AcceptsNonEmptySub is the positive control: a validly-signed
 // token WITH a sub authenticates and injects verified raw claims downstream,
 // overwriting any upstream-injected header value.
