@@ -1,6 +1,7 @@
 package com.chezgoulet.phonon.pairing
 
 import java.io.File
+import java.io.FileInputStream
 import java.io.IOException
 import java.security.SecureRandom
 import javax.crypto.AEADBadTagException
@@ -59,8 +60,9 @@ class SeedResult(val seed: ByteArray, val origin: SeedOrigin)
  * Filesystem storage for the 32-byte Ed25519 identity seed.
  *
  * On disk the seed exists ONLY in sealed form ([SeedCipher] output prefixed
- * with a one-byte format version), written atomically via a temp file +
- * rename. Deliberately framework-free (no Android imports) so the
+ * with a one-byte format version), written atomically: the temp file is
+ * fsynced, then renamed over the target — the target is never pre-deleted,
+ * so a crash can only leave the previous good blob or the new one. Deliberately framework-free (no Android imports) so the
  * migrate-or-invalidate logic is unit-testable on the JVM; the production
  * cipher is [KeystoreSeedCipher].
  *
@@ -187,11 +189,49 @@ class IdentitySeedStore(
     private fun writeWrapped(seed: ByteArray) {
         val blob = byteArrayOf(BLOB_VERSION_1) + cipher.seal(seed)
         val tmp = File(dir, WRAPPED_FILE_NAME + ".tmp")
-        tmp.writeBytes(blob)
-        if (wrappedFile.exists()) wrappedFile.delete()
-        if (!tmp.renameTo(wrappedFile)) {
-            tmp.copyTo(wrappedFile, overwrite = true)
+        try {
+            tmp.writeBytes(blob)
+            fsync(tmp)
+
+            // POSIX rename atomically REPLACES the target: readers observe
+            // either the old blob or the new one, never a window where
+            // neither exists. Do NOT delete the target first — a crash
+            // between delete and rename used to leave no identity at all,
+            // forcing a fresh generation (and re-pairing).
+            if (tmp.renameTo(wrappedFile)) return
+
+            // Fallback for filesystems that refuse replace-on-rename:
+            // stage a copy through a second temp file so this path is
+            // tmp+rename too, never an in-place overwrite of good state.
+            val staged = File(dir, WRAPPED_FILE_NAME + ".tmp2")
+            try {
+                tmp.copyTo(staged, overwrite = true)
+                fsync(staged)
+                if (!staged.renameTo(wrappedFile)) {
+                    // Both renames refused replacement. Throwing (loud,
+                    // retry next boot) is safer than overwriting a possibly
+                    // intact blob in place.
+                    throw IOException("cannot replace $WRAPPED_FILE_NAME via rename")
+                }
+            } finally {
+                staged.delete()
+            }
+        } finally {
             tmp.delete()
+        }
+    }
+
+    /**
+     * Best-effort durability barrier: flush the temp file's data to stable
+     * storage before it is renamed into place, so a power cut cannot leave
+     * the renamed target with zero-length or unwritten content.
+     */
+    private fun fsync(file: File) {
+        try {
+            FileInputStream(file).use { it.fd.sync() }
+        } catch (_: Exception) {
+            // Best effort: a missed fsync degrades crash-durability, not
+            // secrecy, and some mounts simply do not support it.
         }
     }
 
