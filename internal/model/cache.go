@@ -564,12 +564,17 @@ func (c *Cache) originalName(basename string) string {
 	return ""
 }
 
-// sanitizeName replaces path separators in model names. Overlong names are
-// shortened with a hash suffix so they stay storable and unique instead of
-// failing with ENAMETOOLONG or colliding.
+// sanitizeName makes a model name storable as a single cache filename:
+// path separators fold to "_" and overlong names are shortened with a hash
+// suffix instead of failing with ENAMETOOLONG or colliding. Folding is
+// lossy — "/" and ":" both become "_" — so any name the fold actually
+// changed is also given a 64-bit hash suffix of the ORIGINAL name;
+// otherwise Put("victim/model") and Put("victim_model") would map to one
+// stored file and the second upload would silently overwrite the first.
+// The mapping stays deterministic, so Get/Put always agree on it.
 func sanitizeName(name string) string {
 	s := strings.NewReplacer("/", "_", ":", "_").Replace(name)
-	if len(s) <= maxSanitizedNameLen {
+	if s == name && len(s) <= maxSanitizedNameLen {
 		return s
 	}
 	sum := sha256.Sum256([]byte(name))
@@ -577,13 +582,16 @@ func sanitizeName(name string) string {
 	// SHA-256. A 32-bit truncation let targeted collisions overwrite
 	// another model's file via Put's rename.
 	const hashSuffixLen = 1 + 2*8
-	prefix := maxSanitizedNameLen - hashSuffixLen
-	// Don't split a multi-byte rune at the cut point: walk back over any
-	// continuation bytes so the prefix stays valid UTF-8.
-	for prefix > 0 && !utf8.RuneStart(s[prefix]) {
-		prefix--
+	if len(s) > maxSanitizedNameLen-hashSuffixLen {
+		prefix := maxSanitizedNameLen - hashSuffixLen
+		// Don't split a multi-byte rune at the cut point: walk back over
+		// any continuation bytes so the prefix stays valid UTF-8.
+		for prefix > 0 && !utf8.RuneStart(s[prefix]) {
+			prefix--
+		}
+		s = s[:prefix]
 	}
-	return fmt.Sprintf("%s-%x", s[:prefix], sum[:8])
+	return fmt.Sprintf("%s-%x", s, sum[:8])
 }
 
 // fileSHA256 computes the hex SHA-256 hash of a file.

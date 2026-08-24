@@ -3,6 +3,8 @@ package model
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -188,8 +190,101 @@ func TestResolveHuggingFaceURL(t *testing.T) {
 }
 
 func TestSanitizeName(t *testing.T) {
-	if got := sanitizeName("meta-llama/Llama-3.2-1B:Q4_K_M"); got != "meta-llama_Llama-3.2-1B_Q4_K_M" {
-		t.Errorf("unexpected: %q", got)
+	name := "meta-llama/Llama-3.2-1B:Q4_K_M"
+	got := sanitizeName(name)
+	// Folding rewrote both separators, so the result must carry a 64-bit
+	// hash suffix of the original name to stay distinct from its fold twin.
+	sum := sha256.Sum256([]byte(name))
+	want := "meta-llama_Llama-3.2-1B_Q4_K_M-" + hex.EncodeToString(sum[:8])
+	if got != want {
+		t.Errorf("unexpected: got %q, want %q", got, want)
+	}
+}
+
+// TestSanitizeNameFoldCollidedNamesStayDistinct pins the short-name fold
+// collision fix: "/" and ":" both fold to "_", so without a distinguishing
+// suffix Put("a/b") and Put("a_b") targeted ONE stored file and the second
+// upload silently overwrote the first, cross-serving one model as another.
+func TestCachePutFoldCollidedNamesStayDistinct(t *testing.T) {
+	dir := t.TempDir()
+	c := NewCache(dir, nil)
+	if err := c.Init(); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	contentX := []byte("payload-owned-by-a-slash-b")
+	contentY := []byte("payload-owned-by-a-underscore-b")
+
+	if _, err := c.Put("a/b", bytes.NewReader(contentX), "", 0); err != nil {
+		t.Fatalf(`Put "a/b": %v`, err)
+	}
+	if _, err := c.Put("a_b", bytes.NewReader(contentY), "", 0); err != nil {
+		t.Fatalf(`Put "a_b": %v`, err)
+	}
+
+	pathX, err := c.ModelPath("a/b")
+	if err != nil {
+		t.Fatalf(`ModelPath "a/b": %v`, err)
+	}
+	pathY, err := c.ModelPath("a_b")
+	if err != nil {
+		t.Fatalf(`ModelPath "a_b": %v`, err)
+	}
+	if pathX == pathY {
+		t.Fatalf(`fold collision: "a/b" and "a_b" share one stored file %s`, pathX)
+	}
+
+	gotX, err := os.ReadFile(pathX)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(gotX, contentX) {
+		t.Errorf(`Get("a/b") returns wrong content: got %q, want %q (overwritten by "a_b"?)`, gotX, contentX)
+	}
+	gotY, err := os.ReadFile(pathY)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(gotY, contentY) {
+		t.Errorf(`Get("a_b") returns wrong content: got %q, want %q`, gotY, contentY)
+	}
+
+	// The mapping must survive a restart via the persisted sidecars.
+	c2 := NewCache(dir, nil)
+	if err := c2.Init(); err != nil {
+		t.Fatalf("re-Init: %v", err)
+	}
+	for name, want := range map[string][]byte{"a/b": contentX, "a_b": contentY} {
+		p, err := c2.Get(context.Background(), name, "", "")
+		if err != nil {
+			t.Fatalf(`Get(%q) after restart: %v`, name, err)
+		}
+		got, err := os.ReadFile(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(got, want) {
+			t.Errorf(`Get(%q) after restart: got %q, want %q`, name, got, want)
+		}
+	}
+}
+
+// TestSanitizeNameManySeparatorsStaysWithinLimit feeds a pathological
+// separator-heavy name through fold+hash and requires the result to stay
+// within the filesystem-safe length cap.
+func TestSanitizeNameManySeparatorsStaysWithinLimit(t *testing.T) {
+	name := strings.Repeat("org/repo:quant/", 60) // 450 bytes, 120 separators
+	got := sanitizeName(name)
+	if len(got) > maxSanitizedNameLen {
+		t.Errorf("sanitized name is %d bytes, exceeds %d", len(got), maxSanitizedNameLen)
+	}
+	if !utf8.ValidString(got) {
+		t.Errorf("sanitized name is not valid UTF-8: %q", got)
+	}
+	sum := sha256.Sum256([]byte(name))
+	wantSuffix := "-" + hex.EncodeToString(sum[:8])
+	if !strings.HasSuffix(got, wantSuffix) {
+		t.Errorf("sanitized name %q lacks hash suffix %q", got, wantSuffix)
 	}
 }
 
