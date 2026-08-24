@@ -6,6 +6,7 @@ import android.security.keystore.KeyProperties
 import android.security.keystore.StrongBoxUnavailableException
 import java.security.GeneralSecurityException
 import java.security.KeyStore
+import java.security.ProviderException
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
@@ -82,11 +83,18 @@ class KeystoreSeedCipher(
         (keyStore.getEntry(alias, null) as? KeyStore.SecretKeyEntry)?.let { return it.secretKey }
 
         // StrongBox requires API 28+ hardware support; fall back to the
-        // TEE-backed keystore when the device has no such secure element.
-        // minSdk is 29 so the SDK_INT guard is belt-and-braces documentation.
+        // TEE-backed keystore when secure-element keygen fails for ANY
+        // keystore-shaped reason — StrongBoxUnavailableException, vendor
+        // ProviderException (secure element absent/busy, service not yet up
+        // in early boot), or other GeneralSecurityException. Non-security
+        // RuntimeExceptions are deliberately NOT swallowed.
         return try {
             generateKey(strongBox = preferStrongBox && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P)
         } catch (e: StrongBoxUnavailableException) {
+            generateKey(strongBox = false)
+        } catch (e: ProviderException) {
+            generateKey(strongBox = false)
+        } catch (e: GeneralSecurityException) {
             generateKey(strongBox = false)
         }
     }

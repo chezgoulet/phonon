@@ -73,6 +73,17 @@ class PhononService : Service() {
     @Volatile
     var connectionStatus: String = "connecting"
         private set
+
+    /**
+     * Non-null when service startup failed (e.g. identity unsealing);
+     * drives the degraded-mode notification instead of a FGS crash loop.
+     */
+    @Volatile
+    var startupError: String? = null
+        private set
+
+    /** True once [startComponents] finished successfully. */
+    private var componentsStarted = false
     @Volatile
     var loadedModel: String? = null
         private set
@@ -130,11 +141,26 @@ class PhononService : Service() {
         ThemeEngine.initializeWithDefaults()
         ThemeEngine.setLocalDeviceId(app.deviceId)
 
-        // Start components
-        startComponents()
+        // Start components. An identity failure (e.g. TransientUnsealException
+        // from an early-boot Keystore outage) must degrade LOUDLY — error log
+        // plus a degraded notification — rather than propagate out of
+        // onStartCommand: a throw here crashes the process, START_STICKY then
+        // recreates the service into the same failure, and the foreground
+        // service crash-loops. Returning START_NOT_STICKY stops the tight
+        // restart cycle; retry happens on explicit start / next boot, matching
+        // IdentitySeedStore's retry-on-next-boot semantics.
+        try {
+            startComponents()
+            componentsStarted = true
 
-        // Start VizState update loop (~10fps)
-        startVizStateLoop()
+            // Start VizState update loop (~10fps)
+            startVizStateLoop()
+        } catch (e: Exception) {
+            startupError = (e.message ?: e.javaClass.simpleName).take(120)
+            Log.e(tag, "Sidecar startup failed; degraded until next start/boot: $startupError", e)
+            updateNotification()
+            return START_NOT_STICKY
+        }
 
         // If killed, restart
         return START_STICKY
@@ -151,16 +177,20 @@ class PhononService : Service() {
 
     /** Force an immediate heartbeat to the coordinator. */
     fun forceHeartbeat() {
-        healthReporter.forceSend()
+        if (componentsStarted) healthReporter.forceSend()
     }
 
     override fun onDestroy() {
         vizStateJob?.cancel()
         scope.cancel()
-        inferenceServer.stop()
-        healthReporter.stop()
-        coordinatorClient.stop()
-        mdnsAnnouncer.stop()
+        // Components may never have started (degraded startup path); their
+        // fields are lateinit and must not be touched then.
+        if (componentsStarted) {
+            inferenceServer.stop()
+            healthReporter.stop()
+            coordinatorClient.stop()
+            mdnsAnnouncer.stop()
+        }
         wakeLock?.release()
         stopForeground(STOP_FOREGROUND_REMOVE)
         super.onDestroy()
@@ -341,6 +371,7 @@ class PhononService : Service() {
 
     private fun buildNotification(): Notification {
         val statusText = when {
+            startupError != null -> "ERROR: degraded — $startupError"
             pairingCode != null -> "Pairing — code: $pairingCode"
             connectionStatus == "connected" -> getString(R.string.notification_title_connected)
             connectionStatus == "disconnected" -> getString(R.string.notification_title_disconnected)
