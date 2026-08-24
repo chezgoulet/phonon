@@ -29,12 +29,12 @@ var defaultBackoff = []time.Duration{1 * time.Second, 3 * time.Second, 10 * time
 
 // Cache manages local model files downloaded from upstream sources.
 type Cache struct {
-	rootDir   string
-	client    *http.Client
-	log       *slog.Logger
-	mu        sync.RWMutex
-	entries   map[string]*CacheEntry // model name → entry
-	backoff   []time.Duration         // retry backoff schedule (override for tests)
+	rootDir string
+	client  *http.Client
+	log     *slog.Logger
+	mu      sync.RWMutex
+	entries map[string]*CacheEntry // model name → entry
+	backoff []time.Duration        // retry backoff schedule (override for tests)
 }
 
 // SetBackoff overrides the retry backoff schedule. Used in tests.
