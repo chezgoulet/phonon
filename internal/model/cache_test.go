@@ -192,6 +192,32 @@ func TestSanitizeName(t *testing.T) {
 	}
 }
 
+// TestSanitizeNameOverlongNamesStayDistinct guards the 64-bit hash suffix on
+// overlong names: two different names sharing a long common prefix must not
+// collide, or Put's rename would let one model overwrite another's file.
+func TestSanitizeNameOverlongNamesStayDistinct(t *testing.T) {
+	common := strings.Repeat("Llama-3-405B-block-", 12) // 228-byte shared prefix
+	a := common + strings.Repeat("a", 24) + "-alpha"
+	b := common + strings.Repeat("b", 24) + "-bravo"
+	if len(a) <= maxSanitizedNameLen || len(b) <= maxSanitizedNameLen {
+		t.Fatalf("test names must exceed %d bytes: got %d and %d", maxSanitizedNameLen, len(a), len(b))
+	}
+	sa := sanitizeName(a)
+	sb := sanitizeName(b)
+	if sa == sb {
+		t.Fatalf("distinct overlong names collided: %q", sa)
+	}
+	for name, s := range map[string]string{"a": sa, "b": sb} {
+		if len(s) > maxSanitizedNameLen {
+			t.Errorf("sanitized %s is %d bytes, exceeds %d", name, len(s), maxSanitizedNameLen)
+		}
+		suffix := s[len(s)-17:]
+		if suffix[0] != '-' || strings.Trim(suffix[1:], "0123456789abcdef") != "" {
+			t.Errorf("sanitized %s has malformed 64-bit hash suffix %q: %q", name, suffix, s)
+		}
+	}
+}
+
 func TestDistributeHandler_NoModelInPath(t *testing.T) {
 	cache := NewCache(t.TempDir(), nil)
 	handler := DistributeHandler(cache)

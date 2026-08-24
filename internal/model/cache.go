@@ -519,8 +519,12 @@ func sanitizeName(name string) string {
 		return s
 	}
 	sum := sha256.Sum256([]byte(name))
-	prefix := maxSanitizedNameLen - 9
-	return fmt.Sprintf("%s-%x", s[:prefix], sum[:4])
+	// The suffix is "-" plus 16 hex digits: a 64-bit truncation of the
+	// SHA-256. A 32-bit truncation let targeted collisions overwrite
+	// another model's file via Put's rename.
+	const hashSuffixLen = 1 + 2*8
+	prefix := maxSanitizedNameLen - hashSuffixLen
+	return fmt.Sprintf("%s-%x", s[:prefix], sum[:8])
 }
 
 // fileSHA256 computes the hex SHA-256 hash of a file.
