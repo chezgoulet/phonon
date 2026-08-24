@@ -18,8 +18,8 @@ import (
 	"sync"
 	"time"
 
-	gojwt "github.com/golang-jwt/jwt/v5"
 	"github.com/coreos/go-oidc/v3/oidc"
+	gojwt "github.com/golang-jwt/jwt/v5"
 )
 
 // Mode constants.
@@ -37,7 +37,7 @@ type Config struct {
 
 	// PSK is the pre-shared key for LAN deployments (mode="psk").
 	// If empty and mode is "psk", auth will reject all requests.
-	PSK string
+	PSK              string
 	JWKSRefresh      time.Duration
 	DiscoveryTimeout time.Duration
 }
@@ -145,7 +145,7 @@ func (m *Middleware) Stop() {
 
 // Status represents the current authentication mode.
 type Status struct {
-	Mode   string `json:"mode"`   // "secure", "psk", or "insecure"
+	Mode   string `json:"mode"` // "secure", "psk", or "insecure"
 	Issuer string `json:"issuer,omitempty"`
 }
 
@@ -179,10 +179,6 @@ func (m *Middleware) Handler(next http.Handler) http.Handler {
 }
 
 func (m *Middleware) handleOIDC(w http.ResponseWriter, r *http.Request, next http.Handler) {
-	// Strip any injected X-Auth-Claims header before validation
-	// (prevents upstream proxy injection attacks)
-	r.Header.Del("X-Auth-Claims")
-
 	token, err := extractBearerToken(r)
 	if err != nil {
 		http.Error(w, `{"error":"unauthorized","message":"missing or invalid authorization header"}`, http.StatusUnauthorized)
@@ -205,13 +201,20 @@ func (m *Middleware) handleOIDC(w http.ResponseWriter, r *http.Request, next htt
 		return
 	}
 
-	// Base claims for issuer/clientID validation (redundant with go-oidc, but
-	// included for forward compatibility).
-	var claims struct {
+	// Reject tokens lacking a subject before any claims are injected into
+	// headers or context (#302): an empty sub means an unauditable identity.
+	var sub struct {
 		Sub string `json:"sub"`
 	}
-	if err := idToken.Claims(&claims); err == nil {
-		_ = claims.Sub // available for downstream logging
+	if err := idToken.Claims(&sub); err != nil {
+		m.log.Warn("failed to extract sub", "error", err)
+		http.Error(w, `{"error":"unauthorized","message":"failed to extract subject"}`, http.StatusUnauthorized)
+		return
+	}
+	if sub.Sub == "" {
+		m.log.Warn("token has no subject; rejecting", "error", "empty sub")
+		http.Error(w, `{"error":"unauthorized","message":"token has no subject"}`, http.StatusUnauthorized)
+		return
 	}
 
 	// Inject claims into request context.
@@ -225,10 +228,6 @@ func (m *Middleware) handleOIDC(w http.ResponseWriter, r *http.Request, next htt
 }
 
 func (m *Middleware) handlePSK(w http.ResponseWriter, r *http.Request, next http.Handler) {
-	// Strip any injected X-Auth-Claims header before validation
-	// (prevents upstream proxy injection attacks)
-	r.Header.Del("X-Auth-Claims")
-
 	if !validatePSK(r, []byte(m.config.PSK), len(m.config.PSK)) {
 		http.Error(w, `{"error":"unauthorized","message":"invalid or missing PSK"}`, http.StatusUnauthorized)
 		return
@@ -248,10 +247,11 @@ func ClaimsFromContext(ctx context.Context) string {
 	return ""
 }
 
-// contextKey is an unexported type for context keys to avoid collisions.
-type contextKey string
+// claimsContextKey is an unexported struct type so the context key can never
+// collide with keys defined by other packages (a plain string key could).
+type claimsContextKey struct{}
 
-const claimsKey contextKey = "auth:claims"
+var claimsKey = claimsContextKey{}
 
 // extractBearerToken extracts a Bearer token from the Authorization header.
 func extractBearerToken(r *http.Request) (string, error) {

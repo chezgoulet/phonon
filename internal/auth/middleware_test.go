@@ -154,25 +154,6 @@ func TestHandlerPSK(t *testing.T) {
 	}
 }
 
-func TestHandlerPSKStripClaimsHeader(t *testing.T) {
-	m := New(Config{Mode: "psk", PSK: "testkey"})
-	m.started = true
-
-	handler := m.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Verify X-Auth-Claims was stripped
-		if r.Header.Get("X-Auth-Claims") != "" {
-			t.Error("expected X-Auth-Claims to be stripped")
-		}
-		w.WriteHeader(http.StatusOK)
-	}))
-
-	req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
-	req.Header.Set("Authorization", "Bearer testkey")
-	req.Header.Set("X-Auth-Claims", "injected")
-	w := httptest.NewRecorder()
-	handler.ServeHTTP(w, req)
-}
-
 func TestExtractBearerToken(t *testing.T) {
 	tests := []struct {
 		name    string

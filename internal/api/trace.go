@@ -38,8 +38,14 @@ func TraceIDFromContext(ctx context.Context) string {
 //
 // The ID is always generated server-side (an inbound X-Phonon-Trace-Id is
 // ignored) so clients cannot inject arbitrary strings into the event log.
+//
+// As the outermost middleware it also strips any inbound X-Auth-Claims
+// header (#302). The strip must be global — mounts without auth middleware
+// (e.g. /api/v1/sidecar/*) would otherwise let an upstream proxy inject
+// trusted-looking claims downstream.
 func TraceMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.Header.Del("X-Auth-Claims")
 		traceID := NewTraceID()
 		w.Header().Set(TraceIDHeader, traceID)
 		next.ServeHTTP(w, r.WithContext(ContextWithTraceID(r.Context(), traceID)))
