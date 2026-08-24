@@ -21,10 +21,13 @@ package model
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -187,9 +190,27 @@ func TestProbe_OpenDirSwapRace_TruncatesAndDeletesVictim(t *testing.T) {
 	}
 }
 
+// eloopClassRefusal reports whether err is an O_NOFOLLOW/ELOOP-class refusal
+// of a planted final-component symlink — either the wrapped errno from the
+// openat itself or the diagnosed containment message. Requiring this class
+// (not merely err != nil) is what keeps the probe non-vacuous: a failure
+// upstream of openat (bad URL, dead server) would not qualify.
+func eloopClassRefusal(err error) bool {
+	return errors.Is(err, syscall.ELOOP) || strings.Contains(err.Error(), "symlink")
+}
+
 // Control: with the final component swapped to a symlink mid-flight (dir stays real),
-// O_NOFOLLOW must make the open fail with ELOOP — confirms the fix's core claim.
+// O_NOFOLLOW must make the pinned-fd write-open fail with ELOOP — confirms the fix's
+// core claim. The probe drives downloadOnceAt through a live httptest server and a
+// pinned models-dir fd so the swap genuinely reaches the openat call; an empty URL
+// would fail in the HTTP client and make every iteration pass vacuously.
 func TestProbe_FinalComponentSwapCoveredByNoFollow(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("DUMMY-MODEL-BYTES"))
+	}))
+	defer srv.Close()
+
 	base := t.TempDir()
 	root := filepath.Join(base, "cache")
 	victim := filepath.Join(base, "victim.bin")
@@ -204,14 +225,23 @@ func TestProbe_FinalComponentSwapCoveredByNoFollow(t *testing.T) {
 	modelsDir := filepath.Join(root, cacheModelsDir)
 	dest := filepath.Join(modelsDir, "m.gguf")
 
+	pin, pinName, err := cache.pinDestination(dest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closePinned(&pin)
+
 	followed := 0
 	for i := 0; i < 2000; i++ {
 		// Simulate the tightest possible swap: plant symlink JUST BEFORE the call.
 		os.Remove(dest)
 		os.Symlink(victim, dest)
-		err := cache.downloadOnce(context.Background(), "", dest, "")
-		if err == nil {
+		err := cache.downloadOnceAt(context.Background(), srv.URL, pin, pinName, "")
+		switch {
+		case err == nil:
 			followed++
+		case !eloopClassRefusal(err):
+			t.Fatalf("iteration %d: expected ELOOP-class symlink refusal at the openat layer, got %v", i, err)
 		}
 		if b, e := os.ReadFile(victim); e != nil || string(b) != string(sentinel) {
 			t.Fatalf("iteration %d: victim damaged (%v)", i, e)
