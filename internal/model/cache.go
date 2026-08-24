@@ -4,8 +4,10 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"os"
@@ -113,12 +115,19 @@ func bareName(name string) error {
 // pinCacheSubdir pins one of the known constant subdirs below a pinned
 // root: openat(rootFd, name, O_RDONLY|O_DIRECTORY|O_NOFOLLOW). If anyone
 // replaced the subdir with a symlink this FAILS (ELOOP/ENOTDIR), which is
-// the correct containment behavior. A subdir removed after Init is
-// recreated and re-pinned once.
+// the correct containment behavior. A subdir REMOVED after Init is
+// recreated and re-pinned once; any other pin failure (ELOOP/ENOTDIR —
+// entry swapped to a symlink or non-directory) is returned as-is so
+// recreation can never be attempted through a planted link.
 func (c *Cache) pinCacheSubdir(root *pinnedDir, name string) (pinnedDir, error) {
 	d, err := root.openSub(name)
 	if err == nil {
 		return d, nil
+	}
+	// Recreate only a genuinely missing directory; containment-class
+	// failures must propagate untouched.
+	if !errors.Is(err, fs.ErrNotExist) {
+		return pinnedDir{}, err
 	}
 	if mkErr := os.MkdirAll(filepath.Join(c.rootDir, name), 0o755); mkErr != nil {
 		// Surface the original pin failure — recreating is best-effort.
