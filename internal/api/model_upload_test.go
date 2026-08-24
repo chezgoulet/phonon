@@ -5,7 +5,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -359,6 +361,53 @@ func TestModelUploadChecksumFieldOverLimitRejected(t *testing.T) {
 	}
 	if !strings.Contains(resp.Error.Message, "checksum") || !strings.Contains(resp.Error.Message, "4096 byte limit") {
 		t.Errorf("error should name the field and the limit: %q", resp.Error.Message)
+	}
+}
+
+// countingReader tracks how many body bytes the multipart machinery has
+// actually pulled through.
+type countingReader struct {
+	r io.Reader
+	n int64
+}
+
+func (c *countingReader) Read(p []byte) (int, error) {
+	n, err := c.r.Read(p)
+	c.n += int64(n)
+	return n, err
+}
+
+// TestReadSmallFieldCapsDiscardOnOverflow ensures an overflowing field is
+// not drained unboundedly while the upload semaphore is held: at most ~1MiB
+// of a 5MiB junk field may be consumed after the limit is detected.
+func TestReadSmallFieldCapsDiscardOnOverflow(t *testing.T) {
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	fw, err := mw.CreateFormField("name")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fw.Write(bytes.Repeat([]byte("a"), 5<<20)); err != nil {
+		t.Fatal(err)
+	}
+	mw.Close()
+
+	cr := &countingReader{r: bytes.NewReader(buf.Bytes())}
+	mr := multipart.NewReader(cr, mw.Boundary())
+	part, err := mr.NextPart()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = readSmallField(part)
+	if !errors.Is(err, errFieldTooLarge) {
+		t.Fatalf("expected errFieldTooLarge, got %v", err)
+	}
+	// Budget: 4097-byte read + 1MiB capped discard + header/boundary slack.
+	const budget = maxFormFieldLen + 1 + maxFieldDiscardBytes + 8192
+	if cr.n > budget {
+		t.Errorf("consumed %d bytes of the body; want ≤ %d (uncapped Close would drain %d)",
+			cr.n, budget, buf.Len())
 	}
 }
 
