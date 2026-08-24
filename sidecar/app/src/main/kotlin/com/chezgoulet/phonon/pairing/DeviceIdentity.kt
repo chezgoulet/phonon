@@ -10,16 +10,23 @@ import com.google.crypto.tink.subtle.Ed25519Sign
  * Storage model: the 32-byte private seed never touches disk in plaintext.
  * It is sealed by [KeystoreSeedCipher] under an AES-256-GCM key held inside
  * Android Keystore (StrongBox when available) and persisted only as an
- * authenticated ciphertext blob in files/phonon_device.key.enc; the seed is
- * decrypted transiently into memory for each signature operation.
+ * authenticated ciphertext blob in files/phonon_device.key.enc. The seed is
+ * unsealed ONCE, at construction (service start), and then held in memory
+ * for the service's lifetime; it is NOT re-unsealed per signature
+ * operation, and it is not zeroized between signatures. Per-signature
+ * unseal-and-clear was considered and rejected for now: the service is
+ * wake-locked and long-lived, so the seed would be resident continuously
+ * anyway, while per-op Keystore round-trips would add latency and wear to
+ * every pair/status poll. If a shorter-residency model is ever needed,
+ * restructure signPairStatus() to unseal → sign → zeroize per call.
  *
  * Why the seed is not a native Keystore key: AndroidKeyStore exposes no
  * stable Ed25519 keygen/sign algorithm across our supported range (minSdk
  * 29 → 35; KeyMint Ed25519 support is device-dependent), so the Ed25519
  * math remains Tink ([Ed25519Sign]) and Keystore provides the non-exportable
  * hardware-backed wrapping key. The seed is therefore protected against
- * plaintext-at-rest exfiltration (rooted device, custom ROM) even though it
- * still exists transiently in RAM to sign.
+ * plaintext-at-rest exfiltration (rooted device, custom ROM); the residual
+ * exposure is the seed's residency in RAM of the running service process.
  *
  * Migration: a pre-existing plaintext files/phonon_device.key is re-sealed
  * into wrapped storage on first run and zero-wiped, preserving the paired
