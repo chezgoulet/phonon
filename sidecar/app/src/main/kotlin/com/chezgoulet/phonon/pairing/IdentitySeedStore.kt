@@ -54,7 +54,16 @@ enum class SeedOrigin {
     GENERATED_AFTER_INVALIDATION,
 }
 
-class SeedResult(val seed: ByteArray, val origin: SeedOrigin)
+class SeedResult(
+    val seed: ByteArray,
+    val origin: SeedOrigin,
+    /**
+     * Whether removal of the legacy plaintext file succeeded during
+     * migration. Meaningful only when [origin] is [SeedOrigin.MIGRATED_LEGACY];
+     * callers must surface a failure rather than claim "plaintext wiped".
+     */
+    val legacyWipeSucceeded: Boolean = true,
+)
 
 /**
  * Filesystem storage for the 32-byte Ed25519 identity seed.
@@ -91,6 +100,12 @@ class IdentitySeedStore(
     private val dir: File,
     private val cipher: SeedCipher,
     private val random: SecureRandom = SecureRandom(),
+    /**
+     * Warning sink for storage anomalies this framework-free class cannot
+     * log itself (kept free of android.util.Log for JVM testability).
+     * Defaults to stderr, which Android routes to logcat.
+     */
+    private val warn: (String) -> Unit = { System.err.println(it) },
 ) {
     private var invalidatedCorruptState = false
 
@@ -99,8 +114,14 @@ class IdentitySeedStore(
 
         readLegacySeed()?.let { legacy ->
             writeWrapped(legacy)
-            wipe(legacyFile)
-            return SeedResult(legacy, SeedOrigin.MIGRATED_LEGACY)
+            val wiped = wipe(legacyFile)
+            if (!wiped) {
+                warn(
+                    "IdentitySeedStore: sealed the identity but FAILED to delete " +
+                        "plaintext ${legacyFile.absolutePath} — remove it manually",
+                )
+            }
+            return SeedResult(legacy, SeedOrigin.MIGRATED_LEGACY, wiped)
         }
 
         val seed = ByteArray(SEED_BYTES).also { random.nextBytes(it) }
@@ -166,7 +187,12 @@ class IdentitySeedStore(
 
     private fun failCorrupt(): ByteArray? {
         invalidatedCorruptState = true
-        wipe(wrappedFile)
+        if (!wipe(wrappedFile)) {
+            warn(
+                "IdentitySeedStore: corrupt ${wrappedFile.absolutePath} could not be wiped; " +
+                    "a new identity was generated but the corrupt blob may still be present",
+            )
+        }
         return null
     }
 
@@ -235,15 +261,26 @@ class IdentitySeedStore(
         }
     }
 
-    /** Overwrites with zeros before deleting; best effort on failure. */
-    private fun wipe(file: File) {
-        try {
-            if (!file.isFile) return
+    /**
+     * Overwrites with zeros before deleting.
+     *
+     * @return true if the file is gone (or never existed), false if the
+     *         zero-fill or the deletion failed — callers MUST NOT claim the
+     *         plaintext was wiped when this returns false.
+     *
+     * Caveat: on journaled/logged filesystems (e.g. ext4 data=journal, F2FS)
+     * the zero-fill itself can survive in the journal after unlinking, so
+     * "wiped" means "gone from the live filesystem", not forensic erasure;
+     * app-private storage is the actual access gate.
+     */
+    private fun wipe(file: File): Boolean {
+        return try {
+            if (!file.isFile) return true
             val length = file.length().toInt().coerceAtLeast(SEED_BYTES)
             file.writeBytes(ByteArray(length))
             file.delete()
         } catch (_: Exception) {
-            // Best effort; app-private storage already gates access.
+            false
         }
     }
 

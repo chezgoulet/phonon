@@ -75,7 +75,16 @@ class DeviceIdentity(context: Context) {
             SeedOrigin.LOADED_WRAPPED ->
                 Log.d(tag, "Loaded device identity key (Keystore-wrapped)")
             SeedOrigin.MIGRATED_LEGACY ->
-                Log.i(tag, "Migrated device identity key into Keystore-wrapped storage; plaintext copy wiped")
+                // Only claim "plaintext wiped" when deletion actually worked.
+                if (result.legacyWipeSucceeded) {
+                    Log.i(tag, "Migrated device identity key into Keystore-wrapped storage; plaintext copy wiped")
+                } else {
+                    Log.w(
+                        tag,
+                        "Migrated device identity key into Keystore-wrapped storage; FAILED to delete " +
+                            "plaintext ${IdentitySeedStore.LEGACY_FILE_NAME} in ${context.filesDir} — remove it manually",
+                    )
+                }
             SeedOrigin.GENERATED_FRESH ->
                 Log.i(tag, "Generated new device identity key")
             SeedOrigin.GENERATED_AFTER_INVALIDATION ->

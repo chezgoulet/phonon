@@ -128,6 +128,7 @@ class IdentitySeedStoreTest {
 
         assertEquals(SeedOrigin.MIGRATED_LEGACY, result.origin)
         assertTrue(result.seed.contentEquals(legacySeed))
+        assertTrue(result.legacyWipeSucceeded)
         assertFalse("plaintext copy must be removed", legacyFile.exists())
         assertTrue("sealed copy must exist", wrappedFile.isFile)
 
