@@ -3,11 +3,11 @@ package api
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
-	"os"
 	"strings"
 
 	"github.com/chezgoulet/phonon/internal/model"
@@ -45,27 +45,18 @@ func (h *ModelDownloadHandler) handleDownload(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	// Resolve local path from cache
-	path, err := h.cache.ModelPath(modelName)
+	f, fi, err := h.cache.OpenModel(modelName)
 	if err != nil {
-		h.log.Warn("model not cached", "model", modelName)
-		http.Error(w, fmt.Sprintf(`{"error":"model not cached: %s"}`, modelName), http.StatusNotFound)
-		return
-	}
-
-	f, err := os.Open(path)
-	if err != nil {
+		if errors.Is(err, model.ErrNotCached) {
+			h.log.Warn("model not cached", "model", modelName)
+			http.Error(w, fmt.Sprintf(`{"error":"model not cached: %s"}`, modelName), http.StatusNotFound)
+			return
+		}
 		h.log.Error("failed to open model file", "model", modelName, "error", err)
 		http.Error(w, `{"error":"failed to open model file"}`, http.StatusInternalServerError)
 		return
 	}
 	defer f.Close()
-
-	fi, err := f.Stat()
-	if err != nil {
-		http.Error(w, `{"error":"failed to stat model file"}`, http.StatusInternalServerError)
-		return
-	}
 
 	// Compute SHA-256 hash for the X-Checksum-Sha256 header
 	hasher := sha256.New()
@@ -81,14 +72,11 @@ func (h *ModelDownloadHandler) handleDownload(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	// Set response headers
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename=%q`, safeModelName(modelName)))
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", fi.Size()))
 	w.Header().Set("X-Checksum-Sha256", checksum)
 	w.Header().Set("Accept-Ranges", "bytes")
-
-	// Serve the file with Range support
 	http.ServeContent(w, r, safeModelName(modelName), fi.ModTime(), f)
 }
 

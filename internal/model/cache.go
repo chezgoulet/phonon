@@ -576,6 +576,48 @@ func (c *Cache) ModelPath(name string) (string, error) {
 	return entry.Path, nil
 }
 
+// OpenModel opens a model file for reading THROUGH the pinned models-dir fd,
+// by its bare on-disk base name, so the serve path never resolves an
+// attacker-swappable path string. This closes the TOCTOU window that
+// os.Open(entry.Path) left on the download path (#304). The returned
+// *os.File must be closed by the caller.
+func (c *Cache) OpenModel(name string) (*os.File, os.FileInfo, error) {
+	if strings.Contains(name, "..") {
+		return nil, nil, fmt.Errorf("model name %q rejected: path traversal sequences are not allowed", name)
+	}
+	c.mu.RLock()
+	entry, ok := c.entries[name]
+	c.mu.RUnlock()
+	if !ok {
+		return nil, nil, ErrNotCached
+	}
+	base := filepath.Base(entry.Path)
+	root, err := pinRootDir(c.rootDir)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer closePinned(&root)
+	mp, err := c.pinCacheSubdir(&root, cacheModelsDir)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer closePinned(&mp)
+	f, err := mp.openRead(base)
+	if err != nil {
+		return nil, nil, err
+	}
+	fi, err := f.Stat()
+	if err != nil {
+		f.Close()
+		return nil, nil, err
+	}
+	if !fi.Mode().IsRegular() {
+		f.Close()
+		return nil, nil, fmt.Errorf("model %q is not a regular file", name)
+	}
+	return f, fi, nil
+}
+
 // ErrChecksumMismatch is returned by Put when the uploaded bytes do not
 // match the expected SHA-256.
 var ErrChecksumMismatch = fmt.Errorf("SHA-256 checksum mismatch")

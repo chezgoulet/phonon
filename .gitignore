@@ -46,3 +46,6 @@ ui/node_modules/
 ui/dist/
 /tmp/npm-cache/
 /phonon-coordinator
+
+# Torc orchestration briefs (never commit)
+.torc-briefs/
