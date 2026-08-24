@@ -195,6 +195,9 @@ func (m *Middleware) handleOIDC(w http.ResponseWriter, r *http.Request, next htt
 	idToken, err := m.verifier.Verify(r.Context(), token)
 	if err != nil {
 		m.log.Warn("token validation failed", "error", err)
+		// Belt-and-suspenders (#329): keep the local strip uniform on every
+		// 401 path so the defense does not depend on which rejection fires.
+		r.Header.Del("X-Auth-Claims")
 		http.Error(w, fmt.Sprintf(`{"error":"unauthorized","message":%q}`, err.Error()), http.StatusUnauthorized)
 		return
 	}
@@ -203,6 +206,8 @@ func (m *Middleware) handleOIDC(w http.ResponseWriter, r *http.Request, next htt
 	var rawClaims json.RawMessage
 	if err := idToken.Claims(&rawClaims); err != nil {
 		m.log.Warn("failed to extract claims", "error", err)
+		// Belt-and-suspenders (#329): uniform local strip on every 401 path.
+		r.Header.Del("X-Auth-Claims")
 		http.Error(w, `{"error":"unauthorized","message":"failed to extract claims"}`, http.StatusUnauthorized)
 		return
 	}
@@ -214,6 +219,8 @@ func (m *Middleware) handleOIDC(w http.ResponseWriter, r *http.Request, next htt
 	}
 	if err := idToken.Claims(&sub); err != nil {
 		m.log.Warn("failed to extract sub", "error", err)
+		// Belt-and-suspenders (#329): uniform local strip on every 401 path.
+		r.Header.Del("X-Auth-Claims")
 		http.Error(w, `{"error":"unauthorized","message":"failed to extract subject"}`, http.StatusUnauthorized)
 		return
 	}
@@ -239,6 +246,8 @@ func (m *Middleware) handleOIDC(w http.ResponseWriter, r *http.Request, next htt
 
 func (m *Middleware) handlePSK(w http.ResponseWriter, r *http.Request, next http.Handler) {
 	if !validatePSK(r, []byte(m.config.PSK), len(m.config.PSK)) {
+		// Belt-and-suspenders (#329): uniform local strip on every 401 path.
+		r.Header.Del("X-Auth-Claims")
 		http.Error(w, `{"error":"unauthorized","message":"invalid or missing PSK"}`, http.StatusUnauthorized)
 		return
 	}

@@ -472,7 +472,7 @@ func main() {
 		// TraceMiddleware is outermost so every request — including
 		// CORS preflights and auth rejections — gets a trace ID and the
 		// X-Phonon-Trace-Id response header.
-		Handler: api.TraceMiddleware(corsMiddleware(mux, cfg.Cluster.Networking.CORSOrigins, logger)),
+		Handler: buildHandler(mux, cfg, logger),
 	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -684,6 +684,15 @@ func main() {
 	defer cancel()
 	_ = server.Shutdown(shutdownCtx)
 	logger.Info("stopped")
+}
+
+// buildHandler assembles the top-level server Handler. TraceMiddleware must be
+// OUTERMOST so every request gets a trace ID and the global X-Auth-Claims strip
+// runs before CORS/auth (the #302/#311 invariant). The wiring test calls this
+// same function so a rewiring cannot silently diverge from what production
+// serves (#328).
+func buildHandler(mux *http.ServeMux, cfg *config.Config, logger *slog.Logger) http.Handler {
+	return api.TraceMiddleware(corsMiddleware(mux, cfg.Cluster.Networking.CORSOrigins, logger))
 }
 
 // serveUI serves the Vite-built React app from /ui/ and redirects / → /ui/.

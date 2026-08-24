@@ -8,7 +8,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/chezgoulet/phonon/internal/api"
+	"github.com/chezgoulet/phonon/internal/config"
 )
 
 func TestHealthEndpoint(t *testing.T) {
@@ -46,14 +46,15 @@ func TestHealthEndpoint(t *testing.T) {
 }
 
 // TestWiring_TraceMiddlewareOutermostStripsAuthClaims pins the #311
-// global-strip invariant at the wiring level. It reconstructs the exact
-// production handler chain from run() (main.go: Handler:
-// api.TraceMiddleware(corsMiddleware(mux, ...))) and asserts that a request
-// carrying an upstream-injected X-Auth-Claims has that header removed before
-// it reaches an auth-free mount shaped like /api/v1/sidecar/*. The strip
-// must NOT depend on auth middleware being present: if this test fails after
-// a wiring change, TraceMiddleware is no longer outermost and the strip is
-// no longer global.
+// global-strip invariant at the wiring level. It calls the SAME buildHandler()
+// construction production uses in main() (main.go: Handler: buildHandler(mux,
+// cfg, logger)) and asserts that a request carrying an upstream-injected
+// X-Auth-Claims has that header removed before it reaches an auth-free mount
+// shaped like /api/v1/sidecar/*. The strip must NOT depend on auth middleware
+// being present: if this test fails after a wiring change, TraceMiddleware is
+// no longer outermost and the strip is no longer global. Because the test and
+// production share buildHandler (#328), a rewiring cannot silently diverge
+// from what this test pins.
 func TestWiring_TraceMiddlewareOutermostStripsAuthClaims(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
@@ -64,8 +65,15 @@ func TestWiring_TraceMiddlewareOutermostStripsAuthClaims(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	}))
 
-	// Exact wiring from main.go — TraceMiddleware wraps the whole mux.
-	handler := api.TraceMiddleware(corsMiddleware(mux, []string{"*"}, logger))
+	// Shared with production via buildHandler — TraceMiddleware wraps the whole mux.
+	cfg := &config.Config{
+		Cluster: config.ClusterConfig{
+			Networking: config.NetworkingConfig{
+				CORSOrigins: []string{"*"},
+			},
+		},
+	}
+	handler := buildHandler(mux, cfg, logger)
 	srv := httptest.NewServer(handler)
 	defer srv.Close()
 

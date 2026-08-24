@@ -436,3 +436,30 @@ func TestHandlerPSK_rejectsTabAfterBearer(t *testing.T) {
 		t.Errorf("expected 401 for Bearer with tab separator, got %d (not RFC 7235 compliant)", w.Code)
 	}
 }
+
+// TestHandlerPSK_StripsInboundClaimsOn401 verifies #329: the PSK reject
+// path strips any upstream-injected X-Auth-Claims locally before writing
+// the 401, keeping the belt-and-suspenders defense uniform across every
+// 401 branch of the auth middleware.
+func TestHandlerPSK_StripsInboundClaimsOn401(t *testing.T) {
+	m := New(Config{Mode: "psk", PSK: "real-key"})
+	m.started = true
+
+	reached := false
+	handler := m.Handler(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		reached = true
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
+	req.Header.Set("Authorization", "Bearer wrong-key")
+	req.Header.Set("X-Auth-Claims", `{"sub":"injected-by-proxy"}`)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized || reached {
+		t.Fatalf("expected 401 without reaching downstream, got %d reached=%v", w.Code, reached)
+	}
+	if got := req.Header.Get("X-Auth-Claims"); got != "" {
+		t.Errorf("PSK-reject 401 left X-Auth-Claims=%q", got)
+	}
+}

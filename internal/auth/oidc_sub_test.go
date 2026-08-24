@@ -147,6 +147,9 @@ func TestHandleOIDC_RejectsEmptySub(t *testing.T) {
 // X-Auth-Claims before writing a 401, on BOTH rejection paths (missing
 // token and empty sub), so the defense holds even without the outermost
 // TraceMiddleware strip.
+//
+// Since #329 the strip is uniform on EVERY 401 branch: paths 3 (verify
+// failure) and 4 (claims-extract failure) below pin the newly-covered ones.
 func TestHandleOIDC_StripsInboundClaimsOn401(t *testing.T) {
 	m, key, issuer := startTestOIDC(t)
 
@@ -179,6 +182,24 @@ func TestHandleOIDC_StripsInboundClaimsOn401(t *testing.T) {
 	}
 	if got := req2.Header.Get("X-Auth-Claims"); got != "" {
 		t.Errorf("empty-sub 401 left X-Auth-Claims=%q", got)
+	}
+
+	// Path 3 (#329): verify failure — a well-formed but wrongly-signed token.
+	otherKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("GenerateKey: %v", err)
+	}
+	badToken := signIDToken(t, otherKey, issuer, gojwt.MapClaims{"sub": "attacker"})
+	req3 := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
+	req3.Header.Set("Authorization", "Bearer "+badToken)
+	req3.Header.Set("X-Auth-Claims", `{"sub":"injected-by-proxy"}`)
+	w3 := httptest.NewRecorder()
+	handler.ServeHTTP(w3, req3)
+	if w3.Code != http.StatusUnauthorized || reached {
+		t.Fatalf("verify fail: expected 401 without reaching downstream, got %d reached=%v", w3.Code, reached)
+	}
+	if got := req3.Header.Get("X-Auth-Claims"); got != "" {
+		t.Errorf("verify-fail 401 left X-Auth-Claims=%q", got)
 	}
 }
 
