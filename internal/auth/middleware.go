@@ -179,9 +179,9 @@ func (m *Middleware) Handler(next http.Handler) http.Handler {
 }
 
 func (m *Middleware) handleOIDC(w http.ResponseWriter, r *http.Request, next http.Handler) {
-	// Strip any injected X-Auth-Claims header before validation
-	// (prevents upstream proxy injection attacks)
-	r.Header.Del("X-Auth-Claims")
+	// Strip client-injected identity headers before validation so no
+	// downstream code can be fooled by header-supplied "claims".
+	stripInjectedHeaders(r)
 
 	token, err := extractBearerToken(r)
 	if err != nil {
@@ -197,37 +197,36 @@ func (m *Middleware) handleOIDC(w http.ResponseWriter, r *http.Request, next htt
 		return
 	}
 
-	// Extract claims as raw JSON for downstream use
+	// Extract the validated claim set. It is parsed once here, inside the
+	// trust boundary, and carried to handlers via request context only.
+	// The client-supplied X-Auth-Claims header was stripped on entry and
+	// is never re-injected: headers are client-controllable storage and
+	// must not carry identity (TODO #168 migration complete).
 	var rawClaims json.RawMessage
 	if err := idToken.Claims(&rawClaims); err != nil {
 		m.log.Warn("failed to extract claims", "error", err)
 		http.Error(w, `{"error":"unauthorized","message":"failed to extract claims"}`, http.StatusUnauthorized)
 		return
 	}
-
-	// Base claims for issuer/clientID validation (redundant with go-oidc, but
-	// included for forward compatibility).
-	var claims struct {
-		Sub string `json:"sub"`
-	}
-	if err := idToken.Claims(&claims); err == nil {
-		_ = claims.Sub // available for downstream logging
+	parsed, err := parseClaims(rawClaims)
+	if err != nil {
+		m.log.Warn("invalid token claims", "error", err)
+		http.Error(w, `{"error":"unauthorized","message":"invalid claims"}`, http.StatusUnauthorized)
+		return
 	}
 
-	// Inject claims into request context.
-	// TODO(#168): migrate downstream handlers to read claims from
-	// context.Context instead of headers.
-	r.Header.Set("X-Auth-Claims", string(rawClaims))
+	stripInjectedHeaders(r)
 
-	// Store claims in context for future migration away from headers.
-	ctx := context.WithValue(r.Context(), claimsKey, string(rawClaims))
+	ctx := context.WithValue(r.Context(), claimsKey, parsed)
 	next.ServeHTTP(w, r.WithContext(ctx))
 }
 
 func (m *Middleware) handlePSK(w http.ResponseWriter, r *http.Request, next http.Handler) {
 	// Strip any injected X-Auth-Claims header before validation
-	// (prevents upstream proxy injection attacks)
-	r.Header.Del("X-Auth-Claims")
+	// (prevents upstream proxy injection attacks). PSK mode has no claim
+	// set at all — identity is the shared key, and no per-request claims
+	// are placed in the context.
+	stripInjectedHeaders(r)
 
 	if !validatePSK(r, []byte(m.config.PSK), len(m.config.PSK)) {
 		http.Error(w, `{"error":"unauthorized","message":"invalid or missing PSK"}`, http.StatusUnauthorized)
@@ -238,14 +237,17 @@ func (m *Middleware) handlePSK(w http.ResponseWriter, r *http.Request, next http
 
 // ClaimsFromContext retrieves the JWT claims JSON previously stored in the
 // request context by the auth middleware. Returns empty string if not present.
+//
+// Deprecated: this string-typed accessor cannot distinguish "no auth" from
+// "empty claims" and predates the parsed Claims type. Use ClaimsFrom or
+// SubjectFrom, which fail closed. It is retained only so handlers not yet
+// migrated keep compiling; it reads the same trusted context value.
 func ClaimsFromContext(ctx context.Context) string {
-	if ctx == nil {
+	c, ok := claimsFromContext(ctx)
+	if !ok || c == nil {
 		return ""
 	}
-	if v := ctx.Value(claimsKey); v != nil {
-		return v.(string)
-	}
-	return ""
+	return string(c.Raw())
 }
 
 // contextKey is an unexported type for context keys to avoid collisions.
