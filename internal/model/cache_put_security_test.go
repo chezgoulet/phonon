@@ -29,6 +29,12 @@ func TestContainsPath_Semantics(t *testing.T) {
 		{"/cache", "/cache-tmp/x", false},
 		{"/cache", "/other/m.gguf", false},
 		{"/cache", "/cache", true}, // the root itself is "within"
+		// Unclean paths must be normalized before comparison, so a caller
+		// that skips EvalSymlinks cannot smuggle ".." components through.
+		{"/cache", "/cache/../cache-evil/x", false},
+		{"/cache", "/cache/./models/../models/m.gguf", true},
+		{"/cache/", "/cache//models/m.gguf", true},
+		{"/cache", "/cache..", false},
 	}
 	for _, tc := range cases {
 		if got := containsPath(tc.root, tc.p); got != tc.want {

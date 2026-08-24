@@ -102,6 +102,12 @@ func (c *Cache) scan() error {
 // Get returns the local path for the given model. If not cached, it downloads
 // from the upstream URL. The SHA is optionally verified after download.
 func (c *Cache) Get(ctx context.Context, modelName, upstreamURL, expectedSHA string) (string, error) {
+	// Entry-point symmetry with Put(): reject traversal sequences before
+	// they can reach path construction.
+	if strings.Contains(modelName, "..") {
+		return "", fmt.Errorf("model name %q rejected: path traversal sequences are not allowed", modelName)
+	}
+
 	// Check cache under read lock first
 	c.mu.RLock()
 	entry, ok := c.entries[modelName]
@@ -122,6 +128,13 @@ func (c *Cache) Get(ctx context.Context, modelName, upstreamURL, expectedSHA str
 
 	if err := c.download(ctx, upstreamURL, tmpDest, expectedSHA); err != nil {
 		return "", fmt.Errorf("download %s: %w", modelName, err)
+	}
+
+	// Same containment guard as Put(): rename(2) follows symlinked
+	// directory components of dest, so verify before renaming.
+	if err := c.verifyDestinationForWrite(dest); err != nil {
+		os.Remove(tmpDest)
+		return "", fmt.Errorf("rename target: %w", err)
 	}
 
 	// Atomically rename
@@ -357,19 +370,55 @@ var ErrTooLarge = fmt.Errorf("model file exceeds size limit")
 // (e.g. root=/var/cache passing for /var/cache-evil).
 func containsPath(root, p string) bool {
 	root = filepath.Clean(root)
+	p = filepath.Clean(p)
 	if p == root {
 		return true
 	}
 	return strings.HasPrefix(p, root+string(filepath.Separator))
 }
 
+// verifyDestinationForWrite runs the containment checks that MUST happen
+// before a write-open, so no create/truncate/append side effect can land on
+// anything outside the cache root:
+//   - the final path component must not be a symlink (a planted link would
+//     otherwise be followed by O_CREATE|O_TRUNC, destroying the target);
+//   - every directory component must resolve inside the cache root (catches
+//     e.g. the models/.tmp dir itself being replaced by a symlink).
+//
+// The caller still performs the post-open EvalSymlinks verification as a
+// belt-and-braces TOCTOU backstop.
+func (c *Cache) verifyDestinationForWrite(path string) error {
+	if fi, err := os.Lstat(path); err == nil && fi.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("refusing to write %q: destination is a symlink resolving outside cache root (symlink attack?)", path)
+	}
+	realRoot, err := filepath.EvalSymlinks(c.rootDir)
+	if err != nil {
+		return fmt.Errorf("resolve cache root symlinks: %w", err)
+	}
+	realParent, err := filepath.EvalSymlinks(filepath.Dir(path))
+	if err != nil {
+		return fmt.Errorf("resolve parent of %s: %w", path, err)
+	}
+	if !containsPath(realRoot, realParent) {
+		return fmt.Errorf("directory %q resolves outside cache root %q (symlink attack?)", realParent, realRoot)
+	}
+	return nil
+}
+
 // safeCreateFile opens a file for writing, refusing to follow symlinks.
 // After opening, it verifies the resolved real path is within the cache
 // root directory to prevent symlink-escape attacks (#246).
 func (c *Cache) safeCreateFile(path string) (*os.File, error) {
+	// Refuse before opening: a planted symlink (final component or a
+	// directory component) must not cause any create/write outside the
+	// cache root (#246).
+	if err := c.verifyDestinationForWrite(path); err != nil {
+		return nil, err
+	}
+
 	// The tmp dir must already exist — created before calling this.
 	// Use O_EXCL to fail if the file exists (prevents symlink following).
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0o644)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_EXCL|openNoFollow, 0o644)
 	if err != nil {
 		if errors.Is(err, os.ErrExist) {
 			// O_EXCL refused to create through an existing entry — most
@@ -404,9 +453,22 @@ func (c *Cache) safeCreateFile(path string) (*os.File, error) {
 }
 
 func (c *Cache) openFileForDownload(path string, flag int) (*os.File, error) {
-	f, err := os.OpenFile(path, flag, 0o644)
-	if err != nil {
+	// Refuse before opening: O_TRUNC/O_APPEND must never reach a symlink's
+	// target — the write side effect would escape even though a post-open
+	// check later refuses the streamed body (#246).
+	if err := c.verifyDestinationForWrite(path); err != nil {
 		return nil, err
+	}
+
+	f, err := os.OpenFile(path, flag|openNoFollow, 0o644)
+	if err != nil {
+		// Under O_NOFOLLOW a planted final-component symlink fails the
+		// open itself (ELOOP) with zero side effects; diagnose it as the
+		// containment failure it is.
+		if fi, lerr := os.Lstat(path); lerr == nil && fi.Mode()&os.ModeSymlink != 0 {
+			return nil, fmt.Errorf("refusing to open %q: destination is a symlink resolving outside cache root (symlink attack?)", path)
+		}
+		return nil, fmt.Errorf("open %s: %w", path, err)
 	}
 	// Verify the file's real path is within the cache root, preventing
 	// an attacker-controlled symlink from redirecting the write.
@@ -490,6 +552,13 @@ func (c *Cache) Put(name string, r io.Reader, expectedSHA string, maxBytes int64
 		return nil, fmt.Errorf("%w: expected %s, got %s", ErrChecksumMismatch, expectedSHA, got)
 	}
 
+	// rename(2) follows symlinked DIRECTORY components of dest: if the
+	// models dir itself was replaced by a symlink, the renamed file would
+	// land outside the cache root. Verify the destination before renaming.
+	if err := c.verifyDestinationForWrite(dest); err != nil {
+		os.Remove(tmpDest)
+		return nil, fmt.Errorf("rename target: %w", err)
+	}
 	if err := os.Rename(tmpDest, dest); err != nil {
 		os.Remove(tmpDest)
 		return nil, fmt.Errorf("rename upload into cache: %w", err)
