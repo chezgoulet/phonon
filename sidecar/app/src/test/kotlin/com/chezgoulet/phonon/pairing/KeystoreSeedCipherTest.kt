@@ -32,7 +32,7 @@ class KeystoreSeedCipherTest {
         private val pad = ByteArray(48) { ((it * 37 + 11) and 0xFF).toByte() }
 
         override fun seal(plaintext: ByteArray): ByteArray {
-            val xored = ByteArray(plaintext.size) { (plaintext[it] xor pad[it % pad.size]) }
+            val xored = ByteArray(plaintext.size) { (plaintext[it].toInt() xor pad[it % pad.size].toInt()).toByte() }
             return xored + byteArrayOf(checksum(xored))
         }
 
@@ -42,7 +42,7 @@ class KeystoreSeedCipherTest {
             if (checksum(body) != sealed[sealed.size - 1]) {
                 throw AEADBadTagException("fake tag mismatch")
             }
-            return ByteArray(body.size) { (body[it] xor pad[it % pad.size]) }
+            return ByteArray(body.size) { (body[it].toInt() xor pad[it % pad.size].toInt()).toByte() }
         }
 
         private fun checksum(b: ByteArray): Byte {
