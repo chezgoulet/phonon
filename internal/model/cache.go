@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -28,12 +29,12 @@ var defaultBackoff = []time.Duration{1 * time.Second, 3 * time.Second, 10 * time
 
 // Cache manages local model files downloaded from upstream sources.
 type Cache struct {
-	rootDir   string
-	client    *http.Client
-	log       *slog.Logger
-	mu        sync.RWMutex
-	entries   map[string]*CacheEntry // model name → entry
-	backoff   []time.Duration         // retry backoff schedule (override for tests)
+	rootDir string
+	client  *http.Client
+	log     *slog.Logger
+	mu      sync.RWMutex
+	entries map[string]*CacheEntry // model name → entry
+	backoff []time.Duration        // retry backoff schedule (override for tests)
 }
 
 // SetBackoff overrides the retry backoff schedule. Used in tests.
@@ -350,6 +351,18 @@ var ErrChecksumMismatch = fmt.Errorf("SHA-256 checksum mismatch")
 // ErrTooLarge is returned by Put when the upload exceeds maxBytes.
 var ErrTooLarge = fmt.Errorf("model file exceeds size limit")
 
+// containsPath reports whether resolved path p is root itself or lies
+// strictly inside root. Unlike a bare strings.HasPrefix check, it cannot be
+// bypassed by a sibling directory whose name shares the root's prefix
+// (e.g. root=/var/cache passing for /var/cache-evil).
+func containsPath(root, p string) bool {
+	root = filepath.Clean(root)
+	if p == root {
+		return true
+	}
+	return strings.HasPrefix(p, root+string(filepath.Separator))
+}
+
 // safeCreateFile opens a file for writing, refusing to follow symlinks.
 // After opening, it verifies the resolved real path is within the cache
 // root directory to prevent symlink-escape attacks (#246).
@@ -358,6 +371,14 @@ func (c *Cache) safeCreateFile(path string) (*os.File, error) {
 	// Use O_EXCL to fail if the file exists (prevents symlink following).
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0o644)
 	if err != nil {
+		if errors.Is(err, os.ErrExist) {
+			// O_EXCL refused to create through an existing entry — most
+			// notably a planted symlink pointing outside the cache root.
+			// Diagnose it as the containment failure it is (#246).
+			if fi, lerr := os.Lstat(path); lerr == nil && fi.Mode()&os.ModeSymlink != 0 {
+				return nil, fmt.Errorf("refusing to write %q: destination is a symlink resolving outside cache root (symlink attack?)", path)
+			}
+		}
 		return nil, fmt.Errorf("create %s: %w", path, err)
 	}
 
@@ -374,7 +395,7 @@ func (c *Cache) safeCreateFile(path string) (*os.File, error) {
 		os.Remove(path)
 		return nil, fmt.Errorf("resolve cache root symlinks: %w", err)
 	}
-	if !strings.HasPrefix(realPath, realRoot) {
+	if !containsPath(realRoot, realPath) {
 		f.Close()
 		os.Remove(path)
 		return nil, fmt.Errorf("file %q resolves outside cache root %q (symlink attack?)", realPath, realRoot)
@@ -401,7 +422,7 @@ func (c *Cache) openFileForDownload(path string, flag int) (*os.File, error) {
 		os.Remove(path)
 		return nil, fmt.Errorf("resolve cache root symlinks: %w", err)
 	}
-	if !strings.HasPrefix(realPath, realRoot) {
+	if !containsPath(realRoot, realPath) {
 		f.Close()
 		os.Remove(path)
 		return nil, fmt.Errorf("file %q resolves outside cache root %q (symlink attack?)", realPath, realRoot)
@@ -419,6 +440,9 @@ func (c *Cache) openFileForDownload(path string, flag int) (*os.File, error) {
 func (c *Cache) Put(name string, r io.Reader, expectedSHA string, maxBytes int64) (*CacheEntry, error) {
 	if name == "" {
 		return nil, fmt.Errorf("model name required")
+	}
+	if strings.Contains(name, "..") {
+		return nil, fmt.Errorf("model name %q rejected: path traversal sequences are not allowed", name)
 	}
 
 	dest := filepath.Join(c.rootDir, cacheModelsDir, sanitizeName(name))
