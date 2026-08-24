@@ -131,12 +131,15 @@ func (c *Cache) Get(ctx context.Context, modelName, upstreamURL, expectedSHA str
 		return "", fmt.Errorf("download %s: %w", modelName, err)
 	}
 
+	// Same ordering as Put: write the name binding before the content
+	// rename so a crash cannot leave the stale sidecar binding new
+	// content to the previous owner's name.
+	if san := sanitizeName(modelName); san != modelName {
+		c.persistOriginalName(dest, modelName)
+	}
 	// Atomically rename
 	if err := os.Rename(tmpDest, dest); err != nil {
 		return "", fmt.Errorf("rename %s: %w", modelName, err)
-	}
-	if san := sanitizeName(modelName); san != modelName {
-		c.persistOriginalName(dest, modelName)
 	}
 
 	fi, err := os.Stat(dest)
@@ -480,12 +483,17 @@ func (c *Cache) Put(name string, r io.Reader, expectedSHA string, maxBytes int64
 		return nil, fmt.Errorf("%w: expected %s, got %s", ErrChecksumMismatch, expectedSHA, got)
 	}
 
+	// Persist the original-name binding BEFORE the content lands: a crash
+	// after the rename but before the sidecar write left the stale sidecar
+	// pointing at the previous owner's name. Ordered this way the only
+	// possible window leaves an orphan sidecar (no matching model file),
+	// which scan ignores.
+	if san := sanitizeName(name); san != name {
+		c.persistOriginalName(dest, name)
+	}
 	if err := os.Rename(tmpDest, dest); err != nil {
 		os.Remove(tmpDest)
 		return nil, fmt.Errorf("rename upload into cache: %w", err)
-	}
-	if san := sanitizeName(name); san != name {
-		c.persistOriginalName(dest, name)
 	}
 
 	entry := &CacheEntry{
