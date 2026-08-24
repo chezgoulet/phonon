@@ -37,11 +37,22 @@ type Cache struct {
 	mu      sync.RWMutex
 	entries map[string]*CacheEntry // model name → entry
 	backoff []time.Duration        // retry backoff schedule (override for tests)
+	// testHookAfterSidecar, when set, runs after persistOriginalName and
+	// before the promote rename. Tests use it to assert the sidecar exists
+	// at that point (pinning the ordering invariant).
+	testHookAfterSidecar func()
 }
 
 // SetBackoff overrides the retry backoff schedule. Used in tests.
 func (c *Cache) SetBackoff(b []time.Duration) {
 	c.backoff = b
+}
+
+// SetTestHookAfterSidecar installs a hook run after the original-name sidecar
+// is written and before the content rename in Put/Get. Tests use it to pin the
+// sidecar-before-rename ordering; production never sets it.
+func (c *Cache) SetTestHookAfterSidecar(h func()) {
+	c.testHookAfterSidecar = h
 }
 
 // NewCache creates a model cache rooted at cacheDir.
@@ -253,6 +264,9 @@ func (c *Cache) Get(ctx context.Context, modelName, upstreamURL, expectedSHA str
 	// sidecars.)
 	if base != modelName {
 		c.persistOriginalName(base, modelName)
+	}
+	if c.testHookAfterSidecar != nil {
+		c.testHookAfterSidecar()
 	}
 	// Atomic promote INSIDE pinned dirs: renameat(tmpFd, tmpBase,
 	// modelsFd, base). os.Rename would resolve two attacker-swappable path
@@ -757,6 +771,9 @@ func (c *Cache) Put(name string, r io.Reader, expectedSHA string, maxBytes int64
 	if base != name {
 		c.persistOriginalName(base, name)
 	}
+	if c.testHookAfterSidecar != nil {
+		c.testHookAfterSidecar()
+	}
 
 	// Atomic promote INSIDE pinned dirs; models dir re-pinned per attempt
 	// so benign churn costs one retry, while every re-pin still refuses a
@@ -836,8 +853,27 @@ func (c *Cache) persistOriginalName(dest, name string) {
 		return
 	}
 	sidecar := filepath.Join(dir, filepath.Base(dest))
-	if err := os.WriteFile(sidecar, []byte(name), 0o644); err != nil {
-		c.log.Warn("persist original model name", "error", err)
+	// Atomic write: temp file in the same dir, then rename, so a reader can
+	// never observe a truncated sidecar. Rename within a directory is atomic.
+	tmp, err := os.CreateTemp(dir, ".tmp-*")
+	if err != nil {
+		c.log.Warn("persist original model name (create temp)", "error", err)
+		return
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName) // no-op after a successful rename
+	if _, err := tmp.WriteString(name); err != nil {
+		tmp.Close()
+		c.log.Warn("persist original model name (write temp)", "error", err)
+		return
+	}
+	if err := tmp.Close(); err != nil {
+		c.log.Warn("persist original model name (close temp)", "error", err)
+		return
+	}
+	if err := os.Rename(tmpName, sidecar); err != nil {
+		c.log.Warn("persist original model name (rename)", "error", err)
+		return
 	}
 }
 
