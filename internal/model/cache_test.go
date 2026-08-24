@@ -291,10 +291,18 @@ func TestSanitizeNameManySeparatorsStaysWithinLimit(t *testing.T) {
 // TestSanitizeNameOverlongNamesStayDistinct guards the 64-bit hash suffix on
 // overlong names: two different names sharing a long common prefix must not
 // collide, or Put's rename would let one model overwrite another's file.
+//
+// The names share 247 identical leading bytes — longer than any kept prefix
+// (223 bytes under the 64-bit suffix; 231 even under a 32-bit suffix) — so
+// the visible part of both sanitized names is IDENTICAL and only the hash
+// suffix tells them apart. The tails were brute-forced so the raw SHA-256
+// digests agree in their FIRST 4 BYTES while differing in bytes 5–8: the
+// distinctness assertion below therefore fails outright against the old
+// 32-bit truncation (sum[:4]) that permitted crafted collisions.
 func TestSanitizeNameOverlongNamesStayDistinct(t *testing.T) {
-	common := strings.Repeat("Llama-3-405B-block-", 12) // 228-byte shared prefix
-	a := common + strings.Repeat("a", 24) + "-alpha"
-	b := common + strings.Repeat("b", 24) + "-bravo"
+	common := strings.Repeat("Llama-3-405B-block-", 13) // 247-byte shared prefix
+	a := common + "-coll-00013579!"
+	b := common + "-coll-00036791!"
 	if len(a) <= maxSanitizedNameLen || len(b) <= maxSanitizedNameLen {
 		t.Fatalf("test names must exceed %d bytes: got %d and %d", maxSanitizedNameLen, len(a), len(b))
 	}
@@ -311,6 +319,11 @@ func TestSanitizeNameOverlongNamesStayDistinct(t *testing.T) {
 		if suffix[0] != '-' || strings.Trim(suffix[1:], "0123456789abcdef") != "" {
 			t.Errorf("sanitized %s has malformed 64-bit hash suffix %q: %q", name, suffix, s)
 		}
+	}
+	// The shared 247-byte prefix spans the whole kept region: everything
+	// before the hash suffix must be identical between the two.
+	if sa[:len(sa)-17] != sb[:len(sb)-17] {
+		t.Errorf("expected only the hash suffix to differ:\n%q\n%q", sa, sb)
 	}
 }
 
