@@ -61,13 +61,13 @@ func startToggler(modelsDir, evilModels string, realDur, evilDur time.Duration) 
 			}
 			if inReal {
 				busySleep(realDur)
-				os.Remove(modelsDir)
+				os.RemoveAll(modelsDir) // models holds .names since #314: bare Remove would ENOTEMPTY and stall the toggle
 				os.Symlink(evilModels, modelsDir)
 				inReal = false
 				tg.flips++
 			} else {
 				busySleep(evilDur)
-				os.Remove(modelsDir)
+				os.RemoveAll(modelsDir) // models holds .names since #314: bare Remove would ENOTEMPTY and stall the toggle
 				os.MkdirAll(modelsDir, 0o755)
 				inReal = true
 				tg.flips++
@@ -85,7 +85,7 @@ func startToggler(modelsDir, evilModels string, realDur, evilDur time.Duration) 
 func (tg *toggler) halt(modelsDir string) {
 	close(tg.stop)
 	<-tg.done
-	os.Remove(modelsDir)
+	os.RemoveAll(modelsDir) // models holds .names since #314: bare Remove would ENOTEMPTY and stall the toggle
 	os.MkdirAll(modelsDir, 0o755)
 }
 

@@ -2,6 +2,7 @@ package model
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -12,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -22,6 +24,11 @@ import (
 const (
 	cacheModelsDir = "models"
 	cacheTmpDir    = ".tmp"
+	// cacheNamesLeaf is the .names sidecar dir's leaf below cacheModelsDir.
+	// Kept separate so pinNamesDir can pin each path component individually
+	// (openat O_NOFOLLOW guards only the FINAL component of a multi-
+	// component path, so "models/.names" must be pinned as two hops).
+	cacheNamesLeaf = ".names"
 )
 
 // ErrNotCached is returned when a model is not in the local cache.
@@ -69,11 +76,33 @@ func NewCache(cacheDir string, client *http.Client) *Cache {
 	}
 }
 
+// namesTempRe matches exactly the temp-sidecar shape createNamesTemp produces
+// (".tmp-" + 16 lowercase hex from an 8-byte random). Sweeping by this shape —
+// not a bare ".tmp-" prefix — ensures a model LEGITIMATELY named e.g.
+// ".tmp-deadbeefdeadbeef" (sanitizeName leaves dots untouched) is not mistaken
+// for an orphan temp and deleted (#323).
+var namesTempRe = regexp.MustCompile(`^\.tmp-[0-9a-f]{16}$`)
+
 // Init ensures cache directories exist and scans existing files.
 func (c *Cache) Init() error {
 	for _, d := range []string{cacheModelsDir, cacheTmpDir} {
 		if err := os.MkdirAll(filepath.Join(c.rootDir, d), 0o755); err != nil {
 			return fmt.Errorf("create %s: %w", d, err)
+		}
+	}
+	if err := os.MkdirAll(filepath.Join(c.rootDir, cacheNamesDir), 0o755); err != nil {
+		return fmt.Errorf("create %s: %w", cacheNamesDir, err)
+	}
+	// Sweep orphaned temp sidecars left in .names by a crash between the
+	// temp create and the rename (#314): scan ignores them but they
+	// accumulate. Best effort — this is hygiene, not correctness — so a
+	// failed sweep never fails Init. Runs AFTER the MkdirAll so ReadDir
+	// cannot hit ENOENT.
+	if entries, err := os.ReadDir(filepath.Join(c.rootDir, cacheNamesDir)); err == nil {
+		for _, e := range entries {
+			if !e.IsDir() && namesTempRe.MatchString(e.Name()) {
+				_ = os.Remove(filepath.Join(c.rootDir, cacheNamesDir, e.Name()))
+			}
 		}
 	}
 	return c.scan()
@@ -850,38 +879,115 @@ const maxSanitizedNameLen = 240
 // replaced by a hash-suffixed prefix — so the original name must be
 // persisted for Get to resolve models after a restart. Keeping sidecars in
 // their own directory means scan never mistakes one for a model file.
-const cacheNamesDir = "models/.names"
+const cacheNamesDir = cacheModelsDir + "/" + cacheNamesLeaf
+
+// pinNamesDir pins the .names sidecar dir through an fd (openat + O_NOFOLLOW),
+// so a planted symlink fails ELOOP instead of being followed — closing the
+// symlink-swap window that path-string resolution left (#313). Each component
+// is pinned separately (models, then .names) because O_NOFOLLOW guards only
+// the final component of an openat path: component-wise pinning is what also
+// refuses a swapped-in intermediate models symlink. A genuinely missing
+// directory is recreated once and re-pinned (mirroring pinCacheSubdir's
+// gated recreate, but rooted at <root>/models since the second hop is
+// relative to models, not to the cache root); any containment-class failure
+// (ELOOP/ENOTDIR) propagates untouched.
+func (c *Cache) pinNamesDir() (pinnedDir, error) {
+	root, err := pinRootDir(c.rootDir)
+	if err != nil {
+		return pinnedDir{}, err
+	}
+	defer closePinned(&root) // subdirs stay valid after the root fd closes
+	models, err := c.pinCacheSubdir(&root, cacheModelsDir)
+	if err != nil {
+		return pinnedDir{}, err
+	}
+	defer closePinned(&models)
+	d, err := models.openSub(cacheNamesLeaf)
+	if err == nil {
+		return d, nil
+	}
+	// Recreate only a genuinely missing directory; containment-class
+	// failures must propagate untouched.
+	if !errors.Is(err, fs.ErrNotExist) {
+		return pinnedDir{}, err
+	}
+	if mkErr := os.MkdirAll(filepath.Join(c.rootDir, cacheModelsDir, cacheNamesLeaf), 0o755); mkErr != nil {
+		// Surface the original pin failure — recreating is best-effort.
+		return pinnedDir{}, err
+	}
+	// Retry once; if the entry is now a symlink the retry fails again.
+	return models.openSub(cacheNamesLeaf)
+}
+
+// createNamesTemp creates a unique temp sidecar within a pinned .names dir
+// via openat(O_CREAT|O_EXCL) — the pinned-fd counterpart of
+// os.CreateTemp(dir, ".tmp-*"), whose ".tmp-*" name shape the #314 sweep
+// and the atomic-sidecar residue test rely on.
+func createNamesTemp(d pinnedDir) (*os.File, string, error) {
+	var buf [8]byte
+	for attempt := 0; attempt < 5; attempt++ {
+		if _, err := rand.Read(buf[:]); err != nil {
+			return nil, "", err
+		}
+		name := fmt.Sprintf(".tmp-%s", hex.EncodeToString(buf[:]))
+		f, err := d.openFile(name, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+		if err == nil {
+			return f, name, nil
+		}
+		if !errors.Is(err, fs.ErrExist) {
+			return nil, "", err
+		}
+	}
+	return nil, "", fmt.Errorf("no unique temp name after 5 attempts")
+}
 
 // persistOriginalName records the original model name beside its sanitized
 // cache file. Best effort: a missing or unreadable sidecar only degrades
 // restart lookups to on-disk-name keying, never correctness of Put/Get
 // within a running process.
 func (c *Cache) persistOriginalName(dest, name string) {
-	dir := filepath.Join(c.rootDir, cacheNamesDir)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	np, err := c.pinNamesDir()
+	if err != nil {
 		c.log.Warn("persist original model name", "error", err)
 		return
 	}
-	sidecar := filepath.Join(dir, filepath.Base(dest))
-	// Atomic write: temp file in the same dir, then rename, so a reader can
-	// never observe a truncated sidecar. Rename within a directory is atomic.
-	tmp, err := os.CreateTemp(dir, ".tmp-*")
+	defer closePinned(&np)
+
+	base := filepath.Base(dest)
+	// Atomic write THROUGH the pinned dirfd, bare filenames only: the temp
+	// sidecar is created inside the held inode via openat(O_EXCL) and
+	// promoted by renameat against that same dirfd. A reader can never
+	// observe a truncated sidecar, and no attacker-swappable path string is
+	// ever resolved at call time — a planted .names symlink was already
+	// refused by the pin itself (#313).
+	f, tmpBase, err := createNamesTemp(np)
 	if err != nil {
 		c.log.Warn("persist original model name (create temp)", "error", err)
 		return
 	}
-	tmpName := tmp.Name()
-	defer os.Remove(tmpName) // no-op after a successful rename
-	if _, err := tmp.WriteString(name); err != nil {
-		tmp.Close()
+	defer func() { _ = np.remove(tmpBase) }() // no-op after a successful rename
+
+	// Deliberate 0644 (#315): sidecars were world-readable before #306 and
+	// the switch to os.CreateTemp's implicit 0600 was silent and
+	// undocumented. The sidecar carries only the model's display name
+	// (same-user read verified benign), so restore the prior 0644
+	// explicitly. Chmod goes through the fd (fchmod), so it is not masked
+	// by umask and lands on exactly the inode we created.
+	if err := f.Chmod(0o644); err != nil {
+		f.Close()
+		c.log.Warn("persist original model name (chmod temp)", "error", err)
+		return
+	}
+	if _, err := f.WriteString(name); err != nil {
+		f.Close()
 		c.log.Warn("persist original model name (write temp)", "error", err)
 		return
 	}
-	if err := tmp.Close(); err != nil {
+	if err := f.Close(); err != nil {
 		c.log.Warn("persist original model name (close temp)", "error", err)
 		return
 	}
-	if err := os.Rename(tmpName, sidecar); err != nil {
+	if err := renameAt(np, tmpBase, np, base); err != nil {
 		c.log.Warn("persist original model name (rename)", "error", err)
 		return
 	}

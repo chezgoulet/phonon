@@ -330,8 +330,12 @@ func TestModelUploadNameFieldOverLimitRejected(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(entries) != 0 {
-		t.Errorf("rejected upload must not touch disk, found %d entries", len(entries))
+	// Init creates models/.names for original-name sidecars (model #314);
+	// anything else under models means the rejected upload touched disk.
+	for _, e := range entries {
+		if e.Name() != ".names" {
+			t.Errorf("rejected upload must not touch disk, found %q", e.Name())
+		}
 	}
 }
 

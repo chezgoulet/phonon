@@ -96,8 +96,10 @@ func TestDownload_DirComponentSymlinkRejected(t *testing.T) {
 		t.Fatalf("Init: %v", err)
 	}
 	// Replace the models dir with a symlink into the sibling-prefixed tree.
+	// RemoveAll: Init now creates models/.names (#314), so the dir is no
+	// longer empty and a bare os.Remove would fail.
 	modelsDir := filepath.Join(root, cacheModelsDir)
-	if err := os.Remove(modelsDir); err != nil {
+	if err := os.RemoveAll(modelsDir); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Symlink(evilModels, modelsDir); err != nil {
@@ -169,7 +171,9 @@ func TestPut_RejectsDirectoryComponentSymlinkEscape(t *testing.T) {
 			t.Fatalf("Init: %v", err)
 		}
 		modelsDir := filepath.Join(root, cacheModelsDir)
-		if err := os.Remove(modelsDir); err != nil {
+		// RemoveAll: Init now creates models/.names (#314), so the dir is
+		// no longer empty and a bare os.Remove would fail.
+		if err := os.RemoveAll(modelsDir); err != nil {
 			t.Fatal(err)
 		}
 		if err := os.Symlink(evilModels, modelsDir); err != nil {
