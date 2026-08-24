@@ -1,19 +1,37 @@
 package com.chezgoulet.phonon.pairing
 
 import java.io.File
+import java.io.IOException
 import java.security.SecureRandom
+import javax.crypto.AEADBadTagException
+
+/**
+ * Thrown when the sealed identity blob exists but could not be read or
+ * unsealed for a reason that is NOT evidence of corruption — Keystore not
+ * ready during early boot, TEE busy after an OTA, EBUSY/EACCES on storage,
+ * provider hiccups.
+ *
+ * Unlike corruption (GCM auth failure), a transient failure leaves the
+ * sealed blob untouched on disk so the NEXT boot/startup can retry with the
+ * same identity intact. Callers MUST NOT regenerate key material in
+ * response; treat this as "signing unavailable this boot" and surface it
+ * loudly instead.
+ */
+class TransientUnsealException(message: String, cause: Throwable) : Exception(message, cause)
 
 /**
  * Seals/unseals the identity seed. Implementations MUST provide
- * authenticated encryption: unsealing tampered or truncated input throws
- * [java.security.GeneralSecurityException], which [IdentitySeedStore]
- * treats as corrupt state.
+ * authenticated encryption and MUST throw [AEADBadTagException] (possibly
+ * wrapped as the cause of another exception) when authentication fails —
+ * i.e. on tamper, truncation, wrong key, or wrong AAD. [IdentitySeedStore]
+ * classifies that case as corrupt state; ANY other exception type is
+ * treated as transient ([TransientUnsealException]) and preserves the blob.
  */
 interface SeedCipher {
     /** Returns an implementation-specific sealed blob for [plaintext]. */
     fun seal(plaintext: ByteArray): ByteArray
 
-    /** Reverses [seal]; throws on tamper, truncation, or garbage input. */
+    /** Reverses [seal]; throws [AEADBadTagException] on tamper/truncation/wrong-key input. */
     fun unseal(sealed: ByteArray): ByteArray
 }
 
@@ -55,6 +73,17 @@ class SeedResult(val seed: ByteArray, val origin: SeedOrigin)
  *
  * Any unreadable/corrupt/wrong-size material is invalidated (zero-wiped,
  * removed) rather than trusted, and reported via [SeedOrigin].
+ *
+ * Corruption vs transient failure: only a GCM authentication failure
+ * ([AEADBadTagException], directly or as cause) proves the stored blob is
+ * tampered/truncated/foreign-keyed — that path invalidates and regenerates
+ * (device must re-pair). Read errors and any other unseal exception
+ * (Keystore not ready at early boot, TEE busy post-OTA, EBUSY/EACCES,
+ * provider failures) are NOT corruption: they throw
+ * [TransientUnsealException] with the blob preserved, so the next
+ * startup/boot retries and keeps the existing identity. Never fall back to
+ * generation on a transient failure — that would silently replace a good
+ * identity.
  */
 class IdentitySeedStore(
     private val dir: File,
@@ -92,18 +121,45 @@ class IdentitySeedStore(
         if (!wrappedFile.isFile) return null
         val blob = try {
             wrappedFile.readBytes()
-        } catch (_: Exception) {
-            return failCorrupt()
+        } catch (e: Exception) {
+            // File exists but is unreadable right now (EBUSY, EACCES,
+            // storage not mounted yet) — no evidence about its content,
+            // hence transient rather than corrupt.
+            throw TransientUnsealException("failed reading ${wrappedFile.name}", e)
         }
         // Sanity floor: version byte + IV + auth tag for an AEAD blob.
         if (blob.size < MIN_BLOB_BYTES || blob[0] != BLOB_VERSION_1) return failCorrupt()
         val seed = try {
             cipher.unseal(blob.copyOfRange(1, blob.size))
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            if (!isGcmAuthFailure(e)) {
+                // Keystore not ready / TEE busy / provider failure — the
+                // blob may be perfectly fine. Keep it; retry next boot.
+                throw TransientUnsealException(
+                    "unsealing ${wrappedFile.name} failed without GCM auth failure",
+                    e,
+                )
+            }
             return failCorrupt()
         }
         if (seed.size != SEED_BYTES) return failCorrupt()
         return seed
+    }
+
+    /**
+     * True iff [e] is (or wraps, via its cause chain) an AES-GCM tag
+     * verification failure — the only outcome that proves tampering,
+     * truncation, or a foreign wrapping key. AndroidKeyStore sometimes
+     * surfaces it nested inside [java.security.ProviderException], so the
+     * whole cause chain is inspected.
+     */
+    private fun isGcmAuthFailure(e: Throwable): Boolean {
+        var cur: Throwable? = e
+        while (cur != null) {
+            if (cur is AEADBadTagException) return true
+            cur = cur.cause
+        }
+        return false
     }
 
     private fun failCorrupt(): ByteArray? {

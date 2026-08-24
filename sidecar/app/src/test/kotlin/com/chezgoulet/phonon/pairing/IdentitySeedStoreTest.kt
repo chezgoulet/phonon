@@ -3,36 +3,69 @@ package com.chezgoulet.phonon.pairing
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.io.File
+import java.io.IOException
 import java.security.GeneralSecurityException
+import java.security.InvalidKeyException
+import java.security.ProviderException
 import java.security.SecureRandom
+import javax.crypto.AEADBadTagException
 
 /**
- * JVM tests for the migrate-or-invalidate storage logic. The cipher is a
- * deterministic stand-in ([FakeCipher]); the production cipher is
- * [KeystoreSeedCipher], exercised only on a device (see KeystoreSeedCipherTest).
+ * JVM tests for the migrate-or-invalidate logic and the corrupt-vs-transient
+ * classification. The cipher is a deterministic stand-in ([FakeCipher]) whose
+ * tamper detection mimics GCM: modified input raises [AEADBadTagException].
+ * The production cipher is [KeystoreSeedCipher], exercised only on a device
+ * (see the androidTest source set).
  */
 class IdentitySeedStoreTest {
 
     @get:Rule
     val tmp = TemporaryFolder()
 
+    /**
+     * XOR-pad stand-in — NOT real AEAD; plumbing tests only. Appends a
+     * one-byte checksum over the padded body so any modification of the
+     * sealed bytes is DETECTED exactly like GCM would (via
+     * [AEADBadTagException]), letting the store's corrupt-vs-transient
+     * split be exercised without Android Keystore.
+     */
     private class FakeCipher : SeedCipher {
-        // XOR stand-in — NOT AEAD; plumbing tests only. Pad is non-trivial so
-        // sealed bytes never equal plaintext bytes.
         private val pad = ByteArray(48) { ((it * 37 + 11) and 0xFF).toByte() }
 
-        override fun seal(plaintext: ByteArray): ByteArray =
-            ByteArray(plaintext.size) { (plaintext[it] xor pad[it % pad.size]) }
+        override fun seal(plaintext: ByteArray): ByteArray {
+            val xored = ByteArray(plaintext.size) { (plaintext[it] xor pad[it % pad.size]) }
+            return xored + byteArrayOf(checksum(xored))
+        }
 
         override fun unseal(sealed: ByteArray): ByteArray {
-            if (sealed.size < 8) throw GeneralSecurityException("blob too short")
-            return ByteArray(sealed.size) { (sealed[it] xor pad[it % pad.size]) }
+            if (sealed.size < 2) throw GeneralSecurityException("blob too short")
+            val body = sealed.copyOfRange(0, sealed.size - 1)
+            if (checksum(body) != sealed[sealed.size - 1]) {
+                throw AEADBadTagException("fake tag mismatch")
+            }
+            return ByteArray(body.size) { (body[it] xor pad[it % pad.size]) }
         }
+
+        private fun checksum(b: ByteArray): Byte {
+            var acc = 0x5A
+            for (x in b) acc = ((acc * 31) + x.toInt()) and 0xFF
+            return acc.toByte()
+        }
+    }
+
+    /** Cipher whose unseal ALWAYS fails with [error]; sealing works so an
+     *  invalidate-and-regenerate flow can complete inside the same store. */
+    private class ThrowingCipher(private val error: Exception) : SeedCipher {
+        override fun seal(plaintext: ByteArray): ByteArray =
+            ByteArray(plaintext.size) { (plaintext[it] + 1).toByte() }
+
+        override fun unseal(sealed: ByteArray): ByteArray = throw error
     }
 
     private fun newStore(dir: File = tmp.root): IdentitySeedStore =
@@ -191,6 +224,70 @@ class IdentitySeedStoreTest {
         val a = newStore().loadOrGenerate().seed
         val b = IdentitySeedStore(tmp.newFolder(), FakeCipher(), SecureRandom()).loadOrGenerate().seed
         assertFalse(a.contentEquals(b))
+    }
+
+    // ── transient vs corrupt classification ──────────────────────────
+
+    @Test
+    fun `transient unseal failure keeps the blob and throws the typed error`() {
+        val original = newStore().loadOrGenerate()
+        val blobBefore = wrappedFile.readBytes()
+
+        // Simulates early-boot Keystore-not-ready / storage EBUSY: an
+        // IOException-shaped failure with NO GCM verdict.
+        val store = IdentitySeedStore(tmp.root, ThrowingCipher(IOException("simulated EBUSY")))
+
+        val thrown = assertThrows(TransientUnsealException::class.java) {
+            store.loadOrGenerate()
+        }
+        assertEquals("simulated EBUSY", thrown.cause?.message)
+
+        // The sealed blob must survive untouched for retry-on-next-boot.
+        assertTrue("blob must survive a transient failure", wrappedFile.isFile)
+        assertTrue(blobBefore.contentEquals(wrappedFile.readBytes()))
+
+        // Once the transient condition clears, the SAME identity loads.
+        val recovered = newStore().loadOrGenerate()
+        assertEquals(SeedOrigin.LOADED_WRAPPED, recovered.origin)
+        assertTrue(original.seed.contentEquals(recovered.seed))
+    }
+
+    @Test
+    fun `keystore-shaped key failures are transient not corrupt`() {
+        newStore().loadOrGenerate()
+        val blobBefore = wrappedFile.readBytes()
+
+        assertThrows(TransientUnsealException::class.java) {
+            IdentitySeedStore(tmp.root, ThrowingCipher(InvalidKeyException("keystore not ready")))
+                .loadOrGenerate()
+        }
+        assertTrue(blobBefore.contentEquals(wrappedFile.readBytes()))
+    }
+
+    @Test
+    fun `gcm auth failure wipes the blob and regenerates`() {
+        newStore().loadOrGenerate()
+
+        val result = IdentitySeedStore(tmp.root, ThrowingCipher(AEADBadTagException("tag mismatch")))
+            .loadOrGenerate()
+
+        assertEquals(SeedOrigin.GENERATED_AFTER_INVALIDATION, result.origin)
+        // The wiped state was replaced by a fresh, loadable identity.
+        assertTrue(wrappedFile.isFile)
+        assertEquals(IdentitySeedStore.BLOB_VERSION_1, wrappedFile.readBytes()[0])
+    }
+
+    @Test
+    fun `gcm auth failure wrapped in a provider exception still counts as corrupt`() {
+        // AndroidKeyStore frequently nests AEADBadTagException inside
+        // ProviderException — the cause chain must be walked.
+        newStore().loadOrGenerate()
+        val wrapped = ProviderException("keystore operation failed")
+        wrapped.initCause(AEADBadTagException("tag"))
+
+        val result = IdentitySeedStore(tmp.root, ThrowingCipher(wrapped)).loadOrGenerate()
+
+        assertEquals(SeedOrigin.GENERATED_AFTER_INVALIDATION, result.origin)
     }
 
     private fun indexOf(haystack: ByteArray, needle: ByteArray): Int {

@@ -27,6 +27,14 @@ import com.google.crypto.tink.subtle.Ed25519Sign
  * invalidated and regenerated instead; the loud log below marks that case,
  * which requires re-pairing with the coordinator.
  *
+ * Transient unseal failures ([TransientUnsealException] — e.g. Keystore not
+ * ready during early boot, TEE busy after an OTA) are deliberately NOT
+ * treated as corruption: the sealed blob is kept on disk and construction
+ * aborts with a loud error so the service degrades visibly. Because the
+ * blob was preserved, the NEXT service start / device boot retries
+ * automatically and restores the original identity; nothing needs to be
+ * regenerated and no re-pairing is required.
+ *
  * The signed message format must match the coordinator's
  * internal/pair/deviceauth.go:
  *
@@ -39,7 +47,20 @@ class DeviceIdentity(context: Context) {
     val publicKey: ByteArray
 
     init {
-        val result = IdentitySeedStore(context.filesDir, KeystoreSeedCipher()).loadOrGenerate()
+        val result = try {
+            IdentitySeedStore(context.filesDir, KeystoreSeedCipher()).loadOrGenerate()
+        } catch (e: TransientUnsealException) {
+            // Loud startup failure, not silent regeneration: the sealed
+            // blob is still on disk and will be retried on next boot.
+            Log.e(
+                tag,
+                "TRANSIENT failure reading Keystore-wrapped identity (${e.message}); " +
+                    "sealed blob preserved — signing unavailable this start, " +
+                    "will retry on next boot/service start",
+                e,
+            )
+            throw e
+        }
         privateKey = result.seed
         // Tink derives the public key from the private key seed.
         publicKey = ed25519PublicKeyFromSeed(privateKey)
