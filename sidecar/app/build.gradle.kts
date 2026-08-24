@@ -112,4 +112,9 @@ dependencies {
 
     // JUnit 4 for BackendPlannerTest and other unit tests
     testImplementation("junit:junit:4.13.2")
+
+    // Instrumented tests (src/androidTest) — real-Keystore cipher tests
+    // run via connectedDebugAndroidTest on a device runner.
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
+    androidTestImplementation("androidx.test:runner:1.6.2")
 }
