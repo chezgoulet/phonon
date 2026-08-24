@@ -1,4 +1,4 @@
-//go:build unix
+//go:build linux
 
 package model
 
@@ -110,9 +110,11 @@ func (d pinnedDir) statSize(name string) (int64, error) {
 
 // remove unlinks name within the pinned dir (unlinkat). The unlink lands
 // on the held inode regardless of what entry now sits at the old path.
-// Issued as a raw SYS_UNLINKAT syscall: some Go toolchains expose a 2-arg
-// syscall.Unlinkat wrapper without the flags parameter; the raw syscall
-// signature is stable across all of them (flags=0 → plain unlink).
+// Issued as a raw SYS_UNLINKAT syscall (this file builds for linux only):
+// some Go toolchains expose a 2-arg syscall.Unlinkat wrapper without the
+// flags parameter, and wrapper signatures are not portable across
+// platforms — the raw syscall sidesteps whichever variant a toolchain
+// ships (flags=0 → plain unlink).
 func (d pinnedDir) remove(name string) error {
 	if err := bareName(name); err != nil {
 		return err

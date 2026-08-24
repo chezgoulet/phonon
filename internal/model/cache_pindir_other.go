@@ -1,4 +1,4 @@
-//go:build !unix
+//go:build !linux
 
 package model
 
@@ -10,12 +10,15 @@ import (
 	"path/filepath"
 )
 
-// NON-UNIX FALLBACK — READ BEFORE TOUCHING.
+// NON-LINUX FALLBACK — READ BEFORE TOUCHING.
 //
-// Platforms whose syscall package lacks openat/renameat/unlinkat (Windows,
-// Plan 9, js/wasm) cannot pin directories by file descriptor. The type
-// below emulates the pinnedDir API over full paths, keeping the round-1
-// pre-open checks.
+// Only linux gets the fd-pinned implementation (cache_pindir_unix.go):
+// Makefile targets are linux/amd64+linux/arm64 and the raw openat/
+// renameat/unlinkat usage there is not portable across other platforms.
+// Every non-linux platform therefore compiles this path-based emulation
+// of the pinnedDir API (Windows, Plan 9, js/wasm lack the syscalls
+// outright; darwin/BSD exclude the linux file by build constraint),
+// keeping the round-1 pre-open checks.
 //
 // RESIDUAL RACE (documented, fail-visible): every operation below resolves
 // its FULL PATH at call time, so a local attacker able to swap directory
