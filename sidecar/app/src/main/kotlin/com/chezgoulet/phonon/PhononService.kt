@@ -135,6 +135,11 @@ class PhononService : Service() {
 
         // Acquire partial wake lock to prevent Doze from killing us
         val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+        // #332: onStartCommand can fire again while a prior wake lock is held;
+        // release it before reacquiring so we never stack holds up to 4h each.
+        if (wakeLock?.isHeld == true) {
+            wakeLock?.release()
+        }
         wakeLock = powerManager.newWakeLock(
             PowerManager.PARTIAL_WAKE_LOCK,
             "phonon:worker"
@@ -167,9 +172,22 @@ class PhononService : Service() {
 
                 // Start VizState update loop (~10fps)
                 startVizStateLoop()
+
+                // #331: a successful start clears any prior degraded marker so
+                // the notification stops showing a stale "ERROR: degraded".
+                startupError = null
+                updateNotification()
             } catch (e: Exception) {
                 startupError = (e.message ?: e.javaClass.simpleName).take(120)
                 Log.e(tag, "Sidecar startup failed; degraded until next start/boot: $startupError", e)
+                // #330: the failed attempt may have started mDNS before the
+                // identity failure; roll it back so a retry cannot orphan a
+                // ghost _phonon._tcp registration, and reset the flag so a
+                // later successful start turns it back on cleanly.
+                if (mdnsAnnouncerStarted) {
+                    mdnsAnnouncer.stop()
+                    mdnsAnnouncerStarted = false
+                }
                 updateNotification()
                 return START_NOT_STICKY
             }
