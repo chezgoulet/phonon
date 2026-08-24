@@ -83,18 +83,15 @@ jobs:
 
   # ─── Sidecar instrumented tests (real AndroidKeyStore) ────────────
   # Runs the androidTest source set (KeystoreSeedCipherTest) against a real
-  # device/emulator. There is no GitHub-hosted Android device fleet, so this
-  # targets a self-hosted runner labeled "android" — Christopher must
-  # register one (USB-attached device or emulator host):
-  #   repo Settings → Actions → Runners → New self-hosted runner, with labels
-  #   ["self-hosted", "android"].
-  # HONEST CAVEAT: until such a runner exists, the job cannot start. It is
-  # marked continue-on-error so its absence doesn't wedge CI; REMOVE that
-  # flag once a runner is registered so instrumented failures gate merges.
+  # device/emulator on the org self-hosted runner labeled "android".
+  #   repo Settings → Actions → Runners → sasquatch-runner (self-hosted, android)
+  # The runner host keeps a headless phonon_test AVD attached (systemd unit
+  # phonon-emulator.service); connectedDebugAndroidTest installs + runs the
+  # tests against it. Verified 2026-08-24: 4/4 PASS. Instrumented failures
+  # GATE merges — do not add continue-on-error back.
   sidecar-instrumented:
     name: Sidecar instrumented (device)
     runs-on: [self-hosted, android]
-    continue-on-error: true # remove once an [android] device runner is registered
     defaults:
       run:
         working-directory: sidecar
