@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -259,6 +260,105 @@ func TestModelUploadAppearsInModelList(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("uploaded model missing from model list: %+v", list.Data)
+	}
+}
+
+func TestModelUploadNameFieldAtLimitAccepted(t *testing.T) {
+	cache, _ := uploadTestCache(t)
+	h := NewModelUploadHandler(cache)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	payload := []byte("bytes")
+	longName := strings.Repeat("a", 4096)
+	body, ctype := buildUpload(t, longName, "", payload)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/models/upload", body)
+	req.Header.Set("Content-Type", ctype)
+	req.Header.Set(ChecksumHeader, sha(payload))
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201 for %d-byte name, got %d: %s", len(longName), w.Code, w.Body.String())
+	}
+	var meta struct {
+		Name string `json:"name"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&meta); err != nil {
+		t.Fatal(err)
+	}
+	if meta.Name != longName {
+		t.Errorf("response name not intact: got %d bytes, want %d", len(meta.Name), len(longName))
+	}
+	if !cache.Has(longName) {
+		t.Error("cache should register the uploaded model under its full name")
+	}
+}
+
+func TestModelUploadNameFieldOverLimitRejected(t *testing.T) {
+	cache, dir := uploadTestCache(t)
+	h := NewModelUploadHandler(cache)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	payload := []byte("bytes")
+	tooLong := strings.Repeat("a", 4097)
+	body, ctype := buildUpload(t, tooLong, "", payload)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/models/upload", body)
+	req.Header.Set("Content-Type", ctype)
+	req.Header.Set(ChecksumHeader, sha(payload))
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for %d-byte name, got %d: %s", len(tooLong), w.Code, w.Body.String())
+	}
+	var resp struct {
+		Error struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(resp.Error.Message, "name") || !strings.Contains(resp.Error.Message, "4096 byte limit") {
+		t.Errorf("error should name the field and the limit: %q", resp.Error.Message)
+	}
+	entries, err := os.ReadDir(filepath.Join(dir, "models"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("rejected upload must not touch disk, found %d entries", len(entries))
+	}
+}
+
+func TestModelUploadChecksumFieldOverLimitRejected(t *testing.T) {
+	cache, _ := uploadTestCache(t)
+	h := NewModelUploadHandler(cache)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	bigChecksum := strings.Repeat("f", 4097)
+	body, ctype := buildUpload(t, "m", bigChecksum, []byte("bytes"))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/models/upload", body)
+	req.Header.Set("Content-Type", ctype)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for oversized checksum field, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Error struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(resp.Error.Message, "checksum") || !strings.Contains(resp.Error.Message, "4096 byte limit") {
+		t.Errorf("error should name the field and the limit: %q", resp.Error.Message)
 	}
 }
 

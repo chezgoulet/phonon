@@ -506,9 +506,21 @@ func ResolveHuggingFaceURL(modelID string) string {
 	return fmt.Sprintf("https://huggingface.co/%s-GGUF/resolve/main/%s", orgRepo, filename)
 }
 
-// sanitizeName replaces path separators in model names.
+// maxSanitizedNameLen caps sanitized model names below the common 255-byte
+// filesystem filename limit, leaving room for temp-file suffixes.
+const maxSanitizedNameLen = 240
+
+// sanitizeName replaces path separators in model names. Overlong names are
+// shortened with a hash suffix so they stay storable and unique instead of
+// failing with ENAMETOOLONG or colliding.
 func sanitizeName(name string) string {
-	return strings.NewReplacer("/", "_", ":", "_").Replace(name)
+	s := strings.NewReplacer("/", "_", ":", "_").Replace(name)
+	if len(s) <= maxSanitizedNameLen {
+		return s
+	}
+	sum := sha256.Sum256([]byte(name))
+	prefix := maxSanitizedNameLen - 9
+	return fmt.Sprintf("%s-%x", s[:prefix], sum[:4])
 }
 
 // fileSHA256 computes the hex SHA-256 hash of a file.

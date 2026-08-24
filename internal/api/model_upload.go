@@ -141,9 +141,19 @@ func (h *ModelUploadHandler) handleUpload(w http.ResponseWriter, r *http.Request
 
 		switch {
 		case part.FileName() == "" && part.FormName() == "name":
-			name = readSmallField(part)
+			val, ferr := readSmallField(part)
+			if ferr != nil {
+				writeFieldTooLarge(w, "name")
+				return
+			}
+			name = val
 		case part.FileName() == "" && part.FormName() == "checksum":
-			checksum = strings.TrimSpace(readSmallField(part))
+			val, ferr := readSmallField(part)
+			if ferr != nil {
+				writeFieldTooLarge(w, "checksum")
+				return
+			}
+			checksum = strings.TrimSpace(val)
 		case part.FileName() != "":
 			// Fields must precede the file part (standard for form
 			// encoders); validate what we have, then stream the binary
@@ -225,9 +235,29 @@ func (h *ModelUploadHandler) writePutError(w http.ResponseWriter, name string, e
 	}
 }
 
-// readSmallField reads a small form field value (capped at 4 KB).
-func readSmallField(p *multipart.Part) string {
-	b, _ := io.ReadAll(io.LimitReader(p, 4096))
-	p.Close()
-	return string(b)
+// maxFormFieldLen caps small form field values (name, checksum) at 4 KiB.
+const maxFormFieldLen = 4096
+
+// readSmallField reads a form field value of at most maxFormFieldLen bytes.
+// Larger values yield an error rather than being silently truncated.
+func readSmallField(p *multipart.Part) (string, error) {
+	defer p.Close()
+	b, err := io.ReadAll(io.LimitReader(p, maxFormFieldLen+1))
+	if err != nil {
+		return "", err
+	}
+	if len(b) > maxFormFieldLen {
+		return "", fmt.Errorf("form field exceeds %d byte limit", maxFormFieldLen)
+	}
+	return string(b), nil
+}
+
+// writeFieldTooLarge rejects requests whose form fields exceed the limit.
+func writeFieldTooLarge(w http.ResponseWriter, field string) {
+	writeJSON(w, http.StatusBadRequest, map[string]any{
+		"error": map[string]string{
+			"message": fmt.Sprintf("form field %s exceeds %d byte limit", field, maxFormFieldLen),
+			"type":    "invalid_request_error",
+		},
+	})
 }
