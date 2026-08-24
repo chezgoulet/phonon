@@ -21,8 +21,12 @@ For deeper detail on any stage, see the linked documents:
 
 ### Phones (minimum 1)
 
-- **Android** 12+ (API 31); minimum viable hardware is ARM64, 8 GB RAM,
-  USB-C ([SPEC §1.4](../SPEC.md)). Tested on Pixel 6–9 and Moto G Stylus 5G.
+- **Android:** the APK installs on Android 10+ (API 29) — set by
+  `minSdk = 29` in [`sidecar/app/build.gradle.kts`](../sidecar/app/build.gradle.kts),
+  which is the authoritative install floor; [SPEC §1.4](../SPEC.md)
+  additionally targets Android 14+ as minimum supported hardware. Minimum
+  viable hardware is ARM64, 8 GB RAM, USB-C ([SPEC §1.4](../SPEC.md)).
+  Tested on Pixel 6–9 and Moto G Stylus 5G.
 - **Recommended:** Pixel 7a or newer (Tensor G2+) for NPU acceleration.
 - **Storage:** 16 GB minimum for the APK plus a small model; more for larger
   GGUF files.
@@ -62,8 +66,20 @@ Option A — Docker (recommended):
 
 ```bash
 git clone https://github.com/chezgoulet/phonon && cd phonon
+cp phonon.example.yaml phonon.yaml   # create the config BEFORE first start
+# Edit phonon.yaml now: uncomment and fill in at least one group
+# (see Configure below), then start:
 docker compose up -d
 ```
+
+> **Order matters:** `docker-compose.yml` bind-mounts `./phonon.yaml` into
+> the container. If you run `docker compose up` while that file doesn't
+> exist, Docker helpfully creates an empty *directory* named `phonon.yaml`;
+> the coordinator then refuses to load it and exits (`config file exists but
+> failed to load`), and with `restart: unless-stopped` that becomes a silent
+> restart loop. If this happens to you: `docker compose down && rm -d
+> phonon.yaml`, create the file per [Configure](#configure), and start again.
+> Also in [Troubleshooting](#7-troubleshooting).
 
 Option B — from source:
 
@@ -78,7 +94,8 @@ binary, use `./build.sh` (builds the React frontend first, then embeds it).
 
 ### Configure
 
-Copy the annotated reference config and edit it:
+Copy the annotated reference config and edit it (already done if you followed
+Option A above — don't copy over your own edits):
 
 ```bash
 cp phonon.example.yaml phonon.yaml
@@ -135,19 +152,23 @@ and `localhost` only works when the phone *is* the coordinator host.
 ```
 
 > **Verification gate:** startup logs are JSON on stdout. You should now see
-> (among others):
+> (among others; the `time` field is elided here):
 >
 > ```
-> msg="pairing manager initialized" ...
-> msg="UI served at /ui/"
-> msg="inference port configured" port=9876 sidecar_env=PHONON_INFERENCE_PORT
-> msg="mDNS discovery started"
-> msg="listening" addr=":8080" ...
+> {"level":"INFO","msg":"pairing manager initialized", …}
+> {"level":"INFO","msg":"UI served at /ui/"}
+> {"level":"INFO","msg":"inference port configured","port":9876,"sidecar_env":"PHONON_INFERENCE_PORT"}
+> {"level":"INFO","msg":"listening","addr":":8080","auth_mode":"insecure","tls":false}
 > ```
+>
+> (Some background subsystems log plain-text lines instead — e.g.
+> `INFO mDNS discovery started component=discovery`; their format differs but
+> their presence is normal.)
 >
 > The `inference port configured` line is your runtime port check: note the
-> `port` value — every sidecar must run with a matching `PHONON_INFERENCE_PORT`.
-> See [Troubleshooting](#7-troubleshooting) for what a mismatch looks like.
+> numeric `"port"` value — every sidecar must run with a matching
+> `PHONON_INFERENCE_PORT`. See [Troubleshooting](#7-troubleshooting) for what a
+> mismatch looks like.
 
 Smoke-test the HTTP surface:
 
@@ -231,11 +252,25 @@ adb shell am start -n com.chezgoulet.phonon/.MainActivity
 ```
 
 > **Verification gate:** the phone shows a persistent **"Phonon Worker"**
-> notification. Over logcat you should see the service connect:
+> notification. Over logcat you should see the service register and open its
+> command channel:
 >
 > ```bash
-> adb logcat -s PhononService:CoordinatorClient
-> # Expected: "Connected to coordinator" and periodic heartbeats
+> adb logcat -s PhononService CoordinatorClient
+> # Expected: "Registered as <node-name> (status=…)" followed by
+> #           "WebSocket connected"
+> ```
+>
+> Two checks that can actually pass (successful heartbeats are *not* logged —
+> a quiet `CoordinatorClient` after connect is the healthy steady state):
+>
+> ```bash
+> # Coordinator side: the phone registered and is in the node list.
+> curl -s http://localhost:8080/api/v1/cluster/nodes | grep device_id
+> # …"device_id":"<id>"…"name":"…"…"state":"unpaired"…  (pairing comes in §4)
+>
+> # Phone side: the WebSocket command channel came up.
+> adb logcat -d -s CoordinatorClient | grep "WebSocket connected"
 > ```
 
 ### 3.4 Optional: static coordinator URL (skips mDNS)
@@ -282,8 +317,10 @@ coordinator:
 1. The phone registers itself and appears as **unpaired** in the cluster node
    list.
 2. The phone generates an Ed25519 keypair, sends the public key, and receives
-   a **6-digit pairing code**, which it displays on its status screen
-   (and logs under the `PairingClient` tag).
+   a **6-digit pairing code**, which it displays on its status screen.
+   Operator-side, the same code is available from the coordinator: it appears
+   in the web UI's **Pairing** tab and in the `/api/v1/pair/pending` response
+   below (the phone does not log it).
 3. It then polls the pairing-status endpoint, signing each poll, until the
    coordinator confirms — at which point it receives and stores its device
    auth token.
@@ -293,13 +330,14 @@ Your part — confirm the pairing from the coordinator side:
 ```bash
 # Find the pending pairing (includes the code to expect)
 curl -s http://localhost:8080/api/v1/pair/pending
-# [{"device_id":"...","device_model":"Pixel 7a","code":"482913",
-#   "ip_address":"192.168.1.42","created_at":"...","expires_at":"..."}]
+# {"pending":[{"device_id":"…","device_model":"Pixel 7a","code":"482913",
+#   "ip_address":"192.168.1.42","created_at":"…","expires_at":"…"}]}
 
 # Confirm with device_id + code
 curl -s -X POST http://localhost:8080/api/v1/pair/confirm \
   -H "Content-Type: application/json" \
   -d '{"device_id": "...", "code": "482913"}'
+# {"status":"paired","node_name":"pixel-7a-…"}
 
 # Headless phone (no screen to show a code)? Omit the code to auto-approve:
 curl -s -X POST http://localhost:8080/api/v1/pair/confirm \
@@ -315,7 +353,7 @@ endpoint to use).
 > **Verification gate:** within seconds of confirming:
 >
 > ```bash
-> curl -s http://localhost:8080/api/v1/pair/paired     # device listed
+> curl -s http://localhost:8080/api/v1/pair/paired     # {"paired":[{…}]}
 > curl -s http://localhost:8080/api/v1/cluster/nodes   # "state":"online"
 > ```
 >
@@ -435,8 +473,8 @@ bearer JWT. Check current mode with
 |---|---|---|
 | Coordinator up | `curl -s localhost:8080/livez` | `{"status":"ok","version":"0.1.0"}` |
 | Dependencies ready | `curl -s localhost:8080/readyz` | `"event_log":"ok"` in deps |
-| Port check (#281) | read startup log | `"inference port configured" port=9876` |
-| Sidecar alive | `adb logcat -s PhononService:CoordinatorClient` | "Connected to coordinator" + heartbeats |
+| Port check (#281) | read startup log | `"msg":"inference port configured","port":9876` |
+| Sidecar alive | `adb logcat -s PhononService CoordinatorClient` | `"WebSocket connected"` after `Registered as …` |
 | Phone visible | `GET /api/v1/cluster/nodes` | entry with `"state"` field |
 | Paired & online | `GET /api/v1/cluster/nodes` | `"state":"online"` |
 | Model loaded | `GET /api/v1/cluster/nodes` | `"model_loaded":"<name>"` |
@@ -451,8 +489,9 @@ bearer JWT. Check current mode with
 |---|---|---|
 | Phone never appears in the node list | mDNS blocked or unreliable: UDP 5353 filtered, AP/client isolation, phones on a different subnet than the coordinator | Put both on the same subnet; allow UDP 5353 and TCP 8080; or skip discovery — push a static `coordinator_url` to the phone (§3.4) and/or set `discovery.mdns.disabled: true` |
 | Sidecar dies minutes after launch / after screen-off | Battery optimization killed it (the #1 operational failure) | Re-apply §3.3 whitelist commands; disable Adaptive Battery; as a last resort `adb shell svc power stayon true`. Non-Pixel OEMs add their own killers — see dontkillmyapp.com |
-| Every phone shows unreachable-for-inference while heartbeats still succeed | Inference-port mismatch: coordinator probes `cluster.inference_port`, sidecars listen on `PHONON_INFERENCE_PORT`; they must match (both default 9876) | Read the runtime check from the startup log — `"inference port configured" port=… sidecar_env=PHONON_INFERENCE_PORT` (added in [#281]) — and set the same value on both sides. Details: [PHONE-API.md → Port configuration](PHONE-API.md) |
+| Every phone shows unreachable-for-inference while heartbeats still succeed | Inference-port mismatch: coordinator probes `cluster.inference_port`, sidecars listen on `PHONON_INFERENCE_PORT`; they must match (both default 9876) | Read the runtime check from the startup log — `{"msg":"inference port configured","port":…,"sidecar_env":"PHONON_INFERENCE_PORT"}` (added in [#281]) — and set the same value on both sides. Details: [PHONE-API.md → Port configuration](PHONE-API.md) |
 | Coordinator exits immediately at startup with `at least one group must be defined` | Config file present but no groups defined (e.g. fresh copy of `phonon.example.yaml`) | Uncomment/define ≥1 group, or delete `phonon.yaml` to run groupless defaults. A broken config refuses to start rather than fail open |
+| Docker container restart-loops with `config file exists but failed to load` | `docker compose up` ran before `./phonon.yaml` existed, so Docker created an empty **directory** at that bind-mount path (§2, Option A) | `docker compose down && rm -d phonon.yaml` (it will be an empty directory), `cp phonon.example.yaml phonon.yaml`, configure ≥1 group, then `docker compose up -d` |
 | Inference returns `503 … no available phone with model … loaded` | Model still downloading/pushing, or group `phones:` don't match paired device IDs | Check `GET /api/v1/events` for download progress and `GET /api/v1/cluster/nodes` for `model_loaded`; make sure YAML phone identifiers match paired devices |
 | `curl http://host:8080/health` returns 308 | `/health` permanently redirects to `/readyz` | Use `/livez` or `/readyz` directly |
 | Model push fails mid-transfer | Download URL unreachable from the coordinator, or phone out of storage | Verify `download_url` from the coordinator host; free up phone storage (each phone in a group stores the complete model file) |
