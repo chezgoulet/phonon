@@ -40,11 +40,11 @@ func busySleep(d time.Duration) {
 }
 
 type toggler struct {
-	stop   chan struct{}
-	done   chan struct{}
-	flips  int
-	evils  int // periods spent in evil state
-	reals  int
+	stop  chan struct{}
+	done  chan struct{}
+	flips int
+	evils int // periods spent in evil state
+	reals int
 }
 
 func startToggler(modelsDir, evilModels string, realDur, evilDur time.Duration) *toggler {
