@@ -21,6 +21,10 @@
     <!-- Boot completed for auto-start -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
+    <!-- Foreground service wake lock: PhononService holds a PARTIAL_WAKE_LOCK
+         to keep inference alive in the background. -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
     <application
         android:name=".PhononApplication"
         android:allowBackup="false"
