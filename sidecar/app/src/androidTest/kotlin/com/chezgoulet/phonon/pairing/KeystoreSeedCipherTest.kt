@@ -22,7 +22,7 @@ class KeystoreSeedCipherTest {
     private val cipher = KeystoreSeedCipher()
 
     @Test
-    fun `seal unseal round trip`() {
+    fun sealUnsealRoundTrip() {
         val seed = ByteArray(32) { it.toByte() }
         val sealed = cipher.seal(seed)
         assertNotEquals(seed.toList(), sealed.toList())
@@ -30,7 +30,7 @@ class KeystoreSeedCipherTest {
     }
 
     @Test
-    fun `key persists across cipher instances`() {
+    fun keyPersistsAcrossCipherInstances() {
         // The wrapping key is non-exportable but must be stable: a blob
         // sealed by one process/instance unseals in another (reboot proxy).
         val seed = ByteArray(32) { (it * 3).toByte() }
@@ -39,13 +39,13 @@ class KeystoreSeedCipherTest {
     }
 
     @Test
-    fun `sealed blobs are non deterministic`() {
+    fun sealedBlobsAreNonDeterministic() {
         val seed = ByteArray(32) { (it * 7).toByte() }
         assertNotEquals(cipher.seal(seed).toList(), cipher.seal(seed).toList())
     }
 
     @Test(expected = GeneralSecurityException::class)
-    fun `tampered blob fails authentication`() {
+    fun tamperedBlobFailsAuthentication() {
         val sealed = cipher.seal(ByteArray(32))
         sealed[sealed.size - 1] = (sealed[sealed.size - 1] + 1).toByte()
         cipher.unseal(sealed)
