@@ -6,9 +6,19 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
 )
+
+// init announces the degraded containment mode whenever this fallback
+// compiles in (any non-linux platform): containment is best-effort only,
+// with the residual race documented in the file header below.
+func init() {
+	slog.Warn("model cache path containment is degraded on this platform: "+
+		"path-based best-effort checks, no fd-pinned openat/renameat/unlinkat",
+		"component", "model-cache")
+}
 
 // NON-LINUX FALLBACK — READ BEFORE TOUCHING.
 //
