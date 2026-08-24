@@ -141,9 +141,19 @@ func (h *ModelUploadHandler) handleUpload(w http.ResponseWriter, r *http.Request
 
 		switch {
 		case part.FileName() == "" && part.FormName() == "name":
-			name = readSmallField(part)
+			val, ferr := readSmallField(part)
+			if ferr != nil {
+				writeSmallFieldError(w, "name", ferr)
+				return
+			}
+			name = val
 		case part.FileName() == "" && part.FormName() == "checksum":
-			checksum = strings.TrimSpace(readSmallField(part))
+			val, ferr := readSmallField(part)
+			if ferr != nil {
+				writeSmallFieldError(w, "checksum", ferr)
+				return
+			}
+			checksum = strings.TrimSpace(val)
 		case part.FileName() != "":
 			// Fields must precede the file part (standard for form
 			// encoders); validate what we have, then stream the binary
@@ -225,9 +235,64 @@ func (h *ModelUploadHandler) writePutError(w http.ResponseWriter, name string, e
 	}
 }
 
-// readSmallField reads a small form field value (capped at 4 KB).
-func readSmallField(p *multipart.Part) string {
-	b, _ := io.ReadAll(io.LimitReader(p, 4096))
+// maxFormFieldLen caps small form field values (name, checksum) at 4 KiB.
+const maxFormFieldLen = 4096
+
+// maxFieldDiscardBytes caps how much of a rejected overflowing field is
+// drained before giving up — the same cap applied to unknown fields — since
+// uploads are serialized by a semaphore that a multi-gigabyte junk field
+// must not pin down while being drained.
+const maxFieldDiscardBytes = 1 << 20
+
+// errFieldTooLarge marks a genuine overflow: the field value itself exceeded
+// maxFormFieldLen. Any other error from readSmallField is a transport or
+// framing failure (malformed body, aborted request) and must not be
+// reported as "exceeds limit".
+var errFieldTooLarge = errors.New("form field exceeds limit")
+
+// readSmallField reads a form field value of at most maxFormFieldLen bytes.
+// Values over the limit yield errFieldTooLarge; other errors are raw I/O or
+// multipart-framing failures. On overflow only maxFieldDiscardBytes of the
+// remainder are discarded and the part is deliberately left unclosed:
+// Part.Close would otherwise drain the unbounded remainder while the caller
+// holds the single-upload semaphore. The request is rejected immediately
+// afterwards, so the connection is simply abandoned.
+func readSmallField(p *multipart.Part) (string, error) {
+	b, err := io.ReadAll(io.LimitReader(p, maxFormFieldLen+1))
+	if err != nil {
+		p.Close()
+		return "", err
+	}
+	if len(b) > maxFormFieldLen {
+		_, _ = io.Copy(io.Discard, io.LimitReader(p, maxFieldDiscardBytes))
+		return "", errFieldTooLarge
+	}
 	p.Close()
-	return string(b)
+	return string(b), nil
+}
+
+// writeSmallFieldError maps readSmallField failures: genuine overflows get
+// the dedicated too-large message, everything else falls into the existing
+// malformed-body 400 path alongside NextPart errors.
+func writeSmallFieldError(w http.ResponseWriter, field string, err error) {
+	if errors.Is(err, errFieldTooLarge) {
+		writeFieldTooLarge(w, field)
+		return
+	}
+	writeJSON(w, http.StatusBadRequest, map[string]any{
+		"error": map[string]string{
+			"message": "malformed multipart body: " + err.Error(),
+			"type":    "invalid_request_error",
+		},
+	})
+}
+
+// writeFieldTooLarge rejects requests whose form fields exceed the limit.
+func writeFieldTooLarge(w http.ResponseWriter, field string) {
+	writeJSON(w, http.StatusBadRequest, map[string]any{
+		"error": map[string]string{
+			"message": fmt.Sprintf("form field %s exceeds %d byte limit", field, maxFormFieldLen),
+			"type":    "invalid_request_error",
+		},
+	})
 }

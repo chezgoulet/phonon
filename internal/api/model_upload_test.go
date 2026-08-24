@@ -5,12 +5,15 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -259,6 +262,204 @@ func TestModelUploadAppearsInModelList(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("uploaded model missing from model list: %+v", list.Data)
+	}
+}
+
+func TestModelUploadNameFieldAtLimitAccepted(t *testing.T) {
+	cache, _ := uploadTestCache(t)
+	h := NewModelUploadHandler(cache)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	payload := []byte("bytes")
+	longName := strings.Repeat("a", 4096)
+	body, ctype := buildUpload(t, longName, "", payload)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/models/upload", body)
+	req.Header.Set("Content-Type", ctype)
+	req.Header.Set(ChecksumHeader, sha(payload))
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201 for %d-byte name, got %d: %s", len(longName), w.Code, w.Body.String())
+	}
+	var meta struct {
+		Name string `json:"name"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&meta); err != nil {
+		t.Fatal(err)
+	}
+	if meta.Name != longName {
+		t.Errorf("response name not intact: got %d bytes, want %d", len(meta.Name), len(longName))
+	}
+	if !cache.Has(longName) {
+		t.Error("cache should register the uploaded model under its full name")
+	}
+}
+
+func TestModelUploadNameFieldOverLimitRejected(t *testing.T) {
+	cache, dir := uploadTestCache(t)
+	h := NewModelUploadHandler(cache)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	payload := []byte("bytes")
+	tooLong := strings.Repeat("a", 4097)
+	body, ctype := buildUpload(t, tooLong, "", payload)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/models/upload", body)
+	req.Header.Set("Content-Type", ctype)
+	req.Header.Set(ChecksumHeader, sha(payload))
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for %d-byte name, got %d: %s", len(tooLong), w.Code, w.Body.String())
+	}
+	var resp struct {
+		Error struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(resp.Error.Message, "name") || !strings.Contains(resp.Error.Message, "4096 byte limit") {
+		t.Errorf("error should name the field and the limit: %q", resp.Error.Message)
+	}
+	entries, err := os.ReadDir(filepath.Join(dir, "models"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("rejected upload must not touch disk, found %d entries", len(entries))
+	}
+}
+
+func TestModelUploadChecksumFieldOverLimitRejected(t *testing.T) {
+	cache, _ := uploadTestCache(t)
+	h := NewModelUploadHandler(cache)
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	bigChecksum := strings.Repeat("f", 4097)
+	body, ctype := buildUpload(t, "m", bigChecksum, []byte("bytes"))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/models/upload", body)
+	req.Header.Set("Content-Type", ctype)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for oversized checksum field, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Error struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(resp.Error.Message, "checksum") || !strings.Contains(resp.Error.Message, "4096 byte limit") {
+		t.Errorf("error should name the field and the limit: %q", resp.Error.Message)
+	}
+}
+
+// countingReader tracks how many body bytes the multipart machinery has
+// actually pulled through.
+type countingReader struct {
+	r io.Reader
+	n int64
+}
+
+func (c *countingReader) Read(p []byte) (int, error) {
+	n, err := c.r.Read(p)
+	c.n += int64(n)
+	return n, err
+}
+
+// TestReadSmallFieldCapsDiscardOnOverflow ensures an overflowing field is
+// not drained unboundedly while the upload semaphore is held: at most ~1MiB
+// of a 5MiB junk field may be consumed after the limit is detected.
+func TestReadSmallFieldCapsDiscardOnOverflow(t *testing.T) {
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	fw, err := mw.CreateFormField("name")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fw.Write(bytes.Repeat([]byte("a"), 5<<20)); err != nil {
+		t.Fatal(err)
+	}
+	mw.Close()
+
+	cr := &countingReader{r: bytes.NewReader(buf.Bytes())}
+	mr := multipart.NewReader(cr, mw.Boundary())
+	part, err := mr.NextPart()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = readSmallField(part)
+	if !errors.Is(err, errFieldTooLarge) {
+		t.Fatalf("expected errFieldTooLarge, got %v", err)
+	}
+	// Budget: 4097-byte read + 1MiB capped discard + header/boundary slack.
+	const budget = maxFormFieldLen + 1 + maxFieldDiscardBytes + 8192
+	if cr.n > budget {
+		t.Errorf("consumed %d bytes of the body; want ≤ %d (uncapped Close would drain %d)",
+			cr.n, budget, buf.Len())
+	}
+}
+
+// TestModelUploadTruncatedFieldNotReportedAsTooLarge ensures raw I/O errors
+// (aborted/truncated bodies) surface as malformed multipart bodies rather
+// than the misleading "exceeds 4096 byte limit" overflow message.
+func TestModelUploadTruncatedFieldNotReportedAsTooLarge(t *testing.T) {
+	for _, field := range []string{"name", "checksum"} {
+		t.Run(field, func(t *testing.T) {
+			cache, _ := uploadTestCache(t)
+			h := NewModelUploadHandler(cache)
+			mux := http.NewServeMux()
+			h.RegisterRoutes(mux)
+
+			var buf bytes.Buffer
+			mw := multipart.NewWriter(&buf)
+			fw, err := mw.CreateFormField(field)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := fw.Write([]byte(strings.Repeat("n", 512))); err != nil {
+				t.Fatal(err)
+			}
+			mw.Close()
+
+			// Cut the body mid-field so the field read fails without
+			// ever seeing the boundary.
+			truncated := buf.Bytes()[:buf.Len()/2]
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/models/upload", bytes.NewReader(truncated))
+			req.Header.Set("Content-Type", mw.FormDataContentType())
+			req.Header.Set(ChecksumHeader, sha([]byte("bytes")))
+			w := httptest.NewRecorder()
+			mux.ServeHTTP(w, req)
+
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("expected 400 for truncated body, got %d: %s", w.Code, w.Body.String())
+			}
+			var resp struct {
+				Error struct {
+					Message string `json:"message"`
+				} `json:"error"`
+			}
+			if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(resp.Error.Message, "byte limit") {
+				t.Errorf("I/O failure misreported as overflow: %q", resp.Error.Message)
+			}
+			if !strings.Contains(resp.Error.Message, "malformed multipart body") {
+				t.Errorf("truncated body should map to malformed-body error: %q", resp.Error.Message)
+			}
+		})
 	}
 }
 

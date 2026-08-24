@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 )
 
 // Default cache subdirectories.
@@ -85,13 +86,20 @@ func (c *Cache) scan() error {
 		if e.IsDir() {
 			continue
 		}
+		name := e.Name()
 		fi, err := e.Info()
 		if err != nil {
 			continue
 		}
-		name := e.Name()
-		c.entries[name] = &CacheEntry{
-			Name:      name,
+		// Prefer the persisted original name: sanitized filenames lose
+		// information (rewritten separators, hash-suffixed truncation),
+		// so without it Get would not find the model after a restart.
+		key := name
+		if orig := c.originalName(name); orig != "" {
+			key = orig
+		}
+		c.entries[key] = &CacheEntry{
+			Name:      key,
 			Path:      filepath.Join(modelsDir, name),
 			SizeBytes: fi.Size(),
 			CachedAt:  fi.ModTime(),
@@ -239,6 +247,13 @@ func (c *Cache) Get(ctx context.Context, modelName, upstreamURL, expectedSHA str
 		return "", fmt.Errorf("download %s: %w", modelName, err)
 	}
 
+	// Same ordering as Put: write the name binding before the content
+	// rename so a crash cannot leave the stale sidecar binding new content
+	// to the previous owner's name. (Best effort; scan ignores orphaned
+	// sidecars.)
+	if base != modelName {
+		c.persistOriginalName(base, modelName)
+	}
 	// Atomic promote INSIDE pinned dirs: renameat(tmpFd, tmpBase,
 	// modelsFd, base). os.Rename would resolve two attacker-swappable path
 	// strings; renameat resolves two bare filenames against held inodes.
@@ -541,7 +556,13 @@ func (c *Cache) Remove(name string) error {
 		return err
 	}
 	defer closePinned(&d)
-	return d.remove(base)
+	if err := d.remove(base); err != nil {
+		return err
+	}
+	// Sidecar cleanup is best effort; a leftover sidecar without its file
+	// is ignored by scan.
+	_ = os.Remove(filepath.Join(c.rootDir, cacheNamesDir, base))
+	return nil
 }
 
 // ModelPath returns the local path for a cached model.
@@ -686,9 +707,18 @@ func (c *Cache) Put(name string, r io.Reader, expectedSHA string, maxBytes int64
 		return nil, fmt.Errorf("rename target: %w", err)
 	}
 
+	// Persist the original-name binding BEFORE the content lands: a crash
+	// after the rename but before the sidecar write would leave the stale
+	// sidecar pointing at the previous owner's name. Ordered this way the
+	// only possible window leaves an orphan sidecar (no matching model
+	// file), which scan ignores.
+	if base != name {
+		c.persistOriginalName(base, name)
+	}
+
 	// Atomic promote INSIDE pinned dirs; models dir re-pinned per attempt
-	// so benign churn (dir removed/recreated mid-upload) costs one retry,
-	// while every re-pin still refuses a swapped-in symlink (ELOOP).
+	// so benign churn costs one retry, while every re-pin still refuses a
+	// swapped-in symlink (ELOOP).
 	promote := func() error {
 		mp, err := c.pinCacheSubdir(&rootPin, cacheModelsDir)
 		if err != nil {
@@ -741,7 +771,73 @@ func ResolveHuggingFaceURL(modelID string) string {
 	return fmt.Sprintf("https://huggingface.co/%s-GGUF/resolve/main/%s", orgRepo, filename)
 }
 
-// sanitizeName replaces path separators in model names.
+// maxSanitizedNameLen caps sanitized model names below the common 255-byte
+// filesystem filename limit, leaving room for temp-file suffixes.
+const maxSanitizedNameLen = 240
+
+// cacheNamesDir holds per-file sidecars recording the original model name
+// of sanitized files ("<models>/.names/<basename>"). Sanitization loses
+// information — separators become underscores and overlong names are
+// replaced by a hash-suffixed prefix — so the original name must be
+// persisted for Get to resolve models after a restart. Keeping sidecars in
+// their own directory means scan never mistakes one for a model file.
+const cacheNamesDir = "models/.names"
+
+// persistOriginalName records the original model name beside its sanitized
+// cache file. Best effort: a missing or unreadable sidecar only degrades
+// restart lookups to on-disk-name keying, never correctness of Put/Get
+// within a running process.
+func (c *Cache) persistOriginalName(dest, name string) {
+	dir := filepath.Join(c.rootDir, cacheNamesDir)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		c.log.Warn("persist original model name", "error", err)
+		return
+	}
+	sidecar := filepath.Join(dir, filepath.Base(dest))
+	if err := os.WriteFile(sidecar, []byte(name), 0o644); err != nil {
+		c.log.Warn("persist original model name", "error", err)
+	}
+}
+
+// originalName returns the persisted original model name for an on-disk
+// file basename, or "" when none was recorded.
+func (c *Cache) originalName(basename string) string {
+	raw, err := os.ReadFile(filepath.Join(c.rootDir, cacheNamesDir, basename))
+	if err != nil {
+		return ""
+	}
+	if orig := strings.TrimSpace(string(raw)); orig != "" {
+		return orig
+	}
+	return ""
+}
+
+// sanitizeName makes a model name storable as a single cache filename:
+// path separators fold to "_" and overlong names are shortened with a hash
+// suffix instead of failing with ENAMETOOLONG or colliding. Folding is
+// lossy — "/" and ":" both become "_" — so any name the fold actually
+// changed is also given a 64-bit hash suffix of the ORIGINAL name;
+// otherwise Put("victim/model") and Put("victim_model") would map to one
+// stored file and the second upload would silently overwrite the first.
+// The mapping stays deterministic, so Get/Put always agree on it.
 func sanitizeName(name string) string {
-	return strings.NewReplacer("/", "_", ":", "_").Replace(name)
+	s := strings.NewReplacer("/", "_", ":", "_").Replace(name)
+	if s == name && len(s) <= maxSanitizedNameLen {
+		return s
+	}
+	sum := sha256.Sum256([]byte(name))
+	// The suffix is "-" plus 16 hex digits: a 64-bit truncation of the
+	// SHA-256. A 32-bit truncation let targeted collisions overwrite
+	// another model's file via Put's rename.
+	const hashSuffixLen = 1 + 2*8
+	if len(s) > maxSanitizedNameLen-hashSuffixLen {
+		prefix := maxSanitizedNameLen - hashSuffixLen
+		// Don't split a multi-byte rune at the cut point: walk back over
+		// any continuation bytes so the prefix stays valid UTF-8.
+		for prefix > 0 && !utf8.RuneStart(s[prefix]) {
+			prefix--
+		}
+		s = s[:prefix]
+	}
+	return fmt.Sprintf("%s-%x", s, sum[:8])
 }
