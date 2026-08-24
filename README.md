@@ -397,6 +397,7 @@ automatically.
 
 | Document | What it covers |
 |---|---|
+| [ZERO-TO-INFERENCE.md](docs/ZERO-TO-INFERENCE.md) | Step-by-step setup: bare hardware to first token |
 | [PHONON.md](PHONON.md) | Full product spec, performance estimates, roadmap |
 | [SPEC.md](SPEC.md) | Technical implementation specification |
 | [HARDWARE_SETUP.md](docs/HARDWARE_SETUP.md) | Phone selection guide |
