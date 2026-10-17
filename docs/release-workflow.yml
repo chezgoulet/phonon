@@ -1,0 +1,152 @@
+# NOTE: kept outside .github/workflows because the current PAT lacks the
+# GitHub workflow scope. Move this file to .github/workflows/release.yml
+# with a token that has that scope.
+# Draft GitHub Actions release workflow for Phonon.
+# Target path in the repo: .github/workflows/release.yml
+#
+# On a pushed tag it: checks out (with submodules), enforces a monotonically
+# increasing versionCode, builds the release APK with a pinned NDK, signs it with
+# the project keystore, and attaches the APK to a GitHub Release.
+#
+# ASSUMPTIONS / GAPS this workflow depends on (see GAPS.md):
+#   * a committed Gradle wrapper (./gradlew) also commits gradle-wrapper.jar
+#   * GraphQL-free: uses the default GITHUB_TOKEN
+#   * the secrets below exist: KEYSTORE_BASE64, KEYSTORE_PASSWORD,
+#     KEY_ALIAS, KEY_PASSWORD
+#   * llama.cpp is present as a git submodule (checkout with submodules)
+
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  # Pin the NDK. 30.0.16138531 is r30-rc1; prefer the stable r30 30.0.16248370
+  # unless the app requires the rc. Keep this in lockstep with
+  # app/app/build.gradle.kts (ndkVersion) and fdroiddata/…/com.phononai.app.yml (ndk:).
+  ANDROID_NDK_VERSION: '30.0.16248370'
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (with submodules)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install pinned NDK
+        run: |
+          yes | sdkmanager --licenses > /dev/null || true
+          sdkmanager "ndk;${ANDROID_NDK_VERSION}"
+          echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/${ANDROID_NDK_VERSION}" >> "$GITHUB_ENV"
+
+      - name: Derive version
+        id: ver
+        run: |
+          set -euo pipefail
+          VNAME="$(sed -nE 's/.*versionName[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/p' app/app/build.gradle.kts | head -n1)"
+          VCODE="$(sed -nE 's/.*versionCode[[:space:]]*=[[:space:]]*([0-9]+).*/\1/p' app/app/build.gradle.kts | head -n1)"
+          test -n "$VNAME" -a -n "$VCODE" || { echo "could not read version"; exit 1; }
+          echo "name=$VNAME" >> "$GITHUB_OUTPUT"
+          echo "code=$VCODE" >> "$GITHUB_OUTPUT"
+          echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          echo "versionName=$VNAME versionCode=$VCODE tag=${GITHUB_REF_NAME}"
+
+      # Monotonicity guard: the new versionCode must exceed the highest
+      # versionCode ever released. We read it from existing v* tags' Gradle files.
+      - name: Enforce monotonic versionCode
+        run: |
+          set -euo pipefail
+          NEW="${{ steps.ver.outputs.code }}"
+          HIGH=0
+          for t in $(git tag -l 'v*'); do
+            c="$(git show "$t:app/app/build.gradle.kts" 2>/dev/null | sed -nE 's/.*versionCode[[:space:]]*=[[:space:]]*([0-9]+).*/\1/p' | head -n1)"
+            [ -n "$c" ] && [ "$c" -gt "$HIGH" ] && HIGH="$c" || true
+          done
+          echo "highest previous versionCode = $HIGH, new = $NEW"
+          if [ "$NEW" -le "$HIGH" ]; then
+            echo "::error::versionCode $NEW is not greater than the previous maximum $HIGH"
+            exit 1
+          fi
+
+      - name: Decode keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        run: |
+          set -euo pipefail
+          test -n "$KEYSTORE_BASE64" || { echo "::error::KEYSTORE_BASE64 secret is not set"; exit 1; }
+          echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.keystore"
+
+      - name: Build signed release APK
+        env:
+          PHONON_KEYSTORE: ${{ runner.temp }}/release.keystore
+          PHONON_KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          PHONON_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          PHONON_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          # The build.gradle.kts release signing block reads these env vars so
+          # CI signs without committing secrets. See GAPS.md item "signing config".
+          ./gradlew --no-daemon :app:assembleRelease
+
+      - name: Locate APK
+        id: apk
+        run: |
+          set -euo pipefail
+          APK="$(find app/app/build/outputs/apk/release -name '*.apk' ! -name '*unsigned*' | head -n1)"
+          test -n "$APK" || { echo "::error::no signed APK produced"; exit 1; }
+          echo "path=$APK" >> "$GITHUB_OUTPUT"
+          echo "apk=$APK"
+
+      - name: Verify APK (signature + version)
+        run: |
+          set -euo pipefail
+          APK="${{ steps.apk.outputs.path }}"
+          "$ANDROID_SDK_ROOT/build-tools/"*/apksigner verify --print-certs "$APK"
+          "$ANDROID_SDK_ROOT/build-tools/"*/aapt dump badging "$APK" | grep -E "package:|versionCode"
+
+      - name: Rename artifact
+        id: named
+        run: |
+          set -euo pipefail
+          OUT="phonon-${{ steps.ver.outputs.name }}-${{ steps.ver.outputs.code }}-arm64-v8a.apk"
+          cp "${{ steps.apk.outputs.path }}" "$OUT"
+          echo "out=$OUT" >> "$GITHUB_OUTPUT"
+
+      - name: Write release notes from changelog
+        run: |
+          set -euo pipefail
+          CL="fastlane/metadata/android/en-US/changelogs/${{ steps.ver.outputs.code }}.txt"
+          if [ -f "$CL" ]; then cp "$CL" "$RUNNER_TEMP/notes.txt"; else
+            echo "Release ${{ steps.ver.outputs.name }}" > "$RUNNER_TEMP/notes.txt"; fi
+
+      - name: Create GitHub Release and attach APK
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.ver.outputs.tag }}
+          name: Phonon ${{ steps.ver.outputs.name }}
+          body_path: ${{ runner.temp }}/notes.txt
+          files: ${{ steps.named.outputs.out }}
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
