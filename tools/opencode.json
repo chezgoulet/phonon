@@ -1,0 +1,91 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "phone/gemma-4-e2b",
+  "small_model": "phone/gemma-4-e2b",
+  "default_agent": "phone-coder",
+  "autoupdate": false,
+  "share": "disabled",
+  "provider": {
+    "litellm": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Phone pool (LiteLLM)",
+      "options": {
+        "baseURL": "http://litellm.lan:4000/v1",
+        "apiKey": "{env:LITELLM_KEY}",
+        "timeout": 1800000,
+        "headerTimeout": 900000,
+        "chunkTimeout": 600000
+      },
+      "models": {
+        "phone-a": {
+          "name": "Pixel 7 #1 (pinned)",
+          "tool_call": true,
+          "reasoning": false,
+          "limit": { "context": 8192, "output": 2048 }
+        },
+        "phone-b": {
+          "name": "Pixel 7 #2 (pinned)",
+          "tool_call": true,
+          "reasoning": false,
+          "limit": { "context": 8192, "output": 2048 }
+        },
+        "gemma-4-e2b": {
+          "name": "Phone pool (any)",
+          "tool_call": true,
+          "reasoning": false,
+          "limit": { "context": 8192, "output": 2048 }
+        }
+      }
+    },
+    "phone": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Phone (LAN llama.cpp)",
+      "options": {
+        "baseURL": "http://phone.lan:8080/v1",
+        "apiKey": "{env:PHONE_KEY}",
+        "timeout": 1800000,
+        "headerTimeout": 900000,
+        "chunkTimeout": 600000
+      },
+      "models": {
+        "gemma-4-e2b": {
+          "name": "Gemma 4 E2B (phone)",
+          "tool_call": true,
+          "reasoning": false,
+          "limit": {
+            "context": 8192,
+            "output": 2048
+          }
+        }
+      }
+    }
+  },
+  "permission": {
+    "*": "allow",
+    "external_directory": "deny",
+    "webfetch": "deny"
+  },
+  "tools": {
+    "webfetch": false,
+    "task": false,
+    "skill": false,
+    "todowrite": false,
+    "glob": false,
+    "grep": false
+  },
+  "agent": {
+    "phone-coder": {
+      "description": "Small mechanical coding tasks on a slow local model",
+      "model": "phone/gemma-4-e2b",
+      "prompt": "You are a careful, slow coding worker. You receive one small task. Do exactly that task and nothing else.\n\nRules:\n- Read only the files you need. Do not explore the repository.\n- Change as few files as possible; one file is the normal case.\n- Do not refactor, rename broadly, reformat, or 'improve' unrelated code.\n- To search, use bash: `grep -rn \"pattern\" .` or `find . -name \"*.py\"`.\n- Do not run git. The runner handles branches and commits.\n- Run the check command the task gives you.\n- If the check fails, fix your change if the cause is obvious; otherwise stop and say what failed.\n- When the task is complete, reply with one short paragraph: what you changed, and the check result.",
+      "tools": {
+        "webfetch": false,
+        "task": false,
+        "skill": false,
+        "todowrite": false,
+        "glob": false,
+        "grep": false
+      }
+    }
+  }
+}

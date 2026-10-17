@@ -1,0 +1,27 @@
+device: Google Pixel 7
+codename: panther
+soc: Google Tensor G2
+ram_gb: 8
+android: null
+rooted: false
+runtime: llama.cpp
+runtime_build: null
+model: gemma-4-E2B-it-Q4_K_M
+context: 8192
+threads: 4
+mtp: true
+status: candidate
+units: 2
+measured:
+  prefill_tps: null
+  decode_tps: null
+  ttft_s: null
+  after_5min_tps: null
+  after_15min_tps: null
+  peak_mem_mb: null
+  battery_temp_c: null
+notes: >-
+  Owner's hardware; two units. No measurements taken yet. Known constraints:
+  8 GB RAM shared with Android, so a 3 GB model plus KV cache is at the edge;
+  USB-C hub must provide PD passthrough and gigabit Ethernet; no case, airflow
+  required for sustained load.
