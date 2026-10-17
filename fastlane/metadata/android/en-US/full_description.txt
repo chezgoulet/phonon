@@ -1,0 +1,53 @@
+Phonon turns a spare Android phone into a private, local inference server.
+
+A model runs whole on one phone and exposes an OpenAI-compatible HTTP API over
+your own network. No cloud, no accounts, no data leaving the device. One phone
+is one worker: adding a second phone adds a second slot, not a faster one.
+
+Phonon is built for phones used as appliances — plugged in, on Ethernet, screen
+on, airflow around the case. It runs llama.cpp (built from source, bundled) as a
+foreground service and supervises it, restarting after kills and pausing on
+thermal limits.
+
+<b>What it does</b>
+* Serves an OpenAI-compatible endpoint (chat completions and tool calls) bound
+  to loopback by default.
+* Downloads GGUF models on request into app-private storage, with HTTP range
+  resume and size verification. No model is bundled in the APK.
+* Supervises llama.cpp: readiness checks, exponential-backoff restart, a
+  bounded log ring, and thermal pause/resume.
+* Reports device telemetry: decode tokens/second, temperature, and a one-button
+  device report (SoC, RAM, Android version, build, model hash, benchmark).
+* Optional kiosk/appliance mode when provisioned as Device Owner, so the phone
+  can run unattended without competing apps or an accidental factory reset.
+
+<b>Models</b>
+Models are chosen by the user and fetched from Hugging Face. The default tier
+(Qwen3.5) is Apache-2.0. You own the model file; Phonon only stores it and
+hands it to llama.cpp.
+
+<b>Privacy</b>
+Nothing is sent to the project. There is no analytics, no crash reporting and
+no update check in the app. Network access is used only for (a) the model
+download you initiate and (b) serving the LAN API you configure.
+
+<b>Device administration</b>
+To run a phone as an unattended appliance, Phonon can be provisioned as Device
+Owner: this pins the app (kiosk/Lock Task), exempts the service from battery
+optimisation, and prevents in-field factory resets. This is opt-in, requires an
+explicit `adb shell dpm set-device-owner` (or QR provisioning), and is not
+needed for normal use. The app ships a DeviceAdmin receiver for this purpose.
+If you have other device administrators active you can leave Phonon unprivileged
+and still use it as a foreground inference server.
+
+<b>Hardware notes</b>
+Optimised for arm64-v8a phones with 8 GB RAM or more (for example Pixel 7/9).
+On Mali GPUs, serving with the screen off is a documented limitation of the
+GPU power-management path, so Phonon holds a screen-on wake lock while serving
+and can fall back to CPU inference.
+
+<b>Licence</b>
+Apache License 2.0. Bundled components and their licences are listed in NOTICE
+(llama.cpp / ggml: MIT).
+
+Source, issue tracker and full documentation: https://github.com/chezgoulet/phonon
