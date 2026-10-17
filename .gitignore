@@ -26,3 +26,6 @@ local.properties
 
 # native payload (llama.cpp build output; synced by app/sync-native.sh)
 app/app/src/main/jniLibs/
+
+# native build intermediates
+app/app/.cxx/
