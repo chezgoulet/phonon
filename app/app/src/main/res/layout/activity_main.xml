@@ -21,7 +21,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="2dp"
-            android:text="llama.cpp foreground service · 127.0.0.1:8080"
+            android:text="llama.cpp foreground service · LAN bind with API key"
             android:textSize="12sp" />
 
         <TextView
@@ -160,6 +160,14 @@
                 android:textSize="12sp" />
         </LinearLayout>
 
+        <EditText
+            android:id="@+id/bind_address"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="Bind address (127.0.0.1, 0.0.0.0 or local IPv4)"
+            android:inputType="text"
+            android:textSize="12sp" />
+
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -196,7 +204,7 @@
             android:id="@+id/api_key"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:hint="API key (empty = none)"
+            android:hint="API key (required off loopback)"
             android:inputType="textPassword"
             android:textSize="12sp" />
 
