@@ -182,13 +182,12 @@ def run_one(task: dict, args) -> str:
 
     elapsed = int(time.time() - started)
 
+    # opencode can exit non-zero for a stray tool failure while still doing the
+    # task correctly (observed: a phantom web-search call after the edit
+    # succeeded, exit 1, file correct). The task's own check is the arbiter;
+    # the exit code is recorded but does not by itself reject the work.
     if rc_run != 0:
-        git(repo, "reset", "--hard", base, check=False)
-        git(repo, "clean", "-fd", check=False)
-        git(repo, "checkout", base, check=False)
-        git(repo, "branch", "-D", branch, check=False)
-        log(f"{task['id']}: FAILED (opencode rc={rc_run}, {elapsed}s) -> {logfile}")
-        return "failed"
+        log(f"{task['id']}: opencode rc={rc_run}; deferring to the check")
 
     log(f"{task['id']}: check: {task['check']}")
     try:

@@ -67,3 +67,23 @@ In a real deployment, each phone is a deployment with a pinned alias
 cache survives; the pooled name is for one-shot calls. See
 [`litellm.yaml`](litellm.yaml) for the two-phone template and the notes on the
 router's cloud-shaped defaults.
+
+## opencode through the gateway — now working
+
+Verified after trimming the agent to four tools (bash, edit, read, write) and
+declaring 8K context:
+
+- a plain turn returned `GATEWAY_OK`;
+- a file task created `hello.txt` containing exactly `GATEWAY_TASK_OK`, via the
+  phone, with LiteLLM in front.
+
+Two things learned:
+
+- The earlier `compaction request cannot be reduced` error was a real context
+  overflow: LiteLLM reported a request of **8,512 tokens** against an 8,192
+  window. The default opencode agent does not fit an 8K phone model; the
+  trimmed agent does.
+- opencode exited **1** after the file task even though the file was correct —
+  the model emitted a stray "Web Search" call after the successful edit, and
+  that tool failed. The task's own check is the arbiter, not opencode's exit
+  code; `tools/run_batch.py` now defers to the check and records the exit code.
