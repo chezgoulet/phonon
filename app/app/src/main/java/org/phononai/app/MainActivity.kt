@@ -33,6 +33,9 @@ class MainActivity : Activity() {
     private lateinit var aliasField: EditText
     private lateinit var apiKeyField: EditText
     private lateinit var downloadUrlField: EditText
+    private lateinit var keepWarmIntervalField: EditText
+    private lateinit var loadModeField: EditText
+    private lateinit var keepWarmBox: CheckBox
     private lateinit var reasoningBox: CheckBox
 
     private val refresh = object : Runnable {
@@ -60,6 +63,9 @@ class MainActivity : Activity() {
         aliasField = findViewById(R.id.alias)
         apiKeyField = findViewById(R.id.api_key)
         downloadUrlField = findViewById(R.id.download_url)
+        keepWarmIntervalField = findViewById(R.id.keep_warm_interval)
+        loadModeField = findViewById(R.id.load_mode)
+        keepWarmBox = findViewById(R.id.keep_warm)
         reasoningBox = findViewById(R.id.reasoning)
 
         loadSettingsIntoFields()
@@ -119,6 +125,9 @@ class MainActivity : Activity() {
         aliasField.setText(settings.alias)
         apiKeyField.setText(settings.apiKey)
         downloadUrlField.setText(settings.downloadUrl)
+        keepWarmIntervalField.setText(settings.keepWarmIntervalS.toString())
+        loadModeField.setText(settings.loadMode)
+        keepWarmBox.isChecked = settings.keepWarm
         reasoningBox.isChecked = settings.reasoning
     }
 
@@ -130,10 +139,24 @@ class MainActivity : Activity() {
         val backendPort = backendPortField.text.toString().toIntOrNull()
         val stop = thermalStopField.text.toString().toFloatOrNull()
         val resume = thermalResumeField.text.toString().toFloatOrNull()
+        val keepWarmInterval = keepWarmIntervalField.text.toString().toIntOrNull()
         if (contextSize == null || threads == null || port == null || backendPort == null ||
-            stop == null || resume == null
+            stop == null || resume == null || keepWarmInterval == null
         ) {
             Toast.makeText(this, "Numeric settings are invalid", Toast.LENGTH_SHORT).show()
+            return false
+        }
+        if (keepWarmInterval < Settings.MIN_KEEP_WARM_INTERVAL_S) {
+            Toast.makeText(
+                this,
+                "Keep-warm interval must be >= ${Settings.MIN_KEEP_WARM_INTERVAL_S}s",
+                Toast.LENGTH_SHORT,
+            ).show()
+            return false
+        }
+        val loadMode = loadModeField.text.toString().trim().lowercase()
+        if (loadMode !in Settings.LOAD_MODES) {
+            Toast.makeText(this, "Load mode must be mmap, mlock or none", Toast.LENGTH_SHORT).show()
             return false
         }
         if (stop <= resume) {
@@ -154,6 +177,9 @@ class MainActivity : Activity() {
         settings.alias = aliasField.text.toString().trim().ifBlank { Settings.DEFAULT_ALIAS }
         settings.apiKey = apiKeyField.text.toString()
         settings.downloadUrl = downloadUrlField.text.toString().trim()
+        settings.keepWarmIntervalS = keepWarmInterval
+        settings.loadMode = loadMode
+        settings.keepWarm = keepWarmBox.isChecked
         settings.reasoning = reasoningBox.isChecked
         if (restart) send(PhononService.ACTION_RELOAD)
         return true
@@ -181,6 +207,12 @@ class MainActivity : Activity() {
                 append("decode t/s:   ").append(nullable(h, "last_decode_tps")).append('\n')
                 append("prompt t/s:   ").append(nullable(h, "last_prompt_tps")).append('\n')
                 append("restarts:     ").append(h.optInt("restart_count")).append('\n')
+                append("keep_warm:    ").append(h.optBoolean("keep_warm"))
+                    .append(" / ").append(h.optInt("keep_warm_interval_s")).append("s\n")
+                append("keepalives:   ").append(h.optInt("keepalive_count"))
+                    .append(" (fail ").append(h.optInt("keepalive_failures")).append(")\n")
+                append("load mode:    ").append(h.optString("load_mode"))
+                    .append(" mlock_refused=").append(h.optBoolean("mlock_refused")).append('\n')
                 if (!h.isNull("error")) append("error:        ").append(h.optString("error"))
             }
         } catch (t: Throwable) {

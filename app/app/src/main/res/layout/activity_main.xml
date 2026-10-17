@@ -208,6 +208,36 @@
             android:inputType="textUri"
             android:textSize="12sp" />
 
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <EditText
+                android:id="@+id/keep_warm_interval"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:hint="Keep-warm interval (s)"
+                android:inputType="number"
+                android:textSize="12sp" />
+
+            <EditText
+                android:id="@+id/load_mode"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:hint="Load mode (mmap/mlock/none)"
+                android:inputType="text"
+                android:textSize="12sp" />
+        </LinearLayout>
+
+        <CheckBox
+            android:id="@+id/keep_warm"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Keep model warm while idle" />
+
         <CheckBox
             android:id="@+id/reasoning"
             android:layout_width="match_parent"

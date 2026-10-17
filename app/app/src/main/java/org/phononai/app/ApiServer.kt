@@ -6,6 +6,7 @@ import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
 import java.io.ByteArrayOutputStream
 import java.io.EOFException
+import java.io.File
 import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
@@ -27,6 +28,8 @@ interface ApiHandler {
     fun settingsJson(): String
     fun updateSettings(body: String): String
     fun recordResponseBody(body: String)
+    fun requestStarted()
+    fun requestFinished()
 }
 
 /**
@@ -162,6 +165,14 @@ class ApiServer(
                 respond(out, status, "application/json; charset=utf-8", result.toByteArray())
             }
 
+            // Debug-only test instrument, not a feature. Asks the kernel to
+            // drop the model file's clean page cache. Release builds fall
+            // through to the 404 below because BuildConfig.DEBUG is false.
+            req.method == "POST" && req.path == "/debug/evict" && BuildConfig.DEBUG -> {
+                val (status, body) = evictModelCache()
+                respond(out, status, "application/json; charset=utf-8", body.toByteArray())
+            }
+
             req.path == "/v1" || req.path.startsWith("/v1/") -> {
                 if (!api.isReady()) {
                     val body = JSONObject().apply {
@@ -170,7 +181,12 @@ class ApiServer(
                     }.toString()
                     respond(out, 503, "application/json; charset=utf-8", body.toByteArray())
                 } else {
-                    proxy(req, out)
+                    api.requestStarted()
+                    try {
+                        proxy(req, out)
+                    } finally {
+                        api.requestFinished()
+                    }
                 }
             }
 
@@ -178,6 +194,36 @@ class ApiServer(
                 out, 404, "application/json; charset=utf-8",
                 """{"error":"not found"}""".toByteArray(),
             )
+        }
+    }
+
+    /**
+     * Test instrument for the keep-warm experiment: ask the kernel to drop the
+     * clean, file-backed pages of the model the server is using.
+     *
+     * The call is deliberately fadvise(DONTNEED) and not munmap: it must not
+     * disturb the server. Note that Linux skips pages another process has
+     * mapped, so against a live mmap this is a no-op for the weights (measured;
+     * see docs/app.md). It does drop the unmapped part of the file.
+     */
+    private fun evictModelCache(): Pair<Int, String> {
+        val path = settings.modelPath
+        return try {
+            val errno = DebugEvict.nativeFadviseDontNeed(path)
+            if (errno != 0) throw IOException("posix_fadvise failed: errno $errno")
+            Log.i(TAG, "debug evict: posix_fadvise(DONTNEED) accepted for $path")
+            200 to JSONObject().apply {
+                put("evicted", true)
+                put("path", path)
+                put("bytes", File(path).length())
+            }.toString()
+        } catch (t: Throwable) {
+            Log.w(TAG, "debug evict failed: ${t.javaClass.simpleName}: ${t.message}")
+            500 to JSONObject().apply {
+                put("evicted", false)
+                put("path", path)
+                put("error", "${t.javaClass.simpleName}: ${t.message}")
+            }.toString()
         }
     }
 
@@ -458,6 +504,7 @@ class ApiServer(
         400 -> "Bad Request"
         404 -> "Not Found"
         409 -> "Conflict"
+        500 -> "Internal Server Error"
         502 -> "Bad Gateway"
         503 -> "Service Unavailable"
         else -> "Status"
