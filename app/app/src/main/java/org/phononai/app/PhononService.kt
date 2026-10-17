@@ -459,6 +459,13 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
 
     fun uiHealthJson(): String = healthJson()
 
+    /**
+     * Activity screen-on policy. `ready` covers both idle and generating: a
+     * generate does not leave the ready state. A request in flight is included
+     * defensively across a brief state transition.
+     */
+    fun uiServing(): Boolean = server.state == ServerState.READY || requests.inFlightCount > 0
+
     fun uiLogs(): String = logs()
 
     fun uiDownloadJson(): String = downloadJson()

@@ -1,8 +1,10 @@
 package org.phononai.app.ui
 
+import android.app.Activity
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.ContextWrapper
 import android.content.Intent
 import android.widget.Toast
 import androidx.compose.animation.core.animateFloatAsState
@@ -79,6 +81,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import kotlinx.coroutines.delay
 import org.json.JSONObject
 import org.phononai.app.AppState
+import org.phononai.app.Kiosk
 import org.phononai.app.PhononService
 import org.phononai.app.Settings
 import org.phononai.app.ui.avatar.AvatarView
@@ -355,7 +358,12 @@ private fun ServeScreen(
     ) {
         Spacer(Modifier.height(26.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Avatar(kind = kind, amp = (tps / 20f).coerceIn(0f, 1f), modifier = Modifier.size(92.dp))
+            // AvatarView draws the particle body at 0.32 × the shorter side.
+            // Measured on the Pixel 7: a 140 dp slot gave a 77 dp visible orb,
+            // so 172 dp yields a ~92 dp visible cloud with the 1.55 × halo
+            // still inside the bounds. The old 92 dp slot produced the ~60 dp
+            // smudge this fixes.
+            Avatar(kind = kind, amp = (tps / 20f).coerceIn(0f, 1f), modifier = Modifier.size(172.dp))
             Spacer(Modifier.width(18.dp))
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -389,15 +397,39 @@ private fun ServeScreen(
             }
         }
         Spacer(Modifier.height(24.dp))
+        val hasMeasuredRate = tps > 0f
+        val generating = kind == AvatarKind.Generating
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             MetricCard(
                 modifier = Modifier.weight(1f),
-                label = if (paused) "Last throughput" else "Throughput",
-                value = if (tps > 0f) "%.1f".format(animatedTps) else "—",
-                unit = "tok/s",
+                label = when {
+                    generating -> "Throughput"
+                    hasMeasuredRate -> "Last throughput"
+                    else -> "Throughput"
+                },
+                value = when {
+                    !hasMeasuredRate -> "idle"
+                    generating -> "%.1f".format(animatedTps)
+                    else -> "%.1f".format(tps)
+                },
+                unit = if (hasMeasuredRate) "tok/s" else "",
+                valueColor = if (!hasMeasuredRate || !generating) PhononColors.TextDim else PhononColors.Text,
                 accent = accent,
             ) {
-                Sparkline(tpsHistory, accent, Modifier.fillMaxWidth().height(26.dp).padding(top = 8.dp))
+                if (hasMeasuredRate) {
+                    Sparkline(
+                        tpsHistory,
+                        if (generating) accent else accent.copy(alpha = 0.45f),
+                        Modifier.fillMaxWidth().height(26.dp).padding(top = 8.dp),
+                    )
+                } else {
+                    Spacer(Modifier.height(10.dp))
+                    Text(
+                        if (kind == AvatarKind.Stopped) "Server is off" else "Awaiting first request",
+                        color = PhononColors.TextDim.copy(alpha = 0.8f),
+                        fontSize = 12.sp,
+                    )
+                }
             }
             MetricCard(
                 modifier = Modifier.weight(1f),
@@ -423,7 +455,11 @@ private fun ServeScreen(
             paused = paused,
             settings = settings,
         )
-        Spacer(Modifier.height(28.dp))
+        // Pin the activity line to the bottom of the content area instead of
+        // leaving a dead third of the screen above the primary action.
+        Spacer(Modifier.weight(1f))
+        RecentActivity(health = health, accent = accent)
+        Spacer(Modifier.height(18.dp))
     }
 }
 
@@ -434,6 +470,7 @@ private fun MetricCard(
     value: String,
     unit: String,
     accent: Color,
+    valueColor: Color = PhononColors.Text,
     extra: @Composable ColumnScope.() -> Unit,
 ) {
     Column(
@@ -453,7 +490,7 @@ private fun MetricCard(
         Row(verticalAlignment = Alignment.Bottom) {
             Text(
                 value,
-                color = PhononColors.Text,
+                color = valueColor,
                 fontSize = 26.sp,
                 fontWeight = FontWeight.SemiBold,
                 letterSpacing = (-0.5).sp,
@@ -629,6 +666,43 @@ private fun ThermalCard(
             color = if (paused) PhononColors.Warn.copy(alpha = 0.9f) else PhononColors.TextDim,
             fontSize = 13.sp,
             lineHeight = 18.sp,
+        )
+    }
+}
+
+@Composable
+private fun RecentActivity(health: Health?, accent: Color) {
+    val completed = health?.requestsCompleted ?: 0
+    val last = health?.lastCompletionAt
+    val summary = when {
+        completed == 0 && last == null -> "No requests yet"
+        last == null -> "$completed completed"
+        else -> "$completed completed · ${ageLabel(last)}"
+    }
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(PhononColors.Surface)
+            .border(1.dp, PhononColors.Border, RoundedCornerShape(16.dp))
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.size(5.dp).clip(CircleShape).background(accent.copy(alpha = 0.7f)))
+        Spacer(Modifier.width(8.dp))
+        Text(
+            "RECENT ACTIVITY",
+            color = PhononColors.TextDim,
+            fontSize = 10.sp,
+            letterSpacing = 0.9.sp,
+        )
+        Spacer(Modifier.weight(1f))
+        Text(
+            summary,
+            color = PhononColors.TextDim,
+            fontSize = 12.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
         )
     }
 }
@@ -834,25 +908,36 @@ private fun ModelsScreen(
                 value = downloadUrl,
                 onValueChange = { downloadUrl = it },
                 label = "GGUF URL",
+                placeholder = "https://huggingface.co/…/model.gguf",
                 keyboardType = KeyboardType.Uri,
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "Paste a direct GGUF link. Nothing downloads until you press Download.",
+                color = PhononColors.TextDim,
+                fontSize = 11.sp,
+                lineHeight = 16.sp,
             )
             Spacer(Modifier.height(12.dp))
             val active = download?.active == true
             Button(
                 onClick = {
+                    val url = downloadUrl.trim()
                     val service = AppState.service
-                    if (service == null) {
-                        toast(context, "Service is starting")
-                    } else {
-                        val result = service.startDownload(downloadUrl.trim())
-                        if (result.contains("\"error\"")) {
-                            toast(context, JSONObject(result).optString("error", "Download failed"))
-                        } else {
-                            toast(context, "Download started")
+                    when {
+                        url.isEmpty() -> toast(context, "Paste a GGUF URL first")
+                        service == null -> toast(context, "Service is starting")
+                        else -> {
+                            val result = service.startDownload(url)
+                            if (result.contains("\"error\"")) {
+                                toast(context, JSONObject(result).optString("error", "Download failed"))
+                            } else {
+                                toast(context, "Download started")
+                            }
                         }
                     }
                 },
-                enabled = !active,
+                enabled = !active && downloadUrl.isNotBlank(),
                 modifier = Modifier.fillMaxWidth().height(50.dp),
                 shape = RoundedCornerShape(14.dp),
                 colors = ButtonDefaults.buttonColors(
@@ -1047,7 +1132,9 @@ private fun SettingsScreen(
             put("port", publicPort)
             put("backend_port", internalPort)
             put("alias", draft.alias.trim())
-            put("download_url", draft.downloadUrl.trim())
+            // Empty means "no default": omit it so the API's http(s) validation
+            // only applies to a URL the operator actually entered.
+            draft.downloadUrl.trim().takeIf { it.isNotEmpty() }?.let { put("download_url", it) }
             put("keep_warm_interval_s", warmInterval)
             put("thermal_stop_c", stop.toDouble())
             put("thermal_resume_c", resume.toDouble())
@@ -1209,6 +1296,12 @@ private fun SettingsScreen(
         }
         Spacer(Modifier.height(12.dp))
 
+        val activity = context.findActivity()
+        if (activity != null) {
+            KioskCard(activity)
+        }
+        Spacer(Modifier.height(12.dp))
+
         PhononCard {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
@@ -1285,7 +1378,14 @@ private fun SettingsScreen(
                     draft.downloadUrl,
                     { draft.downloadUrl = it },
                     "Default download URL",
+                    placeholder = "Optional — https://…/model.gguf",
                     keyboardType = KeyboardType.Uri,
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "Optional. Empty leaves the download screen blank.",
+                    color = PhononColors.TextDim,
+                    fontSize = 11.sp,
                 )
                 Spacer(Modifier.height(12.dp))
                 Text("Load mode", color = PhononColors.TextDim, fontSize = 12.sp)
@@ -1378,6 +1478,178 @@ private fun SettingsScreen(
             dismissButton = {
                 TextButton(onClick = { showKey = null }) { Text("Done", color = PhononColors.TextDim) }
             },
+        )
+    }
+}
+
+@Composable
+private fun KioskCard(activity: Activity) {
+    val context = LocalContext.current
+    var owner by remember { mutableStateOf(Kiosk.isDeviceOwner(context)) }
+    var locked by remember { mutableStateOf(Kiosk.isLockTaskActive(context)) }
+    var exempt by remember { mutableStateOf(Kiosk.isBatteryExempt(context)) }
+    var provisioningAllowed by remember { mutableStateOf(Kiosk.isProvisioningAllowed(context)) }
+    var restrictions by remember { mutableStateOf(Kiosk.restrictionSummary(context)) }
+    var message by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            owner = Kiosk.isDeviceOwner(context)
+            locked = Kiosk.isLockTaskActive(context)
+            exempt = Kiosk.isBatteryExempt(context)
+            provisioningAllowed = Kiosk.isProvisioningAllowed(context)
+            restrictions = Kiosk.restrictionSummary(context)
+            delay(1_500)
+        }
+    }
+
+    PhononCard {
+        Text("Kiosk / appliance mode", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+        Spacer(Modifier.height(6.dp))
+        Text(
+            "Device Owner policy pins this app and keeps the screen on while serving. It does not touch the HTTP API.",
+            color = PhononColors.TextDim,
+            fontSize = 12.sp,
+            lineHeight = 17.sp,
+        )
+        Spacer(Modifier.height(12.dp))
+        KioskStatusRow("Device Owner", if (owner) "yes" else "no", owner)
+        if (owner) {
+            KioskStatusRow("Lock task", if (locked) "pinned" else "not pinned", locked)
+            KioskStatusRow(
+                "Battery optimisation",
+                if (exempt) "exempt" else "not exempt",
+                exempt,
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                restrictions,
+                color = PhononColors.TextDim,
+                fontSize = 12.sp,
+            )
+            Spacer(Modifier.height(12.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (!locked) {
+                    Button(
+                        onClick = {
+                            message = Kiosk.enter(activity)
+                            locked = Kiosk.isLockTaskActive(context)
+                            exempt = Kiosk.isBatteryExempt(context)
+                            restrictions = Kiosk.restrictionSummary(context)
+                        },
+                        modifier = Modifier.height(48.dp),
+                        shape = RoundedCornerShape(14.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = PhononColors.Cyan,
+                            contentColor = Color(0xFF001318),
+                        ),
+                    ) {
+                        Text("Enter kiosk", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    }
+                } else {
+                    Button(
+                        onClick = {
+                            message = Kiosk.leave(activity)
+                            locked = Kiosk.isLockTaskActive(context)
+                        },
+                        modifier = Modifier.height(48.dp),
+                        shape = RoundedCornerShape(14.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = PhononColors.SurfaceHigh,
+                            contentColor = PhononColors.Text,
+                        ),
+                    ) {
+                        Text("Leave kiosk", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                    }
+                }
+                if (!exempt) {
+                    TextButton(onClick = { Kiosk.requestBatteryExemption(activity) }) {
+                        Text("Allow in background", color = PhononColors.Cyan, fontSize = 13.sp)
+                    }
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "Enter kiosk sets DISALLOW_SAFE_BOOT and DISALLOW_FACTORY_RESET, pins this activity and asks for the battery exemption. Leave kiosk unpins; the restrictions stay until the admin is removed.",
+                color = PhononColors.TextDim,
+                fontSize = 11.sp,
+                lineHeight = 16.sp,
+            )
+        } else {
+            KioskStatusRow(
+                "Can provision now",
+                if (provisioningAllowed) "yes" else "no",
+                provisioningAllowed,
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "Run this on the host with the phone connected by USB. The package is already installed; no root is needed.",
+                color = PhononColors.TextDim,
+                fontSize = 12.sp,
+                lineHeight = 17.sp,
+            )
+            Spacer(Modifier.height(10.dp))
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(Color(0xFF060B10))
+                    .border(1.dp, PhononColors.Border, RoundedCornerShape(14.dp))
+                    .padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    Kiosk.PROVISION_COMMAND,
+                    color = PhononColors.Text,
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 10.5.sp,
+                    lineHeight = 15.sp,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(onClick = {
+                    val clipboard = context.getSystemService(ClipboardManager::class.java)
+                    clipboard.setPrimaryClip(ClipData.newPlainText("Phonon provisioning", Kiosk.PROVISION_COMMAND))
+                    toast(context, "Command copied")
+                }) {
+                    Text("Copy", color = PhononColors.Cyan, fontSize = 12.sp)
+                }
+            }
+            Spacer(Modifier.height(10.dp))
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(PhononColors.Warn.copy(alpha = 0.05f))
+                    .border(1.dp, PhononColors.Warn.copy(alpha = 0.32f), RoundedCornerShape(14.dp))
+                    .padding(12.dp),
+            ) {
+                Text(
+                    "The phone must have no accounts and no secondary users. If \"Can provision now\" is no, remove all accounts and extra users, or factory-reset it and skip account sign-in before running the command.",
+                    color = Color(0xFFF3D9A0),
+                    fontSize = 11.5.sp,
+                    lineHeight = 17.sp,
+                )
+            }
+        }
+        message?.let {
+            Spacer(Modifier.height(10.dp))
+            Text(it, color = PhononColors.Danger, fontSize = 12.sp)
+        }
+    }
+}
+
+@Composable
+private fun KioskStatusRow(label: String, value: String, ok: Boolean) {
+    Row(
+        Modifier.fillMaxWidth().padding(vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(label, color = PhononColors.Text, fontSize = 13.sp, modifier = Modifier.weight(1f))
+        Text(
+            value,
+            color = if (ok) PhononColors.Ok else PhononColors.Warn,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold,
         )
     }
 }
@@ -1639,11 +1911,15 @@ private fun PhononField(
     label: String,
     modifier: Modifier = Modifier,
     keyboardType: KeyboardType = KeyboardType.Text,
+    placeholder: String? = null,
 ) {
     OutlinedTextField(
         value = value,
         onValueChange = onValueChange,
         label = { Text(label, fontSize = 12.sp) },
+        placeholder = placeholder?.let {
+            { Text(it, color = PhononColors.TextDim.copy(alpha = 0.65f), fontSize = 13.sp) }
+        },
         modifier = modifier.fillMaxWidth(),
         singleLine = true,
         keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
@@ -1726,8 +2002,27 @@ private fun LogDialog(onDismiss: () -> Unit) {
 private fun restartThreshold(value: Float): String =
     if (value == value.toInt().toFloat()) value.toInt().toString() else "%.1f".format(value)
 
+private fun ageLabel(epochMs: Long): String {
+    val seconds = ((System.currentTimeMillis() - epochMs) / 1000L).coerceAtLeast(0L)
+    return when {
+        seconds < 5L -> "just now"
+        seconds < 60L -> "${seconds}s ago"
+        seconds < 3_600L -> "${seconds / 60L}m ago"
+        else -> "${seconds / 3_600L}h ago"
+    }
+}
+
 private fun sendServiceAction(context: Context, action: String) {
     context.startForegroundService(Intent(context, PhononService::class.java).setAction(action))
+}
+
+private fun Context.findActivity(): Activity? {
+    var current: Context = this
+    while (current is ContextWrapper) {
+        if (current is Activity) return current
+        current = current.baseContext
+    }
+    return null
 }
 
 private fun toast(context: Context, message: String) {
