@@ -29,6 +29,21 @@ and arguments on the same request.
   reliability, not speed. Speed is set by the memory bus and the governor,
   and both models sit against the same wall.
 
+
+## Tool-call reliability
+
+Five requests per model, same tool, same prompt, temperature 0.7, through the
+app:
+
+| Model | Valid tool calls |
+|---|---|
+| Qwen3.5-2B | 5/5 |
+| Gemma 4 E2B | 5/5 |
+
+Both models produced `get_weather` with `{"city":"Montreal"}` on every trial.
+This is a small sample and says nothing about multi-step loops; it does say
+that single-call tool use is not the weak point at this size.
+
 ## Known issue found during this comparison
 
 After changing `model_path` via `POST /settings`, `/health` can report
