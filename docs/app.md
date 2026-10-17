@@ -12,6 +12,10 @@ download with size verification, foreground service, readiness, OpenAI-compatibl
 completions and tool calls, kill/restart supervision, and thermal pause/resume.
 **All eight acceptance items have now been observed on the device.**
 
+LAN binding and mandatory authentication were added later on branch
+`feat/lan-binding`; the operating model, security stance and test evidence are
+in [`lan.md`](lan.md).
+
 Items 7 and 8 were initially blocked. An earlier attempt rebooted the device to
 clear memory pressure and it returned to the owner lock screen; Android will not
 mount credential-encrypted `filesDir` or deliver `BOOT_COMPLETED` before first
@@ -48,6 +52,11 @@ is what lets one port answer `/health` while the model is `loading`,
 `restarting`, `thermal_pause`, or `stopped`, and still proxy `/v1` when the
 server is `ready`. The alternative — pointing clients at the server's own port
 — cannot answer health when the server is down.
+
+Both listeners bind `settings.bind_address` (default `127.0.0.1`). When it is
+not loopback, an API key is mandatory and both the operator port and the
+`llama-server` port require `Authorization: Bearer <key>` for everything except
+`/health`. See [`lan.md`](lan.md).
 
 ### Files
 
@@ -104,14 +113,16 @@ Arguments are built from settings on every launch:
 
 ```
 -m <model> -c 2048 -t 4 -np 1 -fa on --jinja --reasoning off
---alias gemma-4-e2b --host 127.0.0.1 --port 8081
+--alias gemma-4-e2b --host <bind_address> --port 8081
 --log-file /data/user/0/org.phononai.app/files/logs/llama-server.log
 -lm <mmap|mlock|none>
 [--api-key <key>]
 ```
 
 `-lm` was added with the keep-warm work; the captured start line below predates
-it and therefore has no `-lm` argument.
+it and therefore has no `-lm` argument. `--host` is now
+`settings.bind_address`; the capture below was taken with the default
+`127.0.0.1`.
 
 Captured from `/logs` after the first start:
 
@@ -139,7 +150,9 @@ service destroy does the same sweep.
 
 ### API
 
-`ApiServer` binds `127.0.0.1:<settings.port>` (default 8080).
+`ApiServer` binds `settings.bind_address:<settings.port>` (default
+`127.0.0.1:8080`). With an API key configured, every route except `/health`
+requires `Authorization: Bearer <key>`.
 
 | Method | Path | Behaviour |
 |---|---|---|
@@ -149,10 +162,10 @@ service destroy does the same sweep.
 | GET | `/model/download` | progress JSON |
 | POST | `/server/start`, `/server/stop` | control |
 | GET | `/settings` | current settings (API key shown only as `api_key_set`) |
-| POST | `/settings` | partial update; validates thresholds and ports |
+| POST | `/settings` | partial update; validates thresholds, ports and `bind_address` |
 | POST | `/debug/evict` | debug builds only, test instrument: ask the kernel to drop the model file's clean page cache; 404 in release |
 | GET | `/logs` | ring buffer, text/plain |
-| * | `/v1/*` | raw HTTP proxy to `127.0.0.1:8081` |
+| * | `/v1/*` | raw HTTP proxy to the configured bind address / backend port |
 
 The proxy forwards the method, path, query and body; streams chunked responses
 as they arrive (SSE works); injects `Authorization: Bearer <api-key>` only when
@@ -160,6 +173,12 @@ an API key is configured and the client sent none; and returns 502/503 rather
 than hanging when the backend is absent. Non-streaming JSON responses are
 scanned for `timings` to fill `last_decode_tps` / `last_prompt_tps`; streaming
 timings are not captured (see caveats).
+
+With `bind_address` not loopback and no API key, neither listener is started on
+the requested address; `/server/start` returns 409 and `/health` reports
+`state: "error"`, `error: "bind_address requires api_key"`. A loopback-only
+operator listener remains so `/health` is observable over USB. The full
+operating model is in [`lan.md`](lan.md).
 
 Health state machine: `loading`, `ready`, `restarting`, `thermal_pause`,
 `stopped`, `error`.
@@ -179,13 +198,19 @@ without restarting a healthy server.
 
 ### Settings
 
-SharedPreferences: model path, context (2048), threads (4), public port (8080),
-backend port (8081), reasoning (off), thermal stop/resume, API key, alias,
-auto-start, download URL, keep-warm on/off and interval (45 s), load mode
-(`mmap`). Server argument changes take effect on the next server start/restart;
-the activity's Save action restarts the server when those arguments changed.
-Public-port changes restart the app API immediately. Keep-warm and interval
-changes take effect on the next tick without a restart.
+SharedPreferences: model path, context (2048), threads (4), bind address
+(127.0.0.1), public port (8080), backend port (8081), reasoning (off), thermal
+stop/resume, API key, alias, auto-start, download URL, keep-warm on/off and
+interval (45 s), load mode (`mmap`). Server argument changes take effect on the
+next server start/restart; the activity's Save action restarts the server when
+those arguments changed. Public-port or bind-address changes restart the app API
+immediately. Keep-warm and interval changes take effect on the next tick without
+a restart.
+
+`bind_address` accepts `127.0.0.1`, `0.0.0.0`, or an IPv4 address assigned to a
+local interface. An API key is mandatory whenever it is not loopback; the
+activity will not save an unsafe combination, while `POST /settings` stores it
+and the next start is refused with a visible error. See [`lan.md`](lan.md).
 
 ## Build and install
 
@@ -564,6 +589,9 @@ Settings (also in the activity and `POST /settings`):
 | `keepalive_last_error` | last failure text, absent if none |
 | `load_mode` | `mmap`, `mlock` or `none` |
 | `mlock_refused` | true when the server log contains `failed to mlock` |
+| `bind_address` | configured bind address (the LAN fallback is not substituted) |
+| `api_key_set` | whether a key is configured; the key is never returned |
+| `exposed_off_host` | true when `bind_address` is not loopback |
 
 `load_mode` is part of the server argument hash, so changing it restarts
 `llama-server`. `mlock_refused` is not inferred from the request: `ServerManager`
@@ -782,7 +810,16 @@ in-process `madvise` hook); neither was available here.
 - Streaming (`stream:true`) responses were not exercised through the proxy.
   Chunked relay is implemented, but the only captured completions were
   non-streaming.
-- `--api-key` enforcement was not exercised; no key was configured.
+- `--api-key` enforcement was not exercised in the original v0 run; no key was
+  configured then. It was exercised later on branch `feat/lan-binding`: with a
+  key set, keyed requests returned 200 and unkeyed requests returned 401 on both
+  `/v1/models` and `/settings`, and the backend port also returned 401 without
+  the key. See [`lan.md`](lan.md).
+- The off-host LAN path has not been exercised end to end. At the time of the
+  LAN-binding run the device had no non-loopback interface (Wi-Fi disabled, no
+  Ethernet), so only the loopback/`adb forward` path was observed. Wi-Fi,
+  USB-C Ethernet with PD, DHCP reservation, and binding to a specific LAN IPv4
+  remain untested; [`lan.md`](lan.md) lists the commands to finish them.
 - `/health.last_decode_tps` was null before the first completion; the value
   after a proxied completion was not re-read before the device locked. The
   parsing code exists, but no captured `/health` body proves it end-to-end.

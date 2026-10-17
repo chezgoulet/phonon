@@ -75,6 +75,10 @@ class ServerManager(
 
     fun start() {
         synchronized(lock) {
+            settings.exposureError?.let { message ->
+                refuseUnsafeExposure(message)
+                return
+            }
             if (thermalPaused) {
                 lastError = "start refused: thermal pause active"
                 ringLog.append(lastError!!)
@@ -104,6 +108,24 @@ class ServerManager(
     fun restart() {
         stop()
         start()
+    }
+
+    /**
+     * Refuse to run with an off-loopback bind and no API key. Called before any
+     * listener is bound; the app API falls back to loopback so /health can
+     * report the error without exposing anything to the LAN.
+     */
+    fun refuseUnsafeExposure(message: String) {
+        synchronized(lock) {
+            isDesired = false
+            thermalPaused = false
+            generation++
+            killLocked()
+            lastError = message
+            ringLog.append("start refused: $message")
+            Log.w(TAG, "server start refused: $message")
+            setState(ServerState.ERROR)
+        }
     }
 
     /** User stop: server down, app API and foreground service stay up. */
@@ -201,6 +223,9 @@ class ServerManager(
             put("last_decode_tps", lastDecodeTps ?: JSONObject.NULL)
             put("last_prompt_tps", lastPromptTps ?: JSONObject.NULL)
             put("restart_count", restartCount)
+            put("bind_address", settings.bindAddress)
+            put("api_key_set", settings.apiKey.isNotBlank())
+            put("exposed_off_host", settings.exposedOffHost)
             put("backend_port", settings.backendPort)
             put("load_mode", settings.loadMode)
             put("mlock_refused", mlockRefused)
@@ -292,7 +317,7 @@ class ServerManager(
         add("--jinja")
         add("--reasoning"); add(if (settings.reasoning) "on" else "off")
         add("--alias"); add(settings.alias)
-        add("--host"); add("127.0.0.1")
+        add("--host"); add(settings.bindAddress)
         add("--port"); add(settings.backendPort.toString())
         add("--log-file"); add(logFile.absolutePath)
         add("-lm"); add(settings.loadMode)
@@ -384,7 +409,7 @@ class ServerManager(
     private fun probeBackend(): Boolean {
         var conn: HttpURLConnection? = null
         return try {
-            conn = URL("http://127.0.0.1:${settings.backendPort}/health").openConnection()
+            conn = URL("http://${settings.backendHost()}:${settings.backendPort}/health").openConnection()
                 as HttpURLConnection
             conn.connectTimeout = 1_000
             conn.readTimeout = 1_500
