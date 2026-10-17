@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="device_admin_label">Phonon kiosk</string>
+    <string name="device_admin_description">Pins Phonon as a local inference appliance and disables safe boot and factory reset while it is Device Owner.</string>
+</resources>
