@@ -62,6 +62,12 @@ more context than they are worth at this size.
 
 Sequence: measure, gateway, app, appliance module, ROM.
 
+**Resolved 2026-10-17.** The app spike proved that a bundled ELF can be
+executed from `nativeLibraryDir` on both an x86_64 emulator and a stock Pixel 7
+(arm64): exit 0, correct ABI, argv0 inside the app's native library directory.
+The app therefore wraps a packaged `llama-server` and supervises it; it does not
+embed llama.cpp through JNI. See [`docs/app-spike.md`](docs/app-spike.md).
+
 A full AOSP port is a multi-quarter project with a security-update treadmill.
 Forking GrapheneOS is the right call if a ROM is needed, and it must be renamed
 and signed with the project's own keys. But the wake-lock problem that motivates

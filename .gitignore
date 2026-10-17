@@ -21,4 +21,5 @@ __pycache__/
 *.pyc
 .gradle/
 build/
+local.properties
 .DS_Store
