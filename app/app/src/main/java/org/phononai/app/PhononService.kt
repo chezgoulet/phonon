@@ -37,6 +37,14 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
     @Volatile private var api: ApiServer? = null
     @Volatile private var apiPort: Int = -1
     @Volatile private var apiBind: String? = null
+
+    /**
+     * Number of settings reloads currently owning the restart. While it is
+     * non-zero control endpoints answer 503 + Retry-After instead of racing a
+     * listener or backend that is being replaced.
+     */
+    private var reloadsInFlight = 0
+    private val reloadGuard = Any()
     @Volatile private var wakeLock: PowerManager.WakeLock? = null
     @Volatile private var foregroundStarted = false
     @Volatile private var destroyed = false
@@ -138,10 +146,26 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
     override fun healthJson(): String {
         val json = JSONObject(server.healthJson(thermal.batteryTempC))
         keepWarm.healthFields(json)
+        // A reload between commit and backend restart must not look `ready`
+        // just because the previous process is still up.
+        if (isRestarting() && json.optString("state") == ServerState.READY.wire) {
+            json.put("state", ServerState.RESTARTING.wire)
+        }
         return json.toString()
     }
 
-    override fun isReady(): Boolean = server.state == ServerState.READY
+    override fun isReady(): Boolean =
+        server.state == ServerState.READY && !isRestarting()
+
+    override fun isRestarting(): Boolean = synchronized(reloadGuard) { reloadsInFlight > 0 }
+
+    private fun beginReload() {
+        synchronized(reloadGuard) { reloadsInFlight++ }
+    }
+
+    private fun endReload() {
+        synchronized(reloadGuard) { if (reloadsInFlight > 0) reloadsInFlight-- }
+    }
 
     override fun logs(): String = server.ringLog.snapshot()
 
@@ -217,10 +241,12 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
         } catch (_: Throwable) {
             return error("invalid JSON body")
         }
+        var markedReload = false
         synchronized(settings.configLock) {
             // Phase 1: compute the prospective configuration. Nothing is
             // written until every field, including the bind/key pair, has
             // passed validation.
+            var next: ApiServer? = null
             try {
                 var modelPath = settings.modelPath
                 var context = settings.contextSize
@@ -330,17 +356,34 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
                     return error("bind_address requires api_key")
                 }
 
-                // Phase 2: commit. If the listener address, port or credential
-                // changes, tear the operator listener down before clearing the
-                // key so it is never off-host with a blank key, then let the
-                // reload operation bring it back with the new configuration.
-                val rebind = bindAddress != settings.bindAddress ||
-                    apiKey != settings.apiKey ||
-                    port != settings.port
+                // Phase 2: commit. An api_key change alone does not touch the
+                // listener: authorized() reads the live settings, so the new
+                // credential applies to the next request on the same socket.
+                // Only a bind address or port change rebinds.
+                val oldBind = settings.bindAddress
+                val rebind = bindAddress != oldBind || port != settings.port
+
+                // Swap the listener before this request's 200 is written. The
+                // old socket is closed and the new one bound in the same
+                // request, so a client that sees 200 can never observe the
+                // port down. Accepted connections (including this one) keep
+                // running: stop() only closes the listening socket. The new
+                // socket does not accept until after the commit, so it never
+                // serves with a half-applied configuration.
+                val previous = api
                 if (rebind) {
-                    api?.stop()
-                    api = null
+                    previous?.stop()
+                    if (api === previous) api = null
+                    val candidate = ApiServer(settings, this, bindAddress, port, apiKey)
+                    if (!candidate.bind()) {
+                        // Restore the listener with the still-current settings.
+                        startApi()
+                        Log.w(TAG, "settings rejected: cannot bind $bindAddress:$port")
+                        return error("cannot bind $bindAddress:$port")
+                    }
+                    next = candidate
                 }
+
                 settings.modelPath = modelPath
                 settings.contextSize = context
                 settings.threads = threads
@@ -357,12 +400,32 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
                 settings.loadMode = loadMode
                 settings.thermalStopC = thermalStop
                 settings.thermalResumeC = thermalResume
+
+                if (next != null) {
+                    next.startAccepting()
+                    api = next
+                    apiPort = port
+                    apiBind = bindAddress
+                }
+
+                if (rebind || currentConfigHash() != configHashAtLaunch) {
+                    beginReload()
+                    markedReload = true
+                }
             } catch (t: Throwable) {
+                next?.stop()
                 return error("invalid setting: ${t.message}")
             }
         }
 
-        reloadExecutor.execute { reloadSettings() }
+        try {
+            reloadExecutor.execute { reloadSettings(markedReload) }
+        } catch (_: Throwable) {
+            // Service is going away; do not leave control endpoints reporting
+            // a reload that will never run.
+            if (markedReload) endReload()
+            return error("service shutting down")
+        }
         return settings.asJson()
     }
 
@@ -394,60 +457,90 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
 
     // --- internals --------------------------------------------------------
 
-    private fun reloadSettings() {
-        if (destroyed) return
-        synchronized(settings.configLock) {
+    private fun reloadSettings(markReload: Boolean = false) {
+        try {
             if (destroyed) return
-            val exposure = settings.exposureError
-            if (exposure != null) {
-                // Unsafe configuration: no off-host listener and no backend.
-                // A loopback-only operator listener stays up so /health can
-                // explain the refusal.
-                server.refuseUnsafeExposure(exposure)
-                if (api == null || apiPort != settings.port ||
-                    apiBind != Settings.DEFAULT_BIND_ADDRESS
-                ) {
-                    api?.stop()
-                    api = null
-                    startApi()
+            var restarted = false
+            synchronized(settings.configLock) {
+                if (destroyed) return
+                val exposure = settings.exposureError
+                if (exposure != null) {
+                    // Unsafe configuration: no off-host listener and no
+                    // backend. A loopback-only operator listener stays up so
+                    // /health can explain the refusal.
+                    server.refuseUnsafeExposure(exposure)
+                    if (api == null || apiPort != settings.port ||
+                        apiBind != Settings.DEFAULT_BIND_ADDRESS
+                    ) {
+                        api?.stop()
+                        api = null
+                        startApi()
+                    }
+                    thermal.pollNow()
+                    updateNotification()
+                    return
                 }
+
+                val hash = currentConfigHash()
+                val changed = hash != configHashAtLaunch
+                val desired = wantServer || server.isDesired
+                if (changed) configHashAtLaunch = hash
+
+                // The operator listener is not touched here. It is either
+                // already serving the committed configuration (a key-only
+                // change) or was replaced atomically by updateSettings. A
+                // request that arrives from now on gets 503 + Retry-After
+                // while control endpoints observe isRestarting().
+                if (!server.thermalPaused && desired && changed) {
+                    Log.i(TAG, "server settings changed; restarting llama-server")
+                    server.restart()
+                    restarted = true
+                } else if (!server.thermalPaused && desired &&
+                    (server.state == ServerState.STOPPED || server.state == ServerState.ERROR)
+                ) {
+                    // Recover from a refusal or a previous failure without
+                    // needing an explicit POST /server/start.
+                    Log.i(TAG, "configuration is safe again; starting llama-server")
+                    server.start()
+                    restarted = true
+                }
+
+                if (api == null) startApi()
+
+                // Thresholds take effect now, which is what makes the thermal
+                // test possible without a heat gun.
                 thermal.pollNow()
                 updateNotification()
-                return
             }
 
-            val hash = currentConfigHash()
-            val changed = hash != configHashAtLaunch
-            val apiMismatch = apiPort != settings.port || apiBind != settings.bindAddress
-            val desired = wantServer || server.isDesired
+            // Do not clear the 503 window until the replacement backend is
+            // ready, so an immediate retry sees a settled server.
+            if (restarted) awaitBackendSettled()
+        } finally {
+            if (markReload) endReload()
+        }
+    }
 
-            // Tear the operator listener down first. Nothing can observe
-            // `ready` while the backend is being replaced, and a request
-            // cannot reach a half-restarted server.
-            if (changed || apiMismatch) {
-                api?.stop()
-                api = null
+    /**
+     * Wait for the restarted backend to reach a terminal state. Readiness is
+     * still reported by ServerManager: this only decides when control
+     * endpoints stop answering 503.
+     */
+    private fun awaitBackendSettled() {
+        val deadline = System.currentTimeMillis() + RELOAD_SETTLE_TIMEOUT_MS
+        while (!destroyed && System.currentTimeMillis() < deadline) {
+            when (server.state) {
+                ServerState.READY,
+                ServerState.STOPPED,
+                ServerState.ERROR,
+                ServerState.THERMAL_PAUSE,
+                -> return
+                else -> try {
+                    Thread.sleep(100)
+                } catch (_: InterruptedException) {
+                    return
+                }
             }
-            if (changed) configHashAtLaunch = hash
-
-            if (!server.thermalPaused && desired && changed) {
-                Log.i(TAG, "server settings changed; restarting llama-server")
-                server.restart()
-            } else if (!server.thermalPaused && desired &&
-                (server.state == ServerState.STOPPED || server.state == ServerState.ERROR)
-            ) {
-                // Recover from a refusal or a previous failure without needing
-                // an explicit POST /server/start.
-                Log.i(TAG, "configuration is safe again; starting llama-server")
-                server.start()
-            }
-
-            if (changed || apiMismatch || api == null) startApi()
-
-            // Thresholds take effect now, which is what makes the thermal test
-            // possible without a heat gun.
-            thermal.pollNow()
-            updateNotification()
         }
     }
 
@@ -489,7 +582,7 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
         if (exposure != null) {
             Log.w(TAG, "refusing exposure: $exposure; API stays on 127.0.0.1")
         }
-        val instance = ApiServer(settings, this, bind)
+        val instance = ApiServer(settings, this, bind, settings.port)
         instance.start()
         api = instance
         apiPort = settings.port
@@ -595,5 +688,8 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
         private const val CHANNEL_ID = "phonon-server"
         private const val NOTIFICATION_ID = 1
         private const val WAKE_LOCK_TAG = "Phonon::llama-server"
+
+        /** Upper bound on how long control endpoints report 503 after a reload. */
+        private const val RELOAD_SETTLE_TIMEOUT_MS = 300_000L
     }
 }
