@@ -36,3 +36,18 @@ llama-server KV prefix cache across the task's turns; the pooled
 4. Red means revert, not repair.
 5. If the phone stops answering, the batch stops — that is not the task's fault
    and must not be recorded as one.
+
+## Provisioning a phone
+
+```bash
+./tools/provision_phone.sh <serial> <host_port> <alias> [model_url]
+```
+
+Installs the app, pulls the model through `adb reverse`, sets the runtime
+configuration, starts the server, forwards the operator port to the host, and
+holds the device awake so it stays in the `top-app` cpuset. It is idempotent —
+re-running it on a provisioned phone changes nothing that is already correct —
+and it prints the exact LiteLLM stanza for that phone.
+
+Verified on the Pixel 7 (2026-10-17): model already present, ready in 2 s,
+`cpuset:/top-app`, `Cpus_allowed_list: 0-7`.
