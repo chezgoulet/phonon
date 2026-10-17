@@ -100,7 +100,14 @@ class Settings(context: Context) {
         set(value) = prefs.edit().putBoolean(KEY_AUTO_START, value).apply()
 
     var downloadUrl: String
-        get() = prefs.getString(KEY_DOWNLOAD_URL, DEFAULT_MODEL_URL) ?: DEFAULT_MODEL_URL
+        get() {
+            val stored = prefs.getString(KEY_DOWNLOAD_URL, null)
+            // Devices that ran an older build have the development loopback URL
+            // persisted. Read it as "unset" so upgrades get the empty default
+            // and the hint, without rewriting storage behind the service.
+            if (stored == LEGACY_DEV_MODEL_URL) return DEFAULT_MODEL_URL
+            return stored ?: DEFAULT_MODEL_URL
+        }
         set(value) = prefs.edit().putString(KEY_DOWNLOAD_URL, value).apply()
 
     /**
@@ -141,7 +148,15 @@ class Settings(context: Context) {
 
     companion object {
         const val DEFAULT_MODEL_NAME = "gemma-4-E2B-it-Q4_0.gguf"
-        const val DEFAULT_MODEL_URL = "http://127.0.0.1:9000/gemma-4-E2B-it-Q4_0.gguf"
+
+        /**
+         * No model host is bundled: a development loopback URL read as a broken
+         * default. The download screen asks for a URL instead.
+         */
+        const val DEFAULT_MODEL_URL = ""
+
+        /** Only value written by builds before the default was removed. */
+        private const val LEGACY_DEV_MODEL_URL = "http://127.0.0.1:9000/gemma-4-E2B-it-Q4_0.gguf"
         const val DEFAULT_ALIAS = "gemma-4-e2b"
         const val DEFAULT_BIND_ADDRESS = "127.0.0.1"
         const val BIND_ANY = "0.0.0.0"
