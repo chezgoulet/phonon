@@ -64,10 +64,15 @@ Settings changes are two-phase:
    is rejected; send the new key and address together when moving back to
    loopback.
 2. **Commit and rebind.** Only after the whole prospective configuration is
-   valid is it written. If `bind_address`, `api_key` or `port` changed, the
-   existing operator listener is closed *before* the key is cleared, so the
-   port is never off-host with a blank key, even briefly. A single reload
-   operation then restarts the backend and binds the new listener.
+   valid is it written. A change to `api_key` alone leaves the operator
+   listener in place; authentication reads the live settings, so the new
+   credential applies to the next request on the same socket. The backend is
+   still restarted once with the new `--api-key`. A change to `bind_address` or
+   `port` swaps the listener inside the request: the old listening socket is
+   closed *before* the key is cleared (so the port is never off-host with a
+   blank key, even briefly), and the replacement is bound, then starts
+   accepting after the commit. Exactly one serialized reload restarts the
+   backend.
 
 There is a second, independent check immediately before the operator socket is
 bound. The check and `bind()` are performed while holding the settings lock, so
@@ -109,12 +114,19 @@ door.
 ## Deterministic rebind
 
 Changing `bind_address`, `api_key`, `port`, or any other setting that affects
-the backend tears down the operator listener, restarts `llama-server` and binds
-the new listener as one serialized reload. While that is happening `/health`
-cannot report `ready`: it is either unreachable (between closing the old
-listener and binding the new one) or returns HTTP 503 with `state: "loading"`.
-It turns `ready` only after the new listener is bound and the new backend
-answers `/health`.
+the backend is one serialized reload. The operator listener is not torn down
+for the whole reload. A key-only change leaves it in place (authentication
+reads the live settings), and a bind/port change swaps it synchronously inside
+the settings request, before that request's 200 is written. Accepted
+connections, including the one making the change, survive the swap and still
+receive their response.
+
+While the replacement backend is starting, control endpoints answer 503 with
+`Retry-After: 1`, and `/health` returns 503 with `state: "restarting"` or
+`"loading"`. It turns `ready`/200 only after the new listener is bound and the
+new backend answers `/health`. See
+[Settings changes never drop the connection](#settings-changes-never-drop-the-connection-2026-10-17)
+for the observed run.
 
 Restoring a safe configuration after a refusal also restarts the server
 automatically; an explicit `POST /server/start` is not required.
@@ -210,8 +222,8 @@ $ curl -sS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8080/v1/models
 200
 
 $ adb -s 2A091FDH200AJ1 shell 'ss -ltn | grep -E "8080|8081"'
-LISTEN 0 0 127.0.0.1:8081           0.0.0.0:*
-LISTEN 0 0 [::ffff:127.0.0.1]:8080  *:*
+LISTEN      0      0      127.0.0.1:8081               0.0.0.0:*                  
+LISTEN      0      0       [::ffff:127.0.0.1]:8080                     *:*                  
 ```
 
 ### 2. `bind_address=0.0.0.0`, no key: rejected before any change
@@ -234,8 +246,8 @@ $ curl -sS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8080/v1/models
 200
 
 $ adb -s 2A091FDH200AJ1 shell 'ss -ltn | grep -E "8080|8081"'
-LISTEN 0 0 127.0.0.1:8081           0.0.0.0:*
-LISTEN 0 0 [::ffff:127.0.0.1]:8080  *:*
+LISTEN      0      0      127.0.0.1:8081               0.0.0.0:*                  
+LISTEN      0      0       [::ffff:127.0.0.1]:8080                     *:*                  
 ```
 
 The listener was not rebound and the server was not restarted. Logcat:
@@ -351,8 +363,8 @@ $ curl -sS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8080/v1/models
 200
 
 $ adb -s 2A091FDH200AJ1 shell 'ss -ltn | grep -E "8080|8081"'
-LISTEN 0 0 127.0.0.1:8081           0.0.0.0:*
-LISTEN 0 0 [::ffff:127.0.0.1]:8080  *:*
+LISTEN      0      0      127.0.0.1:8081               0.0.0.0:*                  
+LISTEN      0      0       [::ffff:127.0.0.1]:8080                     *:*                  
 ```
 
 Logcat:
@@ -424,10 +436,235 @@ Steps and results:
 Posting the `bind_address` change **without** the bearer token returned
 `http=000` — the connection was closed rather than a `401`. Control endpoints
 should answer `401` so a client can distinguish an auth failure from a dead
-server. Not fixed yet.
+server. Fixed on `fix/settings-race`; see
+[Settings changes never drop the connection](#settings-changes-never-drop-the-connection-2026-10-17).
 
 ### Still unverified
 
 Two phones serving at once. The USB-attached stock Pixel was offline during this
 test (its cable no longer enumerates), so only `phone-b` was reachable. The
 pinned-alias concurrency test needs both devices attached.
+
+## Settings changes never drop the connection (2026-10-17)
+
+Branch `fix/settings-race`. Same stock Pixel 7, serial `2A091FDH200AJ1`,
+Android 17, arm64-v8a, unrooted. Installed debug APK: 12,142,615 bytes, SHA-256
+`ba670808673a68340779ce49b7a774bb8f1e215b84eba5e29dac45f1cba53562`,
+version 0.2.0. The device served Qwen3.5-2B Q4_K_M at 32K context. The key was
+generated on the device for step 1, used only over the USB forward, and cleared
+in step 4; it is not recorded here.
+
+The test commands ran on the host through
+`adb -s 2A091FDH200AJ1 forward tcp:18080 tcp:8080`; `ss` is from the device's
+unprivileged shell with the unrelated netlink warning suppressed.
+
+### What changed
+
+- One POST may carry `api_key` and `bind_address`. Both are validated together
+  as a prospective configuration, committed together, and cause one backend
+  restart.
+- `api_key` alone no longer rebinds the operator listener. `authorized()` reads
+  the live settings, so the new credential applies to the next request on the
+  same socket.
+- A `bind_address` or `port` change swaps the listener synchronously inside
+  the settings request, before that request's 200 is written. `stop()` closes
+  only the listening socket; accepted connections, including the one making
+  the change, stay open and still receive their response.
+- From the commit until the replacement backend answers, control endpoints
+  (`/settings`, `/logs`, `/model/*`, `/server/*`, `/debug/*`) return 503 with
+  `Retry-After: 1` and `{"error":"server restarting","retry_after_s":1}`.
+  Authorization is checked first, so a missing or wrong key is 401 even while
+  a reload is in progress.
+- `/health` stays open and reports `restarting` or `loading` with 503; it
+  becomes `ready`/200 only after the new listener and backend both answer.
+
+`SO_REUSEPORT` was unavailable when tried on this device (`ServerSocket`
+returned `UnsupportedOperationException: unsupported option`), so the listener
+swap is close-then-bind inside the request rather than two overlapping
+sockets. The logs below show the
+listening socket down for about 2-5 ms per swap. A stress run of 1,695 requests
+across six rebinds observed no `000` (see below).
+
+### 1. One POST: `api_key` + `bind_address=0.0.0.0`
+
+```text
+$ curl -sS -w '\nHTTP %{http_code}\n' -X POST http://127.0.0.1:18080/settings \
+    -H 'Content-Type: application/json' \
+    -d '{"api_key":"<generated-on-device>","bind_address":"0.0.0.0"}'
+HTTP/1.1 200 OK
+Content-Type: application/json; charset=utf-8
+Content-Length: 421
+
+{"...","bind_address":"0.0.0.0","api_key_set":true,...}
+
+$ adb -s 2A091FDH200AJ1 shell 'ss -ltn | grep -E "8080|8081"'
+LISTEN      0      0            *:8080                     *:*                  
+```
+
+The backend had not bound 8081 yet at that instant. Health samples:
+
+```text
+sample 1  HTTP 503 state=restarting
+sample 2  HTTP 503 state=restarting
+sample 3  HTTP 503 state=loading
+...
+sample 18 HTTP 503 state=loading
+sample 19 HTTP 503 state=restarting
+sample 20 HTTP 200 state=ready
+```
+
+Once ready, both listeners were up and auth was enforced:
+
+```text
+$ curl -sS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:18080/v1/models
+401
+$ curl -sS -o /dev/null -w '%{http_code}\n' \
+    -H 'Authorization: Bearer <key>' http://127.0.0.1:18080/v1/models
+200
+$ adb -s 2A091FDH200AJ1 shell 'ss -ltn | grep -E "8080|8081"'
+LISTEN      0      0      0.0.0.0:8081               0.0.0.0:*                  
+LISTEN      0      0            *:8080                     *:*                  
+```
+
+### 2. Reload, then an immediate second bind change
+
+The first request changed the bind to loopback and started a reload. The next
+request was issued with no delay:
+
+```text
+$ curl ... -X POST .../settings -H 'Authorization: Bearer <key>' \
+    -d '{"bind_address":"127.0.0.1"}'
+change HTTP 200
+stored bind: 127.0.0.1
+
+$ curl ... -X POST .../settings -H 'Authorization: Bearer <key>' \
+    -d '{"bind_address":"0.0.0.0"}'
+HTTP/1.1 503 Service Unavailable
+Content-Type: application/json; charset=utf-8
+Content-Length: 47
+Retry-After: 1
+
+{"error":"server restarting","retry_after_s":1}
+```
+
+The rejected change was not applied (stored bind stayed `127.0.0.1`). After
+`ready`, the same request succeeded:
+
+```text
+$ curl ... -X POST .../settings -H 'Authorization: Bearer <key>' \
+    -d '{"bind_address":"0.0.0.0"}'
+retry HTTP 200
+stored bind: 0.0.0.0
+
+$ adb -s 2A091FDH200AJ1 shell 'ss -ltn | grep -E "8080|8081"'
+LISTEN      0      0      0.0.0.0:8081               0.0.0.0:*                  
+LISTEN      0      0            *:8080                     *:*                  
+```
+
+This change/retry pair was repeated ten times, alternating loopback and
+wildcard. Every first change returned 200, every immediate follow-up returned
+503 with `Retry-After: 1`, and no request returned `000`.
+
+A separate stress run kept eight clients issuing `GET /health`, `GET /settings`
+and `POST /settings` while the bind was toggled six times. Of 1,695 responses,
+26 were 200 and 1,669 were the expected 503 during reloads; **zero were 000**.
+
+### 3. Control request without a key
+
+```text
+$ curl -sS -D - http://127.0.0.1:18080/settings
+HTTP/1.1 401 Unauthorized
+Content-Type: application/json; charset=utf-8
+Content-Length: 24
+WWW-Authenticate: Bearer
+Connection: close
+
+{"error":"unauthorized"}
+
+$ curl -sS -i -X POST http://127.0.0.1:18080/settings \
+    -H 'Content-Type: application/json' -d '{"bind_address":"0.0.0.0"}'
+HTTP/1.1 401 Unauthorized
+Content-Type: application/json; charset=utf-8
+Content-Length: 24
+WWW-Authenticate: Bearer
+
+{"error":"unauthorized"}
+```
+
+`GET /settings` with a wrong bearer token also returned 401, and `/health`
+without a key returned 200. The response body is delivered in full; the socket
+is not reset.
+
+### 4. Restore loopback and clear the key
+
+```text
+$ curl ... -X POST .../settings -H 'Authorization: Bearer <key>' \
+    -d '{"bind_address":"127.0.0.1","api_key":""}'
+HTTP 200
+{"...","bind_address":"127.0.0.1","api_key_set":false,...}
+
+# after ready, with no POST /server/start:
+$ curl -sS http://127.0.0.1:18080/health
+HTTP 200
+{"state":"ready",...,"bind_address":"127.0.0.1","api_key_set":false,
+ "exposed_off_host":false,...}
+
+$ curl -sS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:18080/v1/models
+200
+
+$ adb -s 2A091FDH200AJ1 shell 'ss -ltn | grep -E "8080|8081"'
+LISTEN      0      0      127.0.0.1:8081               0.0.0.0:*                  
+LISTEN      0      0       [::ffff:127.0.0.1]:8080                     *:*                  
+```
+
+### 5. Unauthenticated non-loopback bind is still refused
+
+```text
+$ curl -sS -i -X POST http://127.0.0.1:18080/settings \
+    -H 'Content-Type: application/json' -d '{"bind_address":"0.0.0.0"}'
+HTTP/1.1 400 Bad Request
+Content-Type: application/json; charset=utf-8
+Content-Length: 41
+
+{"error":"bind_address requires api_key"}
+
+$ curl -sS http://127.0.0.1:18080/settings
+{"...","bind_address":"127.0.0.1","api_key_set":false,...}
+
+$ curl -sS http://127.0.0.1:18080/health
+HTTP 200
+{"state":"ready",...,"bind_address":"127.0.0.1","api_key_set":false,
+ "exposed_off_host":false,...}
+
+$ adb -s 2A091FDH200AJ1 shell 'ss -ltn | grep -E "8080|8081"'
+LISTEN      0      0      127.0.0.1:8081               0.0.0.0:*                  
+LISTEN      0      0       [::ffff:127.0.0.1]:8080                     *:*                  
+```
+
+The listener did not move and the backend did not restart. Final stored
+settings: `bind_address=127.0.0.1`, key empty, `ready`. The test key was
+removed from the host; the device's `api_key` value is empty.
+
+### Logcat for the run
+
+```text
+18:03:20.070 Phonon : API stopped 127.0.0.1:8080
+18:03:20.075 Phonon : API listening on 0.0.0.0:8080
+18:03:20.079 Phonon : server settings changed; restarting llama-server
+18:03:22.466 Phonon : ready after 2s, pid=29868
+18:03:22.797 Phonon : API stopped 0.0.0.0:8080
+18:03:22.798 Phonon : API listening on 127.0.0.1:8080
+18:03:22.800 Phonon : server settings changed; restarting llama-server
+18:03:25.177 Phonon : ready after 2s, pid=29898
+18:03:25.406 Phonon : API stopped 127.0.0.1:8080
+18:03:25.411 Phonon : API listening on 0.0.0.0:8080
+18:03:25.419 Phonon : server settings changed; restarting llama-server
+18:03:27.803 Phonon : ready after 2s, pid=29924
+18:03:28.185 Phonon : API stopped 0.0.0.0:8080
+18:03:28.190 Phonon : API listening on 127.0.0.1:8080
+18:03:31.091 Phonon : ready after 2s, pid=29953
+18:03:31.346 Phonon : settings rejected: bind_address requires api_key
+```
+
+The `API stopped` line is the old listening socket closing; the next line is
+the replacement already bound. No process was restarted for the final 400.
