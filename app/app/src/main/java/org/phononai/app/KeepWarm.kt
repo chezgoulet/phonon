@@ -169,7 +169,7 @@ class KeepWarm(
         }.toString()
         var conn: HttpURLConnection? = null
         return try {
-            conn = URL("http://127.0.0.1:${settings.backendPort}/v1/chat/completions")
+            conn = URL("http://${settings.backendHost()}:${settings.backendPort}/v1/chat/completions")
                 .openConnection() as HttpURLConnection
             conn.connectTimeout = BEAT_TIMEOUT_MS
             conn.readTimeout = BEAT_TIMEOUT_MS

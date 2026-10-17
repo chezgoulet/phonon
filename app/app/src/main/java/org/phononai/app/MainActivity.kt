@@ -28,6 +28,7 @@ class MainActivity : Activity() {
     private lateinit var threadsField: EditText
     private lateinit var portField: EditText
     private lateinit var backendPortField: EditText
+    private lateinit var bindAddressField: EditText
     private lateinit var thermalStopField: EditText
     private lateinit var thermalResumeField: EditText
     private lateinit var aliasField: EditText
@@ -58,6 +59,7 @@ class MainActivity : Activity() {
         threadsField = findViewById(R.id.threads)
         portField = findViewById(R.id.port)
         backendPortField = findViewById(R.id.backend_port)
+        bindAddressField = findViewById(R.id.bind_address)
         thermalStopField = findViewById(R.id.thermal_stop)
         thermalResumeField = findViewById(R.id.thermal_resume)
         aliasField = findViewById(R.id.alias)
@@ -120,6 +122,7 @@ class MainActivity : Activity() {
         threadsField.setText(settings.threads.toString())
         portField.setText(settings.port.toString())
         backendPortField.setText(settings.backendPort.toString())
+        bindAddressField.setText(settings.bindAddress)
         thermalStopField.setText(settings.thermalStopC.toString())
         thermalResumeField.setText(settings.thermalResumeC.toString())
         aliasField.setText(settings.alias)
@@ -167,21 +170,73 @@ class MainActivity : Activity() {
             Toast.makeText(this, "API and backend ports must differ", Toast.LENGTH_SHORT).show()
             return false
         }
-        settings.modelPath = modelPath.text.toString().trim()
-        settings.contextSize = contextSize
-        settings.threads = threads
-        settings.port = port
-        settings.backendPort = backendPort
-        settings.thermalStopC = stop
-        settings.thermalResumeC = resume
-        settings.alias = aliasField.text.toString().trim().ifBlank { Settings.DEFAULT_ALIAS }
-        settings.apiKey = apiKeyField.text.toString()
-        settings.downloadUrl = downloadUrlField.text.toString().trim()
-        settings.keepWarmIntervalS = keepWarmInterval
-        settings.loadMode = loadMode
-        settings.keepWarm = keepWarmBox.isChecked
-        settings.reasoning = reasoningBox.isChecked
-        if (restart) send(PhononService.ACTION_RELOAD)
+        val bindAddress = bindAddressField.text.toString().trim()
+        Settings.validateBindAddress(bindAddress)?.let {
+            Toast.makeText(this, it, Toast.LENGTH_LONG).show()
+            return false
+        }
+        val apiKey = apiKeyField.text.toString()
+        if (!Settings.isLoopbackBind(bindAddress) && apiKey.isBlank()) {
+            Toast.makeText(
+                this,
+                "API key is required when bind address is not 127.0.0.1",
+                Toast.LENGTH_LONG,
+            ).show()
+            return false
+        }
+        val alias = aliasField.text.toString().trim().ifBlank { Settings.DEFAULT_ALIAS }
+        val downloadUrl = downloadUrlField.text.toString().trim()
+        // Apply through the service so the same prospective validation and
+        // listener teardown used by POST /settings also covers the activity.
+        // If the service is not up yet there is no listener to race, so a
+        // direct write is safe.
+        val service = AppState.service
+        if (service != null) {
+            val body = JSONObject().apply {
+                put("model_path", modelPath.text.toString().trim())
+                put("context", contextSize)
+                put("threads", threads)
+                put("bind_address", bindAddress)
+                put("port", port)
+                put("backend_port", backendPort)
+                put("thermal_stop_c", stop.toDouble())
+                put("thermal_resume_c", resume.toDouble())
+                put("alias", alias)
+                put("api_key", apiKey)
+                put("download_url", downloadUrl)
+                put("keep_warm_interval_s", keepWarmInterval)
+                put("load_mode", loadMode)
+                put("keep_warm", keepWarmBox.isChecked)
+                put("reasoning", reasoningBox.isChecked)
+            }
+            val result = service.updateSettings(body.toString())
+            if (result.contains("\"error\"")) {
+                val message = try {
+                    JSONObject(result).optString("error")
+                } catch (_: Throwable) {
+                    result
+                }
+                Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+                return false
+            }
+        } else {
+            settings.modelPath = modelPath.text.toString().trim()
+            settings.contextSize = contextSize
+            settings.threads = threads
+            settings.bindAddress = bindAddress
+            settings.port = port
+            settings.backendPort = backendPort
+            settings.thermalStopC = stop
+            settings.thermalResumeC = resume
+            settings.alias = alias
+            settings.apiKey = apiKey
+            settings.downloadUrl = downloadUrl
+            settings.keepWarmIntervalS = keepWarmInterval
+            settings.loadMode = loadMode
+            settings.keepWarm = keepWarmBox.isChecked
+            settings.reasoning = reasoningBox.isChecked
+            if (restart) send(PhononService.ACTION_RELOAD)
+        }
         return true
     }
 
@@ -207,6 +262,9 @@ class MainActivity : Activity() {
                 append("decode t/s:   ").append(nullable(h, "last_decode_tps")).append('\n')
                 append("prompt t/s:   ").append(nullable(h, "last_prompt_tps")).append('\n')
                 append("restarts:     ").append(h.optInt("restart_count")).append('\n')
+                append("bind:         ").append(h.optString("bind_address"))
+                    .append(" exposed=").append(h.optBoolean("exposed_off_host"))
+                    .append(" key_set=").append(h.optBoolean("api_key_set")).append('\n')
                 append("keep_warm:    ").append(h.optBoolean("keep_warm"))
                     .append(" / ").append(h.optInt("keep_warm_interval_s")).append("s\n")
                 append("keepalives:   ").append(h.optInt("keepalive_count"))

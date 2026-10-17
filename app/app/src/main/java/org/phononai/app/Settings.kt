@@ -2,6 +2,9 @@ package org.phononai.app
 
 import android.content.Context
 import java.io.File
+import java.net.Inet4Address
+import java.net.InetAddress
+import java.net.NetworkInterface
 
 /**
  * All knobs live in one SharedPreferences file so they can be changed from the
@@ -12,6 +15,13 @@ class Settings(context: Context) {
 
     private val prefs = context.getSharedPreferences(NAME, Context.MODE_PRIVATE)
     private val filesDir = context.filesDir
+
+    /**
+     * Serialises settings mutation with the bind-time exposure check, so the
+     * operator port cannot be bound off-loopback while a key change is being
+     * committed. Reentrant: callers that already hold it may bind or reload.
+     */
+    val configLock = Any()
 
     fun defaultModelPath(): String =
         File(File(filesDir, "models"), DEFAULT_MODEL_NAME).absolutePath
@@ -27,6 +37,33 @@ class Settings(context: Context) {
     var threads: Int
         get() = prefs.getInt(KEY_THREADS, 4)
         set(value) = prefs.edit().putInt(KEY_THREADS, value).apply()
+
+    /**
+     * Address both the app API and llama-server bind to. Safe values are
+     * loopback, the wildcard address, or an IPv4 address assigned to a local
+     * interface. Anything else is rejected at the settings boundary.
+     */
+    var bindAddress: String
+        get() = prefs.getString(KEY_BIND_ADDRESS, DEFAULT_BIND_ADDRESS) ?: DEFAULT_BIND_ADDRESS
+        set(value) = prefs.edit().putString(KEY_BIND_ADDRESS, value).apply()
+
+    /**
+     * The one rule that must hold before either listener is bound off-loopback.
+     * Null means the configuration is safe to start.
+     */
+    val exposureError: String?
+        get() = if (!isLoopbackBind(bindAddress) && apiKey.isBlank()) {
+            "bind_address requires api_key"
+        } else {
+            null
+        }
+
+    val exposedOffHost: Boolean
+        get() = !isLoopbackBind(bindAddress)
+
+    /** llama-server binds [bindAddress]; 0.0.0.0 and loopback are reached via 127.0.0.1. */
+    fun backendHost(): String =
+        if (bindAddress == BIND_ANY || isLoopbackBind(bindAddress)) "127.0.0.1" else bindAddress
 
     /** Port the app's own API listens on (health, /v1 proxy, control routes). */
     var port: Int
@@ -87,6 +124,7 @@ class Settings(context: Context) {
         put("model_path", modelPath)
         put("context", contextSize)
         put("threads", threads)
+        put("bind_address", bindAddress)
         put("port", port)
         put("backend_port", backendPort)
         put("reasoning", reasoning)
@@ -105,13 +143,60 @@ class Settings(context: Context) {
         const val DEFAULT_MODEL_NAME = "gemma-4-E2B-it-Q4_0.gguf"
         const val DEFAULT_MODEL_URL = "http://127.0.0.1:9000/gemma-4-E2B-it-Q4_0.gguf"
         const val DEFAULT_ALIAS = "gemma-4-e2b"
+        const val DEFAULT_BIND_ADDRESS = "127.0.0.1"
+        const val BIND_ANY = "0.0.0.0"
         const val LOAD_MODE_MMAP = "mmap"
         val LOAD_MODES = setOf(LOAD_MODE_MMAP, "mlock", "none")
         const val MIN_KEEP_WARM_INTERVAL_S = 15
         const val DEFAULT_KEEP_WARM_INTERVAL_S = 45
 
+        fun isLoopbackBind(value: String): Boolean {
+            val v = value.trim()
+            return v == DEFAULT_BIND_ADDRESS || v.startsWith("127.")
+        }
+
+        /**
+         * Validate a proposed bind address. Returns an error message, or null
+         * when the value is 127.0.0.1, 0.0.0.0, or an IPv4 address currently
+         * assigned to a local interface.
+         */
+        fun validateBindAddress(value: String): String? {
+            val v = value.trim()
+            if (!isIPv4(v)) return "bind_address must be an IPv4 address"
+            if (v == DEFAULT_BIND_ADDRESS || v == BIND_ANY) return null
+            if (!isAssignedToLocalInterface(v)) {
+                return "bind_address is not a local IPv4 address: $v"
+            }
+            return null
+        }
+
+        private fun isIPv4(value: String): Boolean {
+            val parts = value.split('.')
+            if (parts.size != 4) return false
+            return parts.all { part ->
+                part.isNotEmpty() && part.length <= 3 && part.all { it.isDigit() } &&
+                    part.toInt() in 0..255
+            }
+        }
+
+        private fun isAssignedToLocalInterface(value: String): Boolean = try {
+            val target = InetAddress.getByName(value)
+            if (target !is Inet4Address) {
+                false
+            } else {
+                NetworkInterface.getNetworkInterfaces()?.toList()?.any { nif ->
+                    nif.inetAddresses.toList().any { address ->
+                        address is Inet4Address && address.hostAddress == target.hostAddress
+                    }
+                } ?: false
+            }
+        } catch (_: Throwable) {
+            false
+        }
+
         private const val NAME = "phonon"
         private const val KEY_MODEL_PATH = "model_path"
+        private const val KEY_BIND_ADDRESS = "bind_address"
         private const val KEY_CONTEXT = "context"
         private const val KEY_THREADS = "threads"
         private const val KEY_PORT = "port"
