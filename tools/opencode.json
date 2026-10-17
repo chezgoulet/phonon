@@ -21,19 +21,28 @@
           "name": "Pixel 7 #1 (pinned)",
           "tool_call": true,
           "reasoning": false,
-          "limit": { "context": 8192, "output": 2048 }
+          "limit": {
+            "context": 32768,
+            "output": 2048
+          }
         },
         "phone-b": {
           "name": "Pixel 7 #2 (pinned)",
           "tool_call": true,
           "reasoning": false,
-          "limit": { "context": 8192, "output": 2048 }
+          "limit": {
+            "context": 32768,
+            "output": 2048
+          }
         },
         "gemma-4-e2b": {
           "name": "Phone pool (any)",
           "tool_call": true,
           "reasoning": false,
-          "limit": { "context": 8192, "output": 2048 }
+          "limit": {
+            "context": 32768,
+            "output": 2048
+          }
         }
       }
     },
@@ -53,7 +62,7 @@
           "tool_call": true,
           "reasoning": false,
           "limit": {
-            "context": 8192,
+            "context": 32768,
             "output": 2048
           }
         }
