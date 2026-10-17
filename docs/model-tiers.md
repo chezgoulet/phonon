@@ -109,3 +109,21 @@ An app cannot change its own cpuset. The fix belongs to the appliance image or
 ROM: put the service in `top-app`, or widen `/foreground` to include 6–7. Until
 then, treat the in-app number as the honest product number and the standalone
 number as the hardware ceiling.
+
+### Confirmed: top-app versus foreground (two phones, same everything)
+
+The cpuset hypothesis is now proven by comparing two Pixel 7s running the same
+model, context and binary:
+
+| State | cpuset | Allowed CPUs | Decode |
+|---|---|---|---|
+| screen locked, foreground service | `/foreground` | 0–5 | 5.8 tok/s |
+| screen on, Activity visible | `/top-app` | 0–7 | 14.36 tok/s |
+
+Keeping the screen awake while charging (`svc power stayon usb`) holds the
+process in `top-app`: 12.7–14.4 tok/s across runs.
+
+So the 2.4x penalty is not a property of the app or the model; it is which
+cgroup Android assigns. An appliance must either keep the display awake (cheap
+in a rack, and the display can be dimmed) or, in the ROM, move the service to
+`top-app` or widen `/foreground`.
