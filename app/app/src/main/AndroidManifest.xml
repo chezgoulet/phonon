@@ -13,7 +13,7 @@
         android:extractNativeLibs="true"
         android:label="Phonon"
         android:supportsRtl="true"
-        android:theme="@android:style/Theme.Material.Light"
+        android:theme="@style/Theme.Phonon"
         android:usesCleartextTraffic="true">
 
         <activity
