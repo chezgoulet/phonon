@@ -10,16 +10,36 @@ These are device captures (`adb exec-out screencap -p`), not mockups.
 
 | File | Screen |
 |---|---|
-| `app-serve.png` | Serve, ready after one completion: muted `LAST THROUGHPUT 4.8 tok/s`, recent activity `1 completed · just now` |
-| `app-serve-idle.png` | Serve, ready before any request: `idle` / `Awaiting first request`, `No requests yet` |
+| `app-serve.png` | Serve at the final LAN bind after the two measured benchmarks: tier line, warm result `7.0 tok/s`, 28.6 °C. The request counter reads 0 because the final APK install restarted the service; benchmark history persisted |
+| `app-serve-idle.png` | Serve on first launch after data clear: `Pixel 7 · 8 GB · tier S`, 2B / 32K / 4, loopback endpoint, no benchmark yet |
 | `app-paused.png` | Serve, thermal pause (`Paused — too warm`, amber, `Resume manually`) |
 | `app-models.png` | Models, scrolled: download card with empty GGUF URL and hint |
 | `app-models-top.png` | Models, top: storage, active model and the second installed model |
-| `app-settings.png` | Settings, policy-first cards |
+| `app-settings.png` | Settings, top: detected Device card, auto-config line, Export device report, then policy cards |
 | `app-settings-advanced.png` | Settings, kiosk section and the start of advanced values |
 | `app-settings-advanced2.png` | Settings, empty default download URL, load mode, switches, log, save |
 | `app-settings-kiosk.png` | Settings, Kiosk / appliance mode: Device Owner `no`, provisioning command |
 | `app-setup.png` | Setup, LAN/phone-only, node name, masked generated key |
+
+## v1 features captured 2026-10-17
+
+App 0.3.0, after `pm clear` and auto-config, then two benchmark runs and a
+device-report export on the same Pixel 7.
+
+- **Tier on Serve.** The model line now starts with
+  `Pixel 7 · 8 GB · tier S`. `app-serve-idle.png` is the first launch after
+  data clear: model `Qwen3.5-2B-Q4_K_M.gguf`, 32K context, 4 threads, alias
+  `qwen3.5-2b`, loopback bind (the LAN bind was restored after the captures).
+- **Benchmark card.** `app-serve.png` shows the second, warm run:
+  `7.0 tok/s decode`, prefill 6.5 tok/s, TTFT 0.7 s, 28.3 °C, peak 1.80 GB.
+  The same card is shown on Serve while serving; running it does not block the
+  screen. The cold run was 5.9 tok/s at 3.3 s TTFT, so the two captures in
+  `../../docs/reports/` show the variance rather than one number.
+- **Device report.** `app-settings.png` shows the Device card with the detected
+  tier, the SoC/Android/ABI line and **Export device report**. The preview
+  dialog (exactly what leaves the phone) is captured in
+  `../../docs/reports/pixel-7-report-preview.png`; the checked-in text is
+  `../../docs/reports/pixel-7-report.txt`.
 
 ## Polish pass
 
@@ -29,14 +49,14 @@ These are device captures (`adb exec-out screencap -p`), not mockups.
    colour and the sparkline retained. `app-serve-idle.png` and
    `app-serve.png` show both states.
 2. **Serve spacing.** A compact `RECENT ACTIVITY` row (completed count and
-   relative last-request age) is anchored above the primary action with a
-   weight spacer, so the content ends at the button instead of two-thirds down
-   the screen.
-3. **Avatar size.** The `AvatarView` slot is 172 dp. The particle body is
-   drawn at `0.32 × min(width, height)`, so the rendered cloud measures
-   **93.5 dp** by the bounding box of non-black pixels around the orb on this
-   capture (88.7 dp at a brighter threshold), against ~60 dp before. The
-   1.55 × halo is inside the view bounds.
+   relative last-request age) sits below the benchmark card. Serve now scrolls
+   above the fixed primary action: the benchmark result block and the activity
+   row together are taller than the content area on a 6.1" phone, and the old
+   weight-spacer layout clipped the activity row behind the button.
+3. **Avatar size.** The `AvatarView` slot is 156 dp. The particle body is
+   drawn at `0.32 × min(width, height)`, so the rendered cloud is ~85 dp and
+   still legible; the slot was reduced from 172 dp to make room for the
+   benchmark card. The 1.55 × halo stays inside the view bounds.
 4. **Download URL.** `Settings.DEFAULT_MODEL_URL` is now empty. The Models
    card shows an empty `GGUF URL` field, the hint “Paste a direct GGUF link.
    Nothing downloads until you press Download.”, and a disabled Download

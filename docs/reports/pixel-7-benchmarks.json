@@ -1,0 +1,40 @@
+[
+  {
+    "timestamp": "2026-10-17T23:14:02.397Z",
+    "model": "Qwen3.5-2B-Q4_K_M.gguf",
+    "alias": "qwen3.5-2b",
+    "load": "warm",
+    "prompt_tokens": 54,
+    "completion_tokens": 128,
+    "prefill_tps": 6.46,
+    "decode_tps": 7.01,
+    "ttft_ms": 662,
+    "total_ms": 18945,
+    "peak_rss_mb": 1801,
+    "battery_temp_c": 28.299999237060547,
+    "context": 32768,
+    "threads": 4,
+    "load_mode": "mmap",
+    "server_pid": 9373,
+    "app_version": "0.3.0"
+  },
+  {
+    "timestamp": "2026-10-17T23:13:26.464Z",
+    "model": "Qwen3.5-2B-Q4_K_M.gguf",
+    "alias": "qwen3.5-2b",
+    "load": "cold",
+    "prompt_tokens": 54,
+    "completion_tokens": 128,
+    "prefill_tps": 16.23,
+    "decode_tps": 5.92,
+    "ttft_ms": 3349,
+    "total_ms": 24968,
+    "peak_rss_mb": 1760,
+    "battery_temp_c": 28,
+    "context": 32768,
+    "threads": 4,
+    "load_mode": "mmap",
+    "server_pid": 9373,
+    "app_version": "0.3.0"
+  }
+]
