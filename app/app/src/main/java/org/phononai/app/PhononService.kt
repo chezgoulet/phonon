@@ -31,6 +31,7 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
     private lateinit var server: ServerManager
     private lateinit var thermal: ThermalMonitor
     private lateinit var keepWarm: KeepWarm
+    private lateinit var benchmark: BenchmarkRunner
     private val requests = RequestTracker()
     private val mainHandler = Handler(Looper.getMainLooper())
 
@@ -62,6 +63,9 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
         super.onCreate()
         AppState.service = this
         settings = Settings(this)
+        // Before the supervisor reads model_path/context/threads: first start
+        // after install or data clear gets the RAM-tier defaults.
+        settings.applyAutoConfigIfNeeded()
         createNotificationChannel()
         acquireWakeLock()
 
@@ -73,6 +77,8 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
 
         keepWarm = KeepWarm(settings, server, requests)
         keepWarm.start()
+
+        benchmark = BenchmarkRunner(settings, server) { thermal.batteryTempC }
 
         startApi()
 
@@ -127,6 +133,7 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
         api?.stop()
         api = null
         reloadExecutor.shutdownNow()
+        if (::benchmark.isInitialized) benchmark.cancel()
         thermal.stop()
         keepWarm.stop()
         server.shutdown()
@@ -280,7 +287,9 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
                 }
                 if (json.has("context")) {
                     val value = json.optInt("context", context)
-                    if (value < 256 || value > 32_768) return error("context must be 256..32768")
+                    if (value < 256 || value > Settings.MAX_CONTEXT) {
+                        return error("context must be 256..${Settings.MAX_CONTEXT}")
+                    }
                     context = value
                 }
                 if (json.has("threads")) {
@@ -458,6 +467,16 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
     // --- activity-facing helpers -----------------------------------------
 
     fun uiHealthJson(): String = healthJson()
+
+    fun uiBenchmarkJson(): String =
+        if (::benchmark.isInitialized) benchmark.stateJson() else "{\"running\":false}"
+
+    fun uiStartBenchmark(): Boolean =
+        ::benchmark.isInitialized && benchmark.start()
+
+    fun uiCancelBenchmark() {
+        if (::benchmark.isInitialized) benchmark.cancel()
+    }
 
     /**
      * Activity screen-on policy. `ready` covers both idle and generating: a

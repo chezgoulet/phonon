@@ -1,6 +1,7 @@
 package org.phononai.app
 
 import android.content.Context
+import org.json.JSONObject
 import java.io.File
 import java.net.Inet4Address
 import java.net.InetAddress
@@ -13,8 +14,9 @@ import java.net.NetworkInterface
  */
 class Settings(context: Context) {
 
-    private val prefs = context.getSharedPreferences(NAME, Context.MODE_PRIVATE)
-    private val filesDir = context.filesDir
+    private val appContext = context.applicationContext
+    private val prefs = appContext.getSharedPreferences(NAME, Context.MODE_PRIVATE)
+    private val filesDir = appContext.filesDir
 
     /**
      * Serialises settings mutation with the bind-time exposure check, so the
@@ -23,20 +25,31 @@ class Settings(context: Context) {
      */
     val configLock = Any()
 
+    /** The tier this device falls into, recomputed from physical memory. */
+    val hardware: DeviceProfile get() = HardwareProfile.detect(appContext)
+
     fun defaultModelPath(): String =
-        File(File(filesDir, "models"), DEFAULT_MODEL_NAME).absolutePath
+        File(File(filesDir, "models"), hardware.tier.modelFile).absolutePath
 
     var modelPath: String
         get() = prefs.getString(KEY_MODEL_PATH, null) ?: defaultModelPath()
         set(value) = prefs.edit().putString(KEY_MODEL_PATH, value).apply()
 
     var contextSize: Int
-        get() = prefs.getInt(KEY_CONTEXT, 2048)
+        get() = prefs.getInt(KEY_CONTEXT, hardware.tier.contextSize)
         set(value) = prefs.edit().putInt(KEY_CONTEXT, value).apply()
 
     var threads: Int
-        get() = prefs.getInt(KEY_THREADS, 4)
+        get() = prefs.getInt(KEY_THREADS, hardware.tier.threads)
         set(value) = prefs.edit().putInt(KEY_THREADS, value).apply()
+
+    /**
+     * Set by the Settings screen's Save action. Auto-configuration never
+     * replaces a value the operator has chosen, including after a restart.
+     */
+    var tunedByUser: Boolean
+        get() = prefs.getBoolean(KEY_TUNED_BY_USER, false)
+        set(value) = prefs.edit().putBoolean(KEY_TUNED_BY_USER, value).apply()
 
     /**
      * Address both the app API and llama-server bind to. Safe values are
@@ -127,6 +140,42 @@ class Settings(context: Context) {
         get() = prefs.getString(KEY_LOAD_MODE, LOAD_MODE_MMAP) ?: LOAD_MODE_MMAP
         set(value) = prefs.edit().putString(KEY_LOAD_MODE, value).apply()
 
+    /**
+     * Apply the RAM-tier defaults once, on the first start after install or
+     * data clear. A value the operator saved from the Settings screen is
+     * never overwritten: [tunedByUser] is set by that screen's Save action.
+     */
+    fun applyAutoConfigIfNeeded() {
+        if (prefs.getBoolean(KEY_AUTO_CONFIG_DONE, false)) return
+        if (!tunedByUser) {
+            val tier = hardware.tier
+            modelPath = File(File(filesDir, "models"), tier.modelFile).absolutePath
+            contextSize = tier.contextSize
+            threads = tier.threads
+            alias = tier.alias
+        }
+        prefs.edit().putBoolean(KEY_AUTO_CONFIG_DONE, true).apply()
+    }
+
+    /** Newest first, capped at [MAX_BENCHMARK_HISTORY]. */
+    val benchmarkHistory: List<JSONObject>
+        get() {
+            val raw = prefs.getString(KEY_BENCHMARK_HISTORY, null) ?: return emptyList()
+            return try {
+                val array = org.json.JSONArray(raw)
+                (0 until array.length()).mapNotNull { array.optJSONObject(it) }
+            } catch (_: Throwable) {
+                emptyList()
+            }
+        }
+
+    fun appendBenchmark(result: JSONObject) {
+        val trimmed = (listOf(result) + benchmarkHistory).take(MAX_BENCHMARK_HISTORY)
+        val array = org.json.JSONArray()
+        trimmed.forEach { array.put(it) }
+        prefs.edit().putString(KEY_BENCHMARK_HISTORY, array.toString()).apply()
+    }
+
     fun asJson(): String = org.json.JSONObject().apply {
         put("model_path", modelPath)
         put("context", contextSize)
@@ -164,6 +213,8 @@ class Settings(context: Context) {
         val LOAD_MODES = setOf(LOAD_MODE_MMAP, "mlock", "none")
         const val MIN_KEEP_WARM_INTERVAL_S = 15
         const val DEFAULT_KEEP_WARM_INTERVAL_S = 45
+        const val MAX_CONTEXT = 65_536
+        const val MAX_BENCHMARK_HISTORY = 10
 
         fun isLoopbackBind(value: String): Boolean {
             val v = value.trim()
@@ -226,5 +277,8 @@ class Settings(context: Context) {
         private const val KEY_KEEP_WARM = "keep_warm"
         private const val KEY_KEEP_WARM_INTERVAL = "keep_warm_interval_s"
         private const val KEY_LOAD_MODE = "load_mode"
+        private const val KEY_TUNED_BY_USER = "tuned_by_user"
+        private const val KEY_AUTO_CONFIG_DONE = "auto_config_done"
+        private const val KEY_BENCHMARK_HISTORY = "benchmark_history"
     }
 }

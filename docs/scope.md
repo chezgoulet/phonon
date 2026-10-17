@@ -40,21 +40,38 @@ behaviour; no amount of ROM stripping fixes it.
 
 ## Hardware tiers
 
+The app reads `ActivityManager.MemoryInfo.totalMem` and applies these defaults
+on first start, unless the operator has saved settings from the Settings screen
+(`tuned_by_user`). The settings are model, context and threads; one slot is
+fixed.
+
+| RAM tier | Default model | Context | Threads | Status |
+|---|---|---|---|---|
+| ≤ 9 GB (8 GB class; Pixel 7 reports 7.83 GB) | Qwen3.5-2B Q4_K_M | 32768 | 4 | **Measured** 2026-10-17, Pixel 7 |
+| 9–13 GB (12 GB class) | Qwen3.5-4B Q4_K_M | 32768 | 6 | **Unmeasured** |
+| ≥ 13 GB (16 GB class) | Qwen3.5-8B Q4_K_M | 49152 | 8 | **Unmeasured** |
+
+The 8 GB tier deliberately uses 2B, not 4B. On the Pixel 7, 4B measured roughly
+**2–3 tok/s and sat at the memory limit**, while 2B measured **4–6 tok/s at 32K**
+in earlier runs (`docs/model-tiers.md`, measured 2026-10-17). The app's own
+benchmark later that day measured 5.92 tok/s cold and 7.01 tok/s warm at 32K
+with 4 threads
+(`docs/benchmark.md`). The 12 GB and 16 GB rows are **unmeasured**: no 12 GB or
+16 GB device has run this build. Those defaults follow the table, not evidence.
+
 Two reference devices, chosen for RAM-tier and thermal diversity:
 
-| Device | SoC | RAM | Realistic ceiling |
-|---|---|---|---|
-| Pixel 7 | Tensor G2 | 8 GB | Qwen3.5-4B Q4_K_M, 32K context |
-| Pixel 9 | Tensor G3 | 12 GB | Qwen3.5-8B Q4, 48–64K context |
+| Device | SoC | RAM | Tier | Status |
+|---|---|---|---|---|
+| Pixel 7 | Tensor G2 | 8 GB | S | measured, 2B / 32K / 4 threads |
+| Pixel 9 | Tensor G3 | 12 GB | M | tier M unmeasured |
 
 The Pixel 9 is the better long-term reference: Pixel 7 security support ends
 October 2027, Pixel 9 runs to roughly 2030. State this plainly so early adopters
 buy the right hardware.
 
-The app must **auto-detect the RAM tier** and select model, quantization,
-context size and parallel slots accordingly. Our two devices exercise that logic
-before any community member touches it, and it is the single highest-leverage
-feature for adoption.
+Our two devices exercise the detection logic before any community member touches
+it, and it is the single highest-leverage feature for adoption.
 
 ## Provisioning (no root)
 
@@ -116,11 +133,14 @@ obligations — keep it that way by recording every dependency's origin in
 
 ## Features required before community arrival
 
-- Hardware detection + auto-config (RAM tier → model/quant/context/parallel)
-- Benchmark mode: N tokens, t/s, thermal state, peak RAM — becomes the
-  crowd-sourced compatibility matrix
-- One-button device report export: SoC, RAM, Android version, llama.cpp build,
-  model hash, template version, benchmark numbers
+- **Done (0.3.0):** hardware detection + auto-config (RAM tier → model, context,
+  threads), with the tier shown on Serve.
+- **Done (0.3.0):** benchmark mode — 128 tokens, prefill/decode, TTFT, thermal
+  state, peak RSS, cold/warm. See [`benchmark.md`](benchmark.md).
+- **Partial (0.3.0):** one-button device report — SoC, RAM, Android version,
+  model hash, settings and benchmark numbers. The llama.cpp build hash and
+  template version are not yet in the report; see
+  [`device-report.md`](device-report.md).
 - Template/version pinning surfaced in the UI, so "tool calls broke" reports can
   be triaged immediately
 
