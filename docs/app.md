@@ -7,19 +7,22 @@ SDK 37, arm64-v8a, unrooted. No other device was used.
 
 ## Status, honestly
 
-Implemented and demonstrated on the Pixel 7: native packaging, install,
-model download with size verification, foreground service, readiness,
-OpenAI-compatible completions and tool calls through the app's single port.
+Implemented and demonstrated on the Pixel 7: native packaging, install, model
+download with size verification, foreground service, readiness, OpenAI-compatible
+completions and tool calls, kill/restart supervision, and thermal pause/resume.
+**All eight acceptance items have now been observed on the device.**
 
-**Not demonstrated: acceptance items 7 (kill/restart) and 8 (thermal pause).**
-During the run the phone was rebooted to clear memory pressure. It came back
-to a secure lock screen and the owner's credential is not available to this
-session, so the app cannot start (Android does not start non-direct-boot apps
-or mount credential-encrypted app storage before first unlock). The exact
-blocker and the commands are recorded below rather than replaced with a claim
-that was never observed.
+Items 7 and 8 were initially blocked. An earlier attempt rebooted the device to
+clear memory pressure and it returned to the owner lock screen; Android will not
+mount credential-encrypted `filesDir` or deliver `BOOT_COMPLETED` before first
+unlock. They were recorded as not run at the time, and completed after the owner
+unlocked the phone. The blocker and the resolution are both below.
 
-Everything else in this document is captured output from this run.
+On throughput: the first in-app measurements were 5.3 tok/s decode against 11.6
+tok/s from the manual baseline. The cause was memory contention, not the app —
+345 MB free and 1.8 GB of zram in use. After `am kill-all` and force-stopping the
+largest background apps, the same binary with the same settings returned
+10.0–10.7 tok/s. That is a measured attribution, not a hypothesis.
 
 ## Architecture
 
@@ -381,38 +384,98 @@ curl -sS http://127.0.0.1:8080/v1/chat/completions \
 `finish_reason: tool_calls`, name `get_weather`, arguments
 `{"city":"Montreal"}`. This matches the spike.
 
-### 7. kill -9 restart — NOT RUN
+### 7. kill -9 restart — VERIFIED
 
-The planned command was:
-
-```bash
-PID=$(curl -sS http://127.0.0.1:8080/health | python3 -c 'import sys,json;print(json.load(sys.stdin)["pid"])')
-adb -s 2A091FDH200AJ1 shell kill -9 "$PID"
-# poll /health until state=ready, expect < 35 s
-```
-
-It was not executed: the reboot came first, and after the reboot the app
-cannot start while the device is locked. The supervisor code exists
-(`waitForExit` → `restarting` → 1 s backoff, reset to 1 s after a successful
-ready, /proc sweep before launch), but this run has no device evidence for it.
-No number is claimed.
-
-### 8. Thermal pause — NOT RUN
-
-The planned command was:
+Killing the server as the app's own uid (the shell uid cannot signal an app
+process):
 
 ```bash
-curl -sS -X POST http://127.0.0.1:8080/settings \
-  -d '{"thermal_stop_c":20,"thermal_resume_c":10}'
-# wait up to 30 s for state=thermal_pause
-curl -sS -X POST http://127.0.0.1:8080/settings \
-  -d '{"thermal_stop_c":45,"thermal_resume_c":40}'
-# wait for state=ready
+PID=$(curl -s http://127.0.0.1:8080/health | python3 -c 'import sys,json;print(json.load(sys.stdin)["pid"])')
+adb -s 2A091FDH200AJ1 shell "run-as org.phononai.app sh -c \"kill -9 $PID\""
+# poll /health until state=ready AND pid != $PID
 ```
 
-Not executed for the same reason. The policy, hysteresis and settings plumbing
-are implemented; battery temperature was read successfully (`25.3 °C` in
-`/health`), but the pause/resume transition was not observed on this device.
+Observed:
+
+```
+before: pid 14483, restart_count 1
+RECOVERED after 4 s, new pid 14528
+after:  state=ready, uptime_s=2, restart_count=2
+```
+
+Four seconds, because the model's pages were still in the page cache. A cold
+restart will be slower; the supervisor's backoff starts at 1 s.
+
+**Test trap worth recording:** the first attempt polled only for `state=ready`
+and read a response produced before the kill landed, concluding "recovered in
+0 s" with the same pid. The restart check must compare the pid.
+
+### 8. Thermal pause — VERIFIED
+
+```bash
+curl -sS -X POST http://127.0.0.1:8080/settings -d '{"thermal_stop_c":20,"thermal_resume_c":10}'
+curl -sS -X POST http://127.0.0.1:8080/settings -d '{"thermal_stop_c":45,"thermal_resume_c":40}'
+```
+
+Observed, with the battery at 26.9 °C:
+
+```
+set stop=20 resume=10
+PAUSED after ~2 s
+{"state":"thermal_pause","pid":null,"thermal_paused":true,...}
+ps: no llama-server process
+
+restore stop=45 resume=40
+RESUMED after ~5 s
+{"state":"ready","pid":14755,"thermal_paused":false,...}
+```
+
+The stop path killed the server, the state machine reported `thermal_pause`, and
+the restore path restarted it. The hysteresis itself (resume only below
+`thermal_resume_c`) was not exercised because the device never crossed 40 °C;
+the two state transitions were.
+
+### Measured baseline (app, Pixel 7)
+
+Device: stock Pixel 7, Android 17, 7.65 GB visible RAM, unrooted, 26.2 °C.
+
+| Metric | Value | Conditions |
+|---|---|---|
+| prefill | 17.86 tok/s | 34-token prompt |
+| decode | 10.04 tok/s | 119 generated tokens |
+| short decode | 10.67 tok/s | 3 tokens, after freeing memory |
+| first in-app run | 5.32 tok/s | 345 MB free, heavy zram; contention |
+
+The prefill figure rests on a short prompt and should be re-taken with a longer
+one. These are app-path numbers (proxy + server), not raw server numbers.
+
+## The memory cliff
+
+Measured on the same device, same build, same settings:
+
+- **Hot cache** (model pages resident): 10.0–10.7 tok/s decode; an 8-token
+  request does ~1.6 s of generation.
+- **After ~5 minutes idle with the screen off**: the same 8-token request took
+  **41 s of wall time** at the server port and **48 s** through the app port,
+  while the server's own timings still reported 4.8 tok/s over ~1.6 s. The gap
+  is page faults: the kernel evicted the model's file-backed pages and re-reads
+  them from storage on the next request.
+- `-lm mlock` is refused on this device:
+  `failed to mlock 3253485568-byte buffer ... Out of memory. Try increasing
+  RLIMIT_MEMLOCK`. An unprivileged app cannot raise that limit.
+
+So 2.84 GB of weights on a 7.65 GB phone is not merely tight at load; it is
+unstable under Android's reclaim policy. The same binary is fast or unusable
+depending on how recently it ran.
+
+Consequences, in order of preference:
+
+1. On 8 GB phones, run a smaller model (roughly ≤1.5 GB of weights) that stays
+   resident, or keep the large model warm with a periodic tiny generation.
+2. Expose the load mode (`mmap`, `mlock`, `none`) and a keep-warm interval in
+   the app, and report when `mlock` was refused instead of assuming it worked.
+3. A stripped appliance image is a real fix here, not a nicety: more free pages
+   means the model stays resident.
 
 ### Device lock (the blocker)
 
