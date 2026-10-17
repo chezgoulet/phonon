@@ -1,0 +1,24 @@
+# models and downloads
+*.gguf
+*.litertlm
+models/
+downloads/
+
+# runtime state
+logs/
+results.jsonl
+.runner.lock
+phone-bench.csv
+
+# secrets
+.env
+.env.*
+*.key
+*.pem
+
+# build and editor noise
+__pycache__/
+*.pyc
+.gradle/
+build/
+.DS_Store

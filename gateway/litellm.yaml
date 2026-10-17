@@ -1,0 +1,76 @@
+# LiteLLM gateway for the phone lane.
+#
+# Draft: YAML-valid, but not yet loaded by a running LiteLLM proxy. The
+# `router_settings` keys should be checked against the installed version on the
+# first bring-up — LiteLLM moves fast and some of these have moved between
+# releases.
+#
+# Two naming layers, deliberately:
+#   phone-a / phone-b : pinned, one deployment each. Use these for agent tasks
+#                       so every turn hits the same llama-server KV cache.
+#   gemma-4-e2b       : pooled, both deployments. Use for one-shot calls that
+#                       have no prefix worth preserving.
+#
+# The same endpoint appears twice (pinned and pooled). That is intentional:
+# model_name is the routing group, litellm_params is the deployment.
+
+model_list:
+  # ---- Pixel 7 #1 -------------------------------------------------------
+  - model_name: phone-a
+    litellm_params:
+      model: openai/gemma-4-e2b
+      api_base: http://phone-a.lan:8080/v1
+      api_key: os.environ/PHONE_A_KEY
+      timeout: 1800
+      stream_timeout: 1800
+      max_retries: 0
+
+  - model_name: gemma-4-e2b
+    litellm_params:
+      model: openai/gemma-4-e2b
+      api_base: http://phone-a.lan:8080/v1
+      api_key: os.environ/PHONE_A_KEY
+      timeout: 1800
+      stream_timeout: 1800
+      max_retries: 0
+
+  # ---- Pixel 7 #2 -------------------------------------------------------
+  - model_name: phone-b
+    litellm_params:
+      model: openai/gemma-4-e2b
+      api_base: http://phone-b.lan:8080/v1
+      api_key: os.environ/PHONE_B_KEY
+      timeout: 1800
+      stream_timeout: 1800
+      max_retries: 0
+
+  - model_name: gemma-4-e2b
+    litellm_params:
+      model: openai/gemma-4-e2b
+      api_base: http://phone-b.lan:8080/v1
+      api_key: os.environ/PHONE_B_KEY
+      timeout: 1800
+      stream_timeout: 1800
+      max_retries: 0
+
+router_settings:
+  routing_strategy: simple-shuffle
+  # A phone takes minutes to first token and can spend half an hour on a task.
+  # Cloud-shaped defaults would abort healthy requests and cool the phone down.
+  timeout: 1800
+  num_retries: 0
+  allowed_fails: 5
+  cooldown_time: 60
+
+  # Sticky routing, if the client ever sends a session id
+  # (x-litellm-session-id, or metadata.session_id in the body).
+  # opencode does not send one by default, which is why the runner pins.
+  optional_pre_call_checks: ["session_affinity"]
+  deployment_affinity_ttl_seconds: 3600
+
+litellm_settings:
+  # Do not let the proxy's background health checks probe models with
+  # completions: a phone busy generating will look dead. Point health checks at
+  # the llama-server /health route instead, and keep them cheap.
+  request_timeout: 1800
+  drop_params: true
