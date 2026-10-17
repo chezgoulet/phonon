@@ -11,9 +11,10 @@
     <application
         android:allowBackup="false"
         android:extractNativeLibs="true"
-        android:label="Phonon Probe"
+        android:label="Phonon"
         android:supportsRtl="true"
-        android:theme="@android:style/Theme.Material.Light">
+        android:theme="@android:style/Theme.Material.Light"
+        android:usesCleartextTraffic="true">
 
         <activity
             android:name=".MainActivity"
@@ -30,7 +31,7 @@
             android:foregroundServiceType="specialUse">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="Runs a bundled ELF probe and serves a loopback health endpoint for the exec spike" />
+                android:value="Runs the owner's local llama.cpp inference server and its loopback API; one phone, one model" />
         </service>
 
         <receiver
