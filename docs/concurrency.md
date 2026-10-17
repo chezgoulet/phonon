@@ -39,3 +39,24 @@ immediately after gets `http=000` and is lost — the request races the restart.
 Set the key, wait for `ready`, then set the bind address. Worth fixing in the
 app: control requests should either wait for the new listener or return `503`
 with a retry hint rather than dropping the connection.
+
+## Two agent tasks at once
+
+The point of the pool: asynchronous work, one task per phone.
+
+Two `opencode2` runs were started in the same second, one against
+`litellm/phone-a` and one against `litellm/phone-b`, each asked to create a file
+containing a unique marker in its own scratch directory.
+
+| Task | Wall | Exit | File |
+|---|---|---|---|
+| phone-a | **209 s** | 0 | `PHONE_A_DONE` |
+| phone-b | **173 s** | 0 | `PHONE_B_DONE` |
+
+Both started at epoch `1792273375`; they finished at `1792273584` and
+`1792273548`. The pair took 209 s end to end, not 382 s — the two agent loops
+ran in parallel on separate phones, with LiteLLM as the only shared component.
+
+Each task is dominated by prompt prefill: opencode's trimmed agent prompt is
+about 3,000 tokens at roughly 20 tok/s. That is the number to attack next if
+turnaround matters; it is not a decode problem.
