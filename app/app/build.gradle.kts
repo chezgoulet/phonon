@@ -35,6 +35,11 @@ android {
 
     buildFeatures {
         buildConfig = true
+        compose = true
+    }
+
+    composeOptions {
+        kotlinCompilerExtensionVersion = "1.5.14"
     }
 
     compileOptions {
@@ -54,6 +59,16 @@ android {
             useLegacyPackaging = true
         }
     }
+}
+
+dependencies {
+    implementation(platform("androidx.compose:compose-bom:2024.09.03"))
+    implementation("androidx.activity:activity-compose:1.9.2")
+    implementation("androidx.compose.ui:ui")
+    implementation("androidx.compose.ui:ui-graphics")
+    implementation("androidx.compose.foundation:foundation")
+    implementation("androidx.compose.material3:material3")
+    debugImplementation("androidx.compose.ui:ui-tooling")
 }
 
 // The fadvise shim is a debug-only test instrument. Keep it out of release
