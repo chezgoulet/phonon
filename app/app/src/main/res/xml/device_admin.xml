@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<device-admin xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-policies>
+        <!-- Kiosk / appliance mode: stable boot path and no in-field reset. -->
+        <force-lock />
+        <wipe-data />
+        <expire-password />
+        <reset-password />
+    </uses-policies>
+</device-admin>

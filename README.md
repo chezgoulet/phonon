@@ -84,7 +84,8 @@ unlocking bootloaders or breaking verified boot. See
 1. **App (now).** Compose UI, the Vox avatar as the state indicator, hardware
    detection and auto-config, benchmark mode, device report export.
 2. **Kiosk deployment.** Device Owner, Lock Task Mode, battery exemption, plus
-   provisioning docs and QR provisioning for bulk.
+   provisioning docs and QR provisioning for bulk — see
+   [`docs/kiosk.md`](docs/kiosk.md).
 3. **Distribution.** Obtainium now; F-Droid main repo once reproducible builds
    and the metadata are ready. One signing key for both.
 4. **Sustained-load tuning.** Per-device thermal profiles (burst vs sustained).
