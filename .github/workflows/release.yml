@@ -1,6 +1,3 @@
-# NOTE: kept outside .github/workflows because the current PAT lacks the
-# GitHub workflow scope. Move this file to .github/workflows/release.yml
-# with a token that has that scope.
 # Draft GitHub Actions release workflow for Phonon.
 # Target path in the repo: .github/workflows/release.yml
 #
