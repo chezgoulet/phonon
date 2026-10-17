@@ -57,6 +57,7 @@ app/app/src/main/java/org/phononai/app/
 ├── PhononService.kt      foreground service, wake lock, thermal policy, download orchestration
 ├── ServerManager.kt      exec, readiness, supervision, exponential backoff, ring buffer
 ├── KeepWarm.kt           idle keepalive beats + client request tracking
+├── DebugEvict.kt         debug-only JNI posix_fadvise shim for POST /debug/evict
 ├── ApiServer.kt          loopback HTTP server and raw /v1 proxy
 ├── ModelDownloader.kt    HTTP Range resume, .part, Content-Length verification
 ├── ThermalMonitor.kt     BatteryManager temperature every 30 s
@@ -149,6 +150,7 @@ service destroy does the same sweep.
 | POST | `/server/start`, `/server/stop` | control |
 | GET | `/settings` | current settings (API key shown only as `api_key_set`) |
 | POST | `/settings` | partial update; validates thresholds and ports |
+| POST | `/debug/evict` | debug builds only, test instrument: ask the kernel to drop the model file's clean page cache; 404 in release |
 | GET | `/logs` | ring buffer, text/plain |
 | * | `/v1/*` | raw HTTP proxy to `127.0.0.1:8081` |
 
@@ -606,9 +608,169 @@ benefit is plausible, and proving it requires a controlled memory-pressure test
 default stays `true` because the cost is one token every 45 s, not because the
 benefit has been measured.
 
+### Deterministic eviction test — instrument failed (2026-10-17)
+
+The follow-up tried to remove the pressure variable: evict the model directly
+with `POST /debug/evict`, then compare keep-warm off/on. The endpoint exists and
+works, but it cannot evict the weights of a running server: Linux's
+`POSIX_FADV_DONTNEED` skips pages that another process has mapped. Arm A is
+therefore fast, and arms B–D were not run.
+
+**Conditions.** Pixel 7, serial `2A091FDH200AJ1`, same model and server
+configuration as above, battery at 24.2 °C, `load_mode=mmap`. The device reported
+`deviceLocked=1` / keyguard showing throughout; the already-running app,
+`run-as`, the API port and `/proc` access all stayed usable, so this did not
+block the measurements. No lock credential was touched. The screen-off state
+matches the condition of the original 41 s cold case.
+
+#### Instrument and debug-only proof
+
+`POST /debug/evict` opens `Settings.modelPath` read-only and calls
+`posix_fadvise(fd, 0, 0, POSIX_FADV_DONTNEED)`. Two implementation details:
+
+- `android.system.Os` has no `posixFadvise` in the public SDK stubs (34, 35, 36
+  and 37); the only `posix_*` function `Os` exposes is `posix_fallocate`. The
+  device's `framework.jar` (Android 17) contains no `fadv` symbol either. The
+  call is therefore made through a small JNI shim,
+  `app/app/src/main/cpp/fadvise.c`, which opens the path `O_RDONLY` and calls
+  libc `posix_fadvise` with the same arguments. The endpoint behaviour is the
+  one specified; only the language binding differs.
+- The route is guarded by `BuildConfig.DEBUG`. A release APK signed with the
+  debug key and installed on the same device returned:
+
+```
+$ curl -i -X POST http://127.0.0.1:8080/debug/evict
+HTTP/1.1 404 Not Found
+Content-Type: application/json; charset=utf-8
+Content-Length: 21
+
+{"error":"not found"}
+```
+
+The native shim is also excluded from release packaging (`assembleRelease`
+contains no `libphonon-fadvise.so`).
+
+Debug response:
+
+```json
+{"evicted":true,"path":"/data/user/0/org.phononai.app/files/models/gemma-4-E2B-it-Q4_0.gguf","bytes":2841481184}
+```
+
+`"evicted":true` means the kernel accepted the advice (errno 0). It does **not**
+mean the model's pages were dropped; the measurements below show they were not.
+
+#### The same call works when the file is unmapped
+
+Stopping the server unmaps the model. The identical endpoint then drops 2.66 GiB
+of clean page cache, which proves the syscall and the endpoint are sound and
+isolates the live mapping as the cause:
+
+| State | `MemFree` kB | `MemAvailable` kB | `Cached` kB |
+|---|---:|---:|---:|
+| server ready | 573,880 | 4,285,492 | 4,409,144 |
+| server stopped | 719,932 | 4,431,568 | 4,409,156 |
+| after `POST /debug/evict` | 3,574,668 | 4,493,832 | 1,617,556 |
+| after restart, `ready` | 673,224 | 4,368,244 | 4,393,608 |
+
+`Cached` fell by 2,791,600 kB after the eviction. Restarting refilled it before
+readiness: llama.cpp maps with `MAP_POPULATE` when prefetch is enabled, so the
+first 8-token request after this cold-cache restart was still fast — 2.875 s,
+`predicted_per_second` 5.2865, `prompt_per_second` 7.8873, `predicted_n` 8,
+`prompt_n` 12. A restart is not a substitute for eviction.
+
+#### Arm A — eviction while the server is running
+
+`keep_warm=false`, `POST /debug/evict`, wait 3 s, one 8-token completion.
+
+```bash
+PID=$(curl -s http://127.0.0.1:8080/health | python3 -c 'import sys,json;print(json.load(sys.stdin)["pid"])')
+adb -s 2A091FDH200AJ1 shell "run-as org.phononai.app cat /proc/$PID/status" | grep -E 'VmRSS|RssFile'
+curl -sS -X POST http://127.0.0.1:8080/debug/evict
+sleep 3
+adb -s 2A091FDH200AJ1 shell "run-as org.phononai.app cat /proc/$PID/status" | grep -E 'VmRSS|RssFile'
+curl -sS -o /tmp/a.json -w 'wall=%{time_total}\n' http://127.0.0.1:8080/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"gemma-4-e2b","messages":[{"role":"user","content":"Say hello."}],
+       "max_tokens":8,"temperature":0,"stream":false}'
+```
+
+| Measure | Before evict | After evict, before request | After request |
+|---|---:|---:|---:|
+| `VmRSS` kB | 2,912,532 | 2,912,532 | 2,913,764 |
+| `RssFile` kB | 2,773,032 | 2,773,032 | 2,773,048 |
+| model mapping `Rss` kB | 2,759,440 | 2,759,440 | 2,759,440 |
+
+Wall 2.726 s; `predicted_per_second` 5.2821; `prompt_per_second` 7.9704;
+`predicted_n` 8; `prompt_n` 11. A repeat gave 2.008 s,
+`predicted_per_second` 5.3641, `prompt_per_second` 7.2843, with `VmRSS`
+2,913,764 kB unchanged across the eviction and the mapping `Rss` still
+2,759,440 kB.
+
+The mapping covers 2,759,440 kB = 2,825,666,560 bytes of the 2,841,481,184-byte
+file, so at most the ~15.1 MiB outside the mapping could have been dropped. All
+weight pages are mapped and resident.
+
+#### Why the live eviction cannot work
+
+`posix_fadvise(POSIX_FADV_DONTNEED)` ends in `invalidate_mapping_pages()`, which
+skips folios with `folio_mapped` set. The server's `mmap` keeps the file in its
+page tables, and llama.cpp does not unmap it between requests. Reproduced on
+the host, ext4: a child mapped and touched a 256 MiB file, the parent called
+`posix_fadvise(DONTNEED)`, and the child's `VmRSS` stayed at 263,076 kB.
+
+Cross-process alternatives are also blocked on this device (kernel
+6.1.162-android14): `process_madvise(MADV_DONTNEED)` returns `EINVAL` and
+`process_madvise(MADV_PAGEOUT)` returns `EPERM` (needs `CAP_SYS_NICE`). An
+unprivileged app has no way to evict another process's live mapping without
+touching that mapping or creating global memory pressure.
+
+#### Arms B–D — not run
+
+Per the brief, the sequence stops when A is fast. B (keep-warm on, 15 s
+interval, evict, wait 20 s), C (keep-warm off, evict, wait 45 s) and D (repeat
+A) were **not run**. Running them would request pages that were never evicted;
+a fast result would say nothing about keep-warm, and recording one as if it did
+would be a false positive.
+
+The commands, if a valid eviction is ever available:
+
+```bash
+# B
+curl -sS -X POST http://127.0.0.1:8080/settings \
+  -H 'Content-Type: application/json' -d '{"keep_warm":true,"keep_warm_interval_s":15}'
+curl -sS -X POST http://127.0.0.1:8080/debug/evict; sleep 20
+# then the same 8-token request and VmRSS capture as A
+
+# C
+curl -sS -X POST http://127.0.0.1:8080/settings \
+  -H 'Content-Type: application/json' -d '{"keep_warm":false}'
+curl -sS -X POST http://127.0.0.1:8080/debug/evict; sleep 45
+
+# D: repeat A twice
+```
+
+#### Answer and verdict
+
+**Does keep-warm measurably keep the model resident after eviction?** No
+measurement is possible with this instrument: the eviction never happened. The
+feature's benefit remains unproven — not disproven.
+
+**Verdict: keep-with-caveat.** Keep the code and the setting, but withdraw any
+claim that the benefit has been measured, and do not cite arm A as evidence
+either way. The cost is real and measured: a discarded one-token completion
+took 1.37 s on this device, which is ~3 % duty cycle at the 45 s default and
+~9 % at the 15 s setting used in the experiment. If the product must decide
+without a valid eviction test, delete the feature: unproven benefit plus a
+real CPU and thermal cost is not a good default. A valid test needs global
+memory pressure or a way to drop the server's live mapping (for example an
+in-process `madvise` hook); neither was available here.
+
 ## What is not verified
 
 
+- Whether keep-warm keeps the model resident under real eviction. The
+  deterministic eviction instrument was a no-op against the live mmap (see
+  "Deterministic eviction test" above); arms B–D were not run.
 - Kill/restart timing (item 7) and thermal pause/resume (item 8).
 - Boot start on this Pixel: the receiver is in the manifest and the spike
   verified boot start on the emulator, but this run could not observe it after
