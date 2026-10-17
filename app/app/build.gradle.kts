@@ -4,15 +4,15 @@ plugins {
 }
 
 android {
-    namespace = "dev.phonon.spike"
+    namespace = "org.phononai.app"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "dev.phonon.spike"
+        applicationId = "org.phononai.app"
         minSdk = 31
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1"
+        versionCode = 2
+        versionName = "0.2.0"
     }
 
     buildTypes {
@@ -30,10 +30,9 @@ android {
         jvmTarget = "17"
     }
 
-    // Keep the probe as a real file in nativeLibraryDir. Without legacy
-    // packaging AGP stores uncompressed libs in the APK and the linker loads
-    // them in place; the spike needs the extracted-file path llama-server
-    // would use.
+    // jniLibs must be extracted as real files: llama-server is exec'd from
+    // nativeLibraryDir, and its sibling .so files are found via
+    // LD_LIBRARY_PATH pointing at the same directory.
     packaging {
         jniLibs {
             useLegacyPackaging = true

@@ -1,6 +1,8 @@
 # Architecture
 
-Status: agreed direction, nothing built beyond the host tooling.
+Status: app v0 is built and was exercised on a Pixel 7 (completions and a tool
+call); see [`docs/app.md`](app.md). The rest of this document is the agreed
+architecture and its rationale.
 
 ## Three layers
 
