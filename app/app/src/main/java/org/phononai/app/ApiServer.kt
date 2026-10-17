@@ -14,6 +14,7 @@ import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
+import java.security.MessageDigest
 import java.util.concurrent.Executors
 import kotlin.concurrent.thread
 
@@ -23,13 +24,16 @@ interface ApiHandler {
     fun logs(): String
     fun downloadJson(): String
     fun startDownload(url: String?): String
-    fun startServer()
+    fun startServer(): String
     fun stopServer()
     fun settingsJson(): String
     fun updateSettings(body: String): String
     fun recordResponseBody(body: String)
     fun requestStarted()
     fun requestFinished()
+
+    /** The bind-time invariant failed; refuse to listen and report it. */
+    fun refuseUnsafeExposure(message: String)
 }
 
 /**
@@ -45,6 +49,7 @@ interface ApiHandler {
 class ApiServer(
     private val settings: Settings,
     private val api: ApiHandler,
+    private val bindAddress: String,
 ) {
     @Volatile private var running = false
     @Volatile private var serverSocket: ServerSocket? = null
@@ -61,9 +66,25 @@ class ApiServer(
                 try {
                     val ss = ServerSocket()
                     ss.reuseAddress = true
-                    ss.bind(InetSocketAddress(InetAddress.getByName("127.0.0.1"), settings.port))
+                    // Assert the invariant at the last possible moment, and
+                    // hold the settings lock across check+bind so a concurrent
+                    // key change cannot race the listener onto the LAN. The
+                    // socket is not bound before this check passes.
+                    synchronized(settings.configLock) {
+                        if (!Settings.isLoopbackBind(bindAddress) && settings.apiKey.isBlank()) {
+                            running = false
+                            val message = "bind_address requires api_key"
+                            Log.e(
+                                TAG,
+                                "refusing to bind $bindAddress:${settings.port}: $message",
+                            )
+                            api.refuseUnsafeExposure(message)
+                            return@thread
+                        }
+                        ss.bind(InetSocketAddress(InetAddress.getByName(bindAddress), settings.port))
+                    }
                     serverSocket = ss
-                    Log.i(TAG, "API listening on 127.0.0.1:${settings.port}")
+                    Log.i(TAG, "API listening on $bindAddress:${settings.port}")
                     while (running && !ss.isClosed) {
                         val client = try {
                             ss.accept()
@@ -74,7 +95,7 @@ class ApiServer(
                         clients.execute { handle(client) }
                     }
                 } catch (t: Throwable) {
-                    if (running) Log.e(TAG, "could not bind 127.0.0.1:${settings.port}: ${t.message}")
+                    if (running) Log.e(TAG, "could not bind $bindAddress:${settings.port}: ${t.message}")
                 }
                 if (running) {
                     try {
@@ -114,6 +135,17 @@ class ApiServer(
     }
 
     private fun route(req: Request, out: OutputStream) {
+        // /health stays unauthenticated so a liveness probe works without the
+        // key. Everything else on the operator port requires the key when one
+        // is configured. With no key and loopback binding this is unchanged.
+        if (req.path != "/health" && !authorized(req)) {
+            respond(
+                out, 401, "application/json; charset=utf-8",
+                """{"error":"unauthorized"}""".toByteArray(),
+                mapOf("WWW-Authenticate" to "Bearer"),
+            )
+            return
+        }
         when {
             req.method == "GET" && req.path == "/health" -> {
                 val body = api.healthJson()
@@ -146,8 +178,9 @@ class ApiServer(
             }
 
             req.method == "POST" && req.path == "/server/start" -> {
-                api.startServer()
-                respond(out, 202, "application/json", """{"accepted":true}""".toByteArray())
+                val result = api.startServer()
+                val status = if (result.contains("\"error\"")) 409 else 202
+                respond(out, status, "application/json; charset=utf-8", result.toByteArray())
             }
 
             req.method == "POST" && req.path == "/server/stop" -> {
@@ -197,6 +230,19 @@ class ApiServer(
         }
     }
 
+    private fun authorized(req: Request): Boolean {
+        val key = settings.apiKey
+        if (key.isBlank()) return true
+        val header = req.headers["authorization"] ?: return false
+        if (!header.startsWith("Bearer ", ignoreCase = true)) return false
+        val presented = header.substring(7).trim()
+        if (presented.isEmpty()) return false
+        return MessageDigest.isEqual(
+            presented.toByteArray(Charsets.UTF_8),
+            key.toByteArray(Charsets.UTF_8),
+        )
+    }
+
     /**
      * Test instrument for the keep-warm experiment: ask the kernel to drop the
      * clean, file-backed pages of the model the server is using.
@@ -230,14 +276,15 @@ class ApiServer(
     private fun proxy(req: Request, out: OutputStream) {
         val socket = Socket()
         var wroteHeaders = false
+        val backendHost = settings.backendHost()
         try {
             try {
-                socket.connect(InetSocketAddress(InetAddress.getByName("127.0.0.1"), settings.backendPort), 3_000)
+                socket.connect(InetSocketAddress(InetAddress.getByName(backendHost), settings.backendPort), 3_000)
             } catch (t: Throwable) {
                 respond(
                     out, 502, "application/json; charset=utf-8",
-                    ("""{"error":"cannot reach llama-server on 127.0.0.1:""" +
-                        settings.backendPort + """"}""").toByteArray(),
+                    ("""{"error":"cannot reach llama-server on """ +
+                        backendHost + ":" + settings.backendPort + """"}""").toByteArray(),
                 )
                 return
             }
@@ -252,7 +299,7 @@ class ApiServer(
                 if (k in HOP_BY_HOP) continue
                 headers[k] = v
             }
-            headers["host"] = "127.0.0.1:${settings.backendPort}"
+            headers["host"] = "$backendHost:${settings.backendPort}"
             headers["connection"] = "close"
             headers["content-length"] = req.body.size.toString()
             if (settings.apiKey.isNotBlank() && !req.headers.containsKey("authorization")) {
@@ -485,11 +532,18 @@ class ApiServer(
         }
     }
 
-    private fun respond(out: OutputStream, status: Int, contentType: String, body: ByteArray) {
+    private fun respond(
+        out: OutputStream,
+        status: Int,
+        contentType: String,
+        body: ByteArray,
+        extraHeaders: Map<String, String> = emptyMap(),
+    ) {
         val head = buildString {
             append("HTTP/1.1 ").append(status).append(' ').append(reason(status)).append("\r\n")
             append("Content-Type: ").append(contentType).append("\r\n")
             append("Content-Length: ").append(body.size).append("\r\n")
+            for ((k, v) in extraHeaders) append(k).append(": ").append(v).append("\r\n")
             append("Cache-Control: no-store\r\n")
             append("Connection: close\r\n\r\n")
         }
@@ -502,6 +556,7 @@ class ApiServer(
         200 -> "OK"
         202 -> "Accepted"
         400 -> "Bad Request"
+        401 -> "Unauthorized"
         404 -> "Not Found"
         409 -> "Conflict"
         500 -> "Internal Server Error"
