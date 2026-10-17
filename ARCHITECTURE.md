@@ -60,23 +60,22 @@ Consequences: one file per task, no repository exploration, and a fresh session
 per task. The agent searches through bash because `glob` and `grep` schemas cost
 more context than they are worth at this size.
 
-## Decision 4: the app is the first product; the ROM is the fifth
+## Decision 4: the app is the product; kiosk mode replaces the ROM
 
-Sequence: measure, gateway, app, appliance module, ROM.
+Phonon ships as an Android app under Apache 2.0, run as a Device Owner in Lock
+Task (kiosk) mode. The stripped-GrapheneOS ROM is on the back burner
+indefinitely.
 
-**Resolved 2026-10-17.** The app spike proved that a bundled ELF can be
-executed from `nativeLibraryDir` on both an x86_64 emulator and a stock Pixel 7
-(arm64): exit 0, correct ABI, argv0 inside the app's native library directory.
-The app therefore wraps a packaged `llama-server` and supervises it; it does not
-embed llama.cpp through JNI. See [`docs/app-spike.md`](docs/app-spike.md).
+Kiosk mode provides what the ROM was for: no competing apps, no OS interference
+with the server process, battery-optimisation exemption, and a pinned foreground
+app. It does that without bootloader unlocks, AVB signing, vendor blobs or a
+per-device porting treadmill — and community contributors can work on an app and
+docs, not device trees.
 
-A full AOSP port is a multi-quarter project with a security-update treadmill.
-Forking GrapheneOS is the right call if a ROM is needed, and it must be renamed
-and signed with the project's own keys. But the wake-lock problem that motivates
-a ROM is already solved by a foreground service. What a ROM actually buys is
-charge control, CPU and thermal policy, and the removal of background services.
-Those should be reached by a configuration/kernel module on top of GrapheneOS
-first, and measured before a fork is justified.
+One hardware constraint is not solved by policy: on Mali GPUs the Vulkan backend
+parks when the app is backgrounded or the screen turns off, and inference
+crashes. The app therefore holds a screen-on wake lock while serving; kiosk apps
+stay visible by design. Screen-off serving falls back to CPU.
 
 ## Decision 5: battery health is an OS job
 

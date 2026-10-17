@@ -76,14 +76,24 @@ measured numbers produced by the repository's own script. See
 
 ## Roadmap
 
-1. **Measure** both Pixel 7s: prefill, decode, with and without the MTP drafter.
-2. **Gateway**: LiteLLM with two pinned phones plus one pooled alias.
-3. **App**: foreground service wrapping llama.cpp; the first decision is whether
-   a bundled `llama-server` binary can be executed from the app's native library
-   directory.
-4. **Appliance image**: GrapheneOS plus a configuration/kernel module.
-5. **ROM**: a fork of GrapheneOS, renamed and signed by this project, only if the
-   module cannot reach the parts that matter.
+The app is the product. The stripped-ROM idea is on the back burner: Device Owner
+kiosk mode delivers the same operational discipline through policy, without
+unlocking bootloaders or breaking verified boot. See
+[`docs/scope.md`](docs/scope.md) for the decision and its consequences.
+
+1. **App (now).** Compose UI, the Vox avatar as the state indicator, hardware
+   detection and auto-config, benchmark mode, device report export.
+2. **Kiosk deployment.** Device Owner, Lock Task Mode, battery exemption, plus
+   provisioning docs and QR provisioning for bulk.
+3. **Distribution.** Obtainium now; F-Droid main repo once reproducible builds
+   and the metadata are ready. One signing key for both.
+4. **Sustained-load tuning.** Per-device thermal profiles (burst vs sustained).
+5. **Optional, later.** A stripped GrapheneOS image as a reference
+   implementation — never a prerequisite for shipping.
+
+Hard constraints that shape the app: Mali GPUs park when the app is backgrounded
+or the screen turns off, so the app holds a screen-on wake lock while serving.
+CPU-only is the fallback when the screen must be off.
 
 ## License
 
