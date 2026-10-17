@@ -13,13 +13,13 @@ mtp: true
 status: candidate
 units: 2
 measured:
-  prefill_tps: null
-  decode_tps: null
+  prefill_tps: 17.86        # 34-token prompt, model resident
+  decode_tps: 10.04         # 119 generated tokens, model resident
   ttft_s: null
-  after_5min_tps: null
+  after_5min_tps: null      # not claimed: page eviction breaks sustained runs
   after_15min_tps: null
   peak_mem_mb: null
-  battery_temp_c: null
+  battery_temp_c: 26.2
 notes: >-
   Owner's hardware; two units. No measurements taken yet. Known constraints:
   8 GB RAM shared with Android, so a 3 GB model plus KV cache is at the edge;
@@ -27,3 +27,9 @@ notes: >-
   required for sustained load. One unit inspected 2026-10-17: stock Android 17
   (SDK 37), user/release-keys, unrooted, 7.65 GB visible RAM, battery at 80%
   and 24.2 C. Exec probe ran on this unit (see docs/app-spike.md).
+
+  App measured 2026-10-17 (docs/app.md): 10.04 tok/s decode / 17.86 prefill with
+  the model resident; 5.3 under memory contention. After ~5 min idle the kernel
+  evicted the model pages and an 8-token request took 41 s of wall time; mlock
+  is refused (RLIMIT_MEMLOCK). 2.84 GB of weights on this 7.65 GB device is
+  unstable under Android reclaim. Sustained numbers are not claimed.
