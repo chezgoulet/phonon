@@ -398,3 +398,36 @@ curl -sS -i http://<phone-ip>:8080/v1/models   # expect 401
 Also confirm with `ss -ltn` on the phone that the requested address, and only
 the requested address, is bound, and that `llama-server --host` matches it in
 `/logs`.
+
+## Off-host verification (2026-10-17, GrapheneOS Pixel 7)
+
+Device: Pixel 7, GrapheneOS user build, Wi-Fi on VLAN 10, address
+`10.0.10.195/24`, app installed from this branch.
+
+Steps and results:
+
+1. Set `api_key` over the USB-forwarded loopback port → 200.
+2. Set `bind_address=0.0.0.0` **with the bearer token** → 200; `bind_address`
+   persisted as `0.0.0.0`; listeners became `*:8080` (operator) and
+   `0.0.0.0:8081` (llama-server).
+3. From sasquatch over the LAN:
+   - `GET /health` → **200**;
+   - `GET /v1/models` without a key → **401**;
+   - `GET /v1/models` with the key → **200**;
+   - a completion returned `Hello!` at **14.36 tok/s decode** in 1.19 s.
+4. LiteLLM deployment `phone-b` pointed at `http://10.0.10.195:8080/v1` with the
+   key; `GET /v1/models` through the gateway lists `phone-a` and `phone-b`, and a
+   completion for `phone-b` returned correctly.
+
+### Issue found
+
+Posting the `bind_address` change **without** the bearer token returned
+`http=000` — the connection was closed rather than a `401`. Control endpoints
+should answer `401` so a client can distinguish an auth failure from a dead
+server. Not fixed yet.
+
+### Still unverified
+
+Two phones serving at once. The USB-attached stock Pixel was offline during this
+test (its cable no longer enumerates), so only `phone-b` was reachable. The
+pinned-alias concurrency test needs both devices attached.
