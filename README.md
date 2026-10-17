@@ -13,9 +13,19 @@ survives is the measurement discipline and a small amount of code.
 
 ## Status: pre-alpha
 
-No inference has been run on a phone under this repository's name yet. What is
-here is the structure, the measurement protocol and the host-side tooling. The
-first milestone is a measured number from the owner's two Pixel 7s.
+**2026-10-17 — app v0.** The app in `app/` now packages `llama-server`,
+downloads a GGUF into app storage, supervises the server from a foreground
+service and serves an OpenAI-compatible API on the phone's loopback interface.
+The first on-device completions and a tool call are recorded in
+[`docs/app.md`](docs/app.md). The measured decode rate in that run was
+5.1–5.3 tok/s, below the spike baseline; the cause is not yet established and
+is documented rather than averaged away. Kill/restart and thermal-pause
+acceptance were blocked by the phone locking before they ran; see the same
+document.
+
+This is the first inference run under the repository's name, on one of the two
+Pixel 7s. The remaining milestone is a repeatable measurement on both units,
+with the supervisor and thermal paths exercised.
 
 Nothing in this repository claims a speed that has not been measured on the
 device it applies to. Device files carry `null` until someone runs the script.
