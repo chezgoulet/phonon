@@ -2,7 +2,7 @@ device: Google Pixel 7
 codename: panther
 soc: Google Tensor G2
 ram_gb: 8
-android: null
+android: 17
 rooted: false
 runtime: llama.cpp
 runtime_build: null
@@ -24,4 +24,6 @@ notes: >-
   Owner's hardware; two units. No measurements taken yet. Known constraints:
   8 GB RAM shared with Android, so a 3 GB model plus KV cache is at the edge;
   USB-C hub must provide PD passthrough and gigabit Ethernet; no case, airflow
-  required for sustained load.
+  required for sustained load. One unit inspected 2026-10-17: stock Android 17
+  (SDK 37), user/release-keys, unrooted, 7.65 GB visible RAM, battery at 80%
+  and 24.2 C. Exec probe ran on this unit (see docs/app-spike.md).
