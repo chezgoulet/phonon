@@ -1,0 +1,19 @@
+# Bench configuration: one phone reachable on the host through adb forward.
+# The container runs with --network host, so 127.0.0.1 is the host's loopback.
+model_list:
+  - model_name: phone-a
+    litellm_params:
+      model: openai/qwen3.5-2b
+      api_base: http://127.0.0.1:8080/v1
+      api_key: sk-none          # the phone has no API key configured
+      timeout: 1800
+      stream_timeout: 1800
+      max_retries: 0
+
+router_settings:
+  routing_strategy: simple-shuffle
+  timeout: 1800
+  num_retries: 0
+
+litellm_settings:
+  drop_params: true
