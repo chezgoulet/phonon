@@ -146,6 +146,14 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
     override fun healthJson(): String {
         val json = JSONObject(server.healthJson(thermal.batteryTempC))
         keepWarm.healthFields(json)
+        // Additive activity signal for the UI. Only proxied /v1 client requests
+        // are counted; keep-warm beats bypass RequestTracker.beginClient().
+        json.put("requests_in_flight", requests.inFlightCount)
+        json.put(
+            "last_completion_at",
+            if (requests.lastCompletionAtMs > 0) requests.lastCompletionAtMs else JSONObject.NULL,
+        )
+        json.put("requests_completed", requests.completedCount)
         // A reload between commit and backend restart must not look `ready`
         // just because the previous process is still up.
         if (isRestarting() && json.optString("state") == ServerState.READY.wire) {
@@ -454,6 +462,22 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
     fun uiLogs(): String = logs()
 
     fun uiDownloadJson(): String = downloadJson()
+
+    /**
+     * Activity-only manual override for a thermal pause. Deliberately not an HTTP
+     * route: the operator pressed a button on the phone. The next thermal poll
+     * applies the configured policy again, so a phone that is still too warm
+     * simply pauses once more.
+     */
+    fun uiResumeThermal() {
+        thread(name = "phonon-resume", isDaemon = true) {
+            synchronized(settings.configLock) {
+                configHashAtLaunch = currentConfigHash()
+                server.resumeFromThermal()
+            }
+            updateNotification()
+        }
+    }
 
     // --- internals --------------------------------------------------------
 

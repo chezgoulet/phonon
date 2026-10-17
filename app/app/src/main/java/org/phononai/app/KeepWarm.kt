@@ -16,6 +16,8 @@ class RequestTracker {
     private var inFlight = 0
     private var beatInFlight = false
     private var lastClientAtMs = 0L
+    private var lastCompletedAtMs = 0L
+    private var completions = 0
 
     val inFlightCount: Int
         get() = synchronized(lock) { inFlight }
@@ -23,14 +25,28 @@ class RequestTracker {
     val lastClientRequestAtMs: Long
         get() = synchronized(lock) { lastClientAtMs }
 
-    fun beginClient() = synchronized(lock) {
-        inFlight++
-        lastClientAtMs = System.currentTimeMillis()
+    /** When the most recent proxied client request finished. Beats never touch it. */
+    val lastCompletionAtMs: Long
+        get() = synchronized(lock) { lastCompletedAtMs }
+
+    val completedCount: Int
+        get() = synchronized(lock) { completions }
+
+    fun beginClient() {
+        synchronized(lock) {
+            inFlight++
+            lastClientAtMs = System.currentTimeMillis()
+        }
     }
 
-    fun endClient() = synchronized(lock) {
-        if (inFlight > 0) inFlight--
-        lastClientAtMs = System.currentTimeMillis()
+    fun endClient() {
+        synchronized(lock) {
+            if (inFlight > 0) inFlight--
+            val now = System.currentTimeMillis()
+            lastClientAtMs = now
+            lastCompletedAtMs = now
+            completions++
+        }
     }
 
     /**
