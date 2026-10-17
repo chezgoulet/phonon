@@ -29,6 +29,8 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
     private lateinit var settings: Settings
     private lateinit var server: ServerManager
     private lateinit var thermal: ThermalMonitor
+    private lateinit var keepWarm: KeepWarm
+    private val requests = RequestTracker()
     private val mainHandler = Handler(Looper.getMainLooper())
 
     @Volatile private var api: ApiServer? = null
@@ -50,6 +52,9 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
 
         thermal = ThermalMonitor(this) { temp -> onBatteryTemp(temp) }
         thermal.start()
+
+        keepWarm = KeepWarm(settings, server, requests)
+        keepWarm.start()
 
         startApi()
 
@@ -94,6 +99,7 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
         api?.stop()
         api = null
         thermal.stop()
+        keepWarm.stop()
         server.shutdown()
         wakeLock?.let { if (it.isHeld) it.release() }
         wakeLock = null
@@ -108,7 +114,11 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
 
     // --- ApiHandler -------------------------------------------------------
 
-    override fun healthJson(): String = server.healthJson(thermal.batteryTempC)
+    override fun healthJson(): String {
+        val json = JSONObject(server.healthJson(thermal.batteryTempC))
+        keepWarm.healthFields(json)
+        return json.toString()
+    }
 
     override fun isReady(): Boolean = server.state == ServerState.READY
 
@@ -215,6 +225,23 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
                 }
                 settings.downloadUrl = value
             }
+            if (json.has("keep_warm")) {
+                settings.keepWarm = json.optBoolean("keep_warm", settings.keepWarm)
+            }
+            if (json.has("keep_warm_interval_s")) {
+                val value = json.optInt("keep_warm_interval_s", settings.keepWarmIntervalS)
+                if (value < Settings.MIN_KEEP_WARM_INTERVAL_S) {
+                    return error("keep_warm_interval_s must be >= ${Settings.MIN_KEEP_WARM_INTERVAL_S}")
+                }
+                settings.keepWarmIntervalS = value
+            }
+            if (json.has("load_mode")) {
+                val value = json.optString("load_mode").trim().lowercase()
+                if (value !in Settings.LOAD_MODES) {
+                    return error("load_mode must be one of ${Settings.LOAD_MODES.joinToString()}")
+                }
+                settings.loadMode = value
+            }
             val stop = if (json.has("thermal_stop_c")) {
                 json.optDouble("thermal_stop_c", settings.thermalStopC.toDouble()).toFloat()
             } else {
@@ -244,6 +271,10 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
     override fun recordResponseBody(body: String) {
         server.recordTimings(body)
     }
+
+    override fun requestStarted() = requests.beginClient()
+
+    override fun requestFinished() = requests.endClient()
 
     // --- activity-facing helpers -----------------------------------------
 
@@ -288,6 +319,7 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
         settings.reasoning,
         settings.alias,
         settings.apiKey,
+        settings.loadMode,
     ).joinToString("|")
 
     private fun onBatteryTemp(temp: Float) {

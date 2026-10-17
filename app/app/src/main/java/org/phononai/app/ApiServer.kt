@@ -27,6 +27,8 @@ interface ApiHandler {
     fun settingsJson(): String
     fun updateSettings(body: String): String
     fun recordResponseBody(body: String)
+    fun requestStarted()
+    fun requestFinished()
 }
 
 /**
@@ -170,7 +172,12 @@ class ApiServer(
                     }.toString()
                     respond(out, 503, "application/json; charset=utf-8", body.toByteArray())
                 } else {
-                    proxy(req, out)
+                    api.requestStarted()
+                    try {
+                        proxy(req, out)
+                    } finally {
+                        api.requestFinished()
+                    }
                 }
             }
 

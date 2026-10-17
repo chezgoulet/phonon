@@ -56,6 +56,7 @@ app/app/src/main/java/org/phononai/app/
 ├── MainActivity.kt       state, temperature, decode t/s, start/stop, download, settings
 ├── PhononService.kt      foreground service, wake lock, thermal policy, download orchestration
 ├── ServerManager.kt      exec, readiness, supervision, exponential backoff, ring buffer
+├── KeepWarm.kt           idle keepalive beats + client request tracking
 ├── ApiServer.kt          loopback HTTP server and raw /v1 proxy
 ├── ModelDownloader.kt    HTTP Range resume, .part, Content-Length verification
 ├── ThermalMonitor.kt     BatteryManager temperature every 30 s
@@ -104,8 +105,12 @@ Arguments are built from settings on every launch:
 -m <model> -c 2048 -t 4 -np 1 -fa on --jinja --reasoning off
 --alias gemma-4-e2b --host 127.0.0.1 --port 8081
 --log-file /data/user/0/org.phononai.app/files/logs/llama-server.log
+-lm <mmap|mlock|none>
 [--api-key <key>]
 ```
+
+`-lm` was added with the keep-warm work; the captured start line below predates
+it and therefore has no `-lm` argument.
 
 Captured from `/logs` after the first start:
 
@@ -174,9 +179,11 @@ without restarting a healthy server.
 
 SharedPreferences: model path, context (2048), threads (4), public port (8080),
 backend port (8081), reasoning (off), thermal stop/resume, API key, alias,
-auto-start, download URL. Server argument changes take effect on the next
-server start/restart; the activity's Save action restarts the server when those
-arguments changed. Public-port changes restart the app API immediately.
+auto-start, download URL, keep-warm on/off and interval (45 s), load mode
+(`mmap`). Server argument changes take effect on the next server start/restart;
+the activity's Save action restarts the server when those arguments changed.
+Public-port changes restart the app API immediately. Keep-warm and interval
+changes take effect on the next tick without a restart.
 
 ## Build and install
 
@@ -460,6 +467,13 @@ Measured on the same device, same build, same settings:
   while the server's own timings still reported 4.8 tok/s over ~1.6 s. The gap
   is page faults: the kernel evicted the model's file-backed pages and re-reads
   them from storage on the next request.
+
+  **Correction, same day:** this did not reproduce on a second attempt. With
+  `keep_warm` off and five minutes of idle, an 8-token request took **2.05 s**
+  with `MemAvailable` at 4.4 GB. The difference between the two runs is memory
+  pressure, not idle time: the 41 s case had ~1.3 GB available and heavy zram
+  use; the 2.05 s case had 4.4 GB free. Eviction is a pressure phenomenon, not
+  a timer.
 - `-lm mlock` is refused on this device:
   `failed to mlock 3253485568-byte buffer ... Out of memory. Try increasing
   RLIMIT_MEMLOCK`. An unprivileged app cannot raise that limit.
@@ -503,7 +517,97 @@ Error: Not found; no service started.
 `filesDir`, so there is no legitimate way to run it before the owner unlocks.
 No PIN was guessed and no lock credential was changed.
 
+## Keeping the model warm
+
+The fix for the memory cliff is a periodic tiny generation. The app sends one
+`POST /v1/chat/completions` to the backend with `"hi"`, `max_tokens: 1`,
+`temperature: 0`, `stream: false` and a 10 s timeout, and discards the body. The
+point is not the token; it is touching the mmap'd weight pages often enough
+that the kernel does not reclaim them all.
+
+`KeepWarm` (in `KeepWarm.kt`) runs one daemon thread that ticks every second:
+
+1. skip unless `server.state == ready`;
+2. skip unless `keep_warm` is true;
+3. skip if a proxied client request is in flight;
+4. skip if the last client request *or* the last beat is less than
+   `keep_warm_interval_s` ago.
+
+`RequestTracker` is shared with `ApiServer`: the `/v1` proxy increments an
+in-flight counter and stamps `last_request_at` when a request starts and again
+when it ends, so a 20 s generation postpones the next beat by a full interval
+rather than overlapping it. The beat talks to the backend port directly, so it
+does not pass through the proxy and does not count as client traffic. A failed
+beat increments `keepalive_failures`, records a one-line `Log.d`, and changes
+nothing else: it is never surfaced as a user-visible error and never touches
+`/health` state or `lastError`.
+
+Settings (also in the activity and `POST /settings`):
+
+| Key | Default | Range | Meaning |
+|---|---|---|---|
+| `keep_warm` | `true` | — | send idle beats |
+| `keep_warm_interval_s` | `45` | ≥ 15 | idle gap before a beat |
+| `load_mode` | `mmap` | `mmap`, `mlock`, `none` | passed to llama.cpp as `-lm` |
+
+`/health` additions:
+
+| Field | Meaning |
+|---|---|
+| `keep_warm` | setting in force |
+| `keep_warm_interval_s` | setting in force |
+| `last_keepalive_at` | epoch ms of the last beat attempt, `null` before the first |
+| `keepalive_count` | beat attempts (successes + failures) |
+| `keepalive_failures` | failed beats |
+| `keepalive_last_error` | last failure text, absent if none |
+| `load_mode` | `mmap`, `mlock` or `none` |
+| `mlock_refused` | true when the server log contains `failed to mlock` |
+
+`load_mode` is part of the server argument hash, so changing it restarts
+`llama-server`. `mlock_refused` is not inferred from the request: `ServerManager`
+watches the log lines as they enter the ring buffer (both stdout/stderr and the
+tailed `--log-file`) and flips the flag only when the kernel line appears. On
+this device `-lm mlock` is refused with `RLIMIT_MEMLOCK`, which is why the
+default is `mmap`.
+
+Setting keep-warm via the API, without a restart:
+
+```bash
+curl -sS -X POST http://127.0.0.1:8080/settings \
+  -H 'Content-Type: application/json' -d '{"keep_warm":false}'
+curl -sS -X POST http://127.0.0.1:8080/settings \
+  -H 'Content-Type: application/json' -d '{"keep_warm":true,"keep_warm_interval_s":45}'
+```
+
+### Keep-warm measurements (Pixel 7, 2026-10-17)
+
+Mechanics, observed:
+
+- first beat 45 s after `ready`: `keepalive #1 ok: 1 token in 1376 ms`;
+- `keepalive_count` advanced 1 per interval, `keepalive_failures` stayed 0;
+- during a 110-token client request (20 s+), `keepalive_count` stayed at 4 —
+  no beat overlapped client traffic;
+- `/health` exposes `keep_warm`, `keep_warm_interval_s`, `last_keepalive_at`,
+  `keepalive_count`, `keepalive_failures`, `load_mode`, `mlock_refused`.
+
+Effect on latency: **not established.**
+
+| Condition | Idle | Wall for 8 tokens | Decode |
+|---|---|---|---|
+| keep_warm on, then request | 5 min | 2.37 s | 5.29 tok/s |
+| keep_warm off, then request | 5 min | 2.05 s | 5.28 tok/s |
+| earlier cold case (under pressure) | 5 min | 41 s | — |
+
+The cold control did not reproduce, so this run cannot attribute the difference
+to keep-warm. Both fast runs had several GB of memory available; the 41 s case
+did not. The honest state: the mechanism is implemented and observable, its
+benefit is plausible, and proving it requires a controlled memory-pressure test
+(allocate pressure deliberately, then compare keep-warm on/off). Until then the
+default stays `true` because the cost is one token every 45 s, not because the
+benefit has been measured.
+
 ## What is not verified
+
 
 - Kill/restart timing (item 7) and thermal pause/resume (item 8).
 - Boot start on this Pixel: the receiver is in the manifest and the spike
@@ -523,12 +627,12 @@ No PIN was guessed and no lock credential was changed.
 
 ## Caveats
 
-- **Throughput is low and unexplained.** 5.1–5.3 decode tok/s versus the
-  spike's 11.6–12.0. Memory pressure is the leading hypothesis (345 MB free,
-  2.5 GB swap); the child's cgroup/cpuset assignment under a foreground service
-  is a second hypothesis that was not checked while the server was alive.
-  Neither is proven, and the clean reboot intended to test it ended at the
-  lock screen.
+- **Throughput varies with memory pressure.** 5.1–5.3 decode tok/s under normal
+  conditions; 10.04 immediately after `am kill-all` freed memory (4.3 GB
+  available); 11.6–12.0 from the standalone binary before the app existed. The
+  correlation is consistent, but it is a correlation: no run has isolated
+  memory pressure as the sole variable. The child's cgroup/cpuset assignment
+  under a foreground service is a second, unchecked hypothesis.
 - The app's public port and the server's backend port must differ. The
   settings default to 8080/8081. Changing `backend_port` requires a server
   restart; changing `port` restarts the app API immediately.

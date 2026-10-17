@@ -59,6 +59,8 @@ class ServerManager(
         private set
     @Volatile var isDesired: Boolean = false
         private set
+    @Volatile var mlockRefused: Boolean = false
+        private set
 
     val ringLog = RingLog(600)
 
@@ -200,6 +202,8 @@ class ServerManager(
             put("last_prompt_tps", lastPromptTps ?: JSONObject.NULL)
             put("restart_count", restartCount)
             put("backend_port", settings.backendPort)
+            put("load_mode", settings.loadMode)
+            put("mlock_refused", mlockRefused)
             put("error", lastError ?: JSONObject.NULL)
         }.toString()
     }
@@ -243,6 +247,7 @@ class ServerManager(
         Log.i(TAG, "starting ${bin.absolutePath} $printable")
 
         setState(ServerState.LOADING)
+        mlockRefused = false
 
         val pb = ProcessBuilder(listOf(bin.absolutePath) + args)
             .directory(context.filesDir)
@@ -290,6 +295,7 @@ class ServerManager(
         add("--host"); add("127.0.0.1")
         add("--port"); add(settings.backendPort.toString())
         add("--log-file"); add(logFile.absolutePath)
+        add("-lm"); add(settings.loadMode)
         if (settings.apiKey.isNotBlank()) {
             add("--api-key"); add(settings.apiKey)
         }
@@ -434,11 +440,25 @@ class ServerManager(
         try {
             BufferedInputStream(input).bufferedReader().useLines { lines ->
                 for (line in lines) {
-                    ringLog.append("[$tag] $line")
+                    recordLine("[$tag] $line")
                     Log.i(TAG, "[$tag] $line")
                 }
             }
         } catch (_: Throwable) {
+        }
+    }
+
+    /**
+     * Record a server log line and notice an mlock refusal. The kernel answer is
+     * the only trustworthy signal: the app must not report mlock as working just
+     * because -lm mlock was requested.
+     */
+    private fun recordLine(text: String) {
+        ringLog.append(text)
+        if (!mlockRefused && text.contains("failed to mlock", ignoreCase = true)) {
+            mlockRefused = true
+            ringLog.append("load mode mlock refused by kernel: ${text.trim()}")
+            Log.w(TAG, "mlock refused: ${text.trim()}")
         }
     }
 
@@ -472,7 +492,7 @@ class ServerManager(
                                     val line = pending.substring(0, idx).trimEnd('\r')
                                     pending.delete(0, idx + 1)
                                     if (line.isNotEmpty()) {
-                                        ringLog.append("[log] $line")
+                                        recordLine("[log] $line")
                                         Log.i(TAG, "[log] $line")
                                     }
                                 }

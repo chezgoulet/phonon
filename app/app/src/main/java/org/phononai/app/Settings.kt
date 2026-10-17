@@ -66,6 +66,23 @@ class Settings(context: Context) {
         get() = prefs.getString(KEY_DOWNLOAD_URL, DEFAULT_MODEL_URL) ?: DEFAULT_MODEL_URL
         set(value) = prefs.edit().putString(KEY_DOWNLOAD_URL, value).apply()
 
+    /**
+     * Send a tiny completion while idle so the kernel does not evict the
+     * model's file-backed pages. See "Keeping the model warm" in docs/app.md.
+     */
+    var keepWarm: Boolean
+        get() = prefs.getBoolean(KEY_KEEP_WARM, true)
+        set(value) = prefs.edit().putBoolean(KEY_KEEP_WARM, value).apply()
+
+    var keepWarmIntervalS: Int
+        get() = prefs.getInt(KEY_KEEP_WARM_INTERVAL, 45)
+        set(value) = prefs.edit().putInt(KEY_KEEP_WARM_INTERVAL, value).apply()
+
+    /** llama.cpp -lm: mmap (default), mlock or none. */
+    var loadMode: String
+        get() = prefs.getString(KEY_LOAD_MODE, LOAD_MODE_MMAP) ?: LOAD_MODE_MMAP
+        set(value) = prefs.edit().putString(KEY_LOAD_MODE, value).apply()
+
     fun asJson(): String = org.json.JSONObject().apply {
         put("model_path", modelPath)
         put("context", contextSize)
@@ -79,12 +96,19 @@ class Settings(context: Context) {
         put("alias", alias)
         put("auto_start", autoStart)
         put("download_url", downloadUrl)
+        put("keep_warm", keepWarm)
+        put("keep_warm_interval_s", keepWarmIntervalS)
+        put("load_mode", loadMode)
     }.toString()
 
     companion object {
         const val DEFAULT_MODEL_NAME = "gemma-4-E2B-it-Q4_0.gguf"
         const val DEFAULT_MODEL_URL = "http://127.0.0.1:9000/gemma-4-E2B-it-Q4_0.gguf"
         const val DEFAULT_ALIAS = "gemma-4-e2b"
+        const val LOAD_MODE_MMAP = "mmap"
+        val LOAD_MODES = setOf(LOAD_MODE_MMAP, "mlock", "none")
+        const val MIN_KEEP_WARM_INTERVAL_S = 15
+        const val DEFAULT_KEEP_WARM_INTERVAL_S = 45
 
         private const val NAME = "phonon"
         private const val KEY_MODEL_PATH = "model_path"
@@ -99,5 +123,8 @@ class Settings(context: Context) {
         private const val KEY_ALIAS = "alias"
         private const val KEY_AUTO_START = "auto_start"
         private const val KEY_DOWNLOAD_URL = "download_url"
+        private const val KEY_KEEP_WARM = "keep_warm"
+        private const val KEY_KEEP_WARM_INTERVAL = "keep_warm_interval_s"
+        private const val KEY_LOAD_MODE = "load_mode"
     }
 }
