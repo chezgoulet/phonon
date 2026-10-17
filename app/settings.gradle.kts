@@ -14,5 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "phonon-app-spike"
+rootProject.name = "phonon-app"
 include(":app")

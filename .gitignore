@@ -23,3 +23,6 @@ __pycache__/
 build/
 local.properties
 .DS_Store
+
+# native payload (llama.cpp build output; synced by app/sync-native.sh)
+app/app/src/main/jniLibs/
