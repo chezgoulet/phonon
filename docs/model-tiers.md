@@ -65,3 +65,47 @@ curl -X POST http://127.0.0.1:8080/model/download \
 curl -X POST http://127.0.0.1:8080/settings \
   -d '{"model_path":"/data/user/0/org.phononai.app/files/models/Qwen3.5-2B-Q4_K_M.gguf","alias":"qwen3.5-2b"}'
 ```
+
+## Context window on 8 GB
+
+Measured with Qwen3.5-2B Q4_K_M, standalone `llama-server`, same phone,
+`-fa on -t 4 -np 1`:
+
+| Context | RSS | Decode | Prefill |
+|---|---|---|---|
+| 16,384 | 1.57 GB | 13.85 tok/s | 22.5 tok/s |
+| 32,768 | 1.76 GB | 13.90 tok/s | 21.9 tok/s |
+
+A 4,339-token prompt at 32K prefilled at 20.7 tok/s and completed correctly in
+209.6 s. Memory cost is about **12 MB per 1,000 tokens** of context, because
+Qwen3.5's hybrid architecture keeps a constant-size state in 24 of its 32 layers
+and only the 8 full-attention layers grow a KV cache. Doubling 16K to 32K cost
+190 MB and nothing measurable in speed.
+
+Gemma 4 E2B uses ordinary attention throughout; its KV grows with every layer
+and is far more expensive at the same context. For long agent sessions on 8 GB,
+Qwen3.5 is the right model.
+
+## The cpuset penalty — bigger than context
+
+The app's server runs about **2.4x slower than the same binary started from a
+shell**: 5.8 tok/s in-app against 13.9 standalone, same model, same context.
+
+Cause, measured:
+
+```
+app child:  cpuset:/foreground   Cpus_allowed_list: 0-5
+/dev/cpuset/top-app/cpus:    0-7
+/dev/cpuset/foreground/cpus: 0-5
+/dev/cpuset/background/cpus: 0-3
+```
+
+On a Pixel 7 the cores are 0–3 little, 4–5 mid, 6–7 Cortex-X1. Android puts a
+foreground *service* in `/foreground`, which excludes the two big cores. The
+standalone server, started from `adb shell`, is not in that cpuset and gets all
+eight.
+
+An app cannot change its own cpuset. The fix belongs to the appliance image or
+ROM: put the service in `top-app`, or widen `/foreground` to include 6–7. Until
+then, treat the in-app number as the honest product number and the standalone
+number as the hardware ceiling.
