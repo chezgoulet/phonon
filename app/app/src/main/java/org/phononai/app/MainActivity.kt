@@ -186,10 +186,10 @@ class MainActivity : Activity() {
         }
         val alias = aliasField.text.toString().trim().ifBlank { Settings.DEFAULT_ALIAS }
         val downloadUrl = downloadUrlField.text.toString().trim()
-        // Apply through the service so the same prospective validation and
-        // listener teardown used by POST /settings also covers the activity.
-        // If the service is not up yet there is no listener to race, so a
-        // direct write is safe.
+        // Apply through the service so the activity uses the same prospective
+        // validation and atomic listener swap as POST /settings. If the
+        // service is not up yet there is no listener to race, so a direct
+        // write is safe.
         val service = AppState.service
         if (service != null) {
             val body = JSONObject().apply {

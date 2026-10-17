@@ -32,13 +32,16 @@ returned two distinct `x-litellm-model-id` values, i.e. both phones served
 traffic. Pinned names (`phone-a`, `phone-b`) remain the right choice for agent
 tasks, where the KV prefix cache has to stay on one device.
 
-## Known issue
+## Resolved: settings race
 
-Setting `api_key` restarts the operator server. A `bind_address` change posted
-immediately after gets `http=000` and is lost — the request races the restart.
-Set the key, wait for `ready`, then set the bind address. Worth fixing in the
-app: control requests should either wait for the new listener or return `503`
-with a retry hint rather than dropping the connection.
+Setting `api_key` used to restart the operator server, and a `bind_address`
+change posted immediately after got `http=000` and was lost. Fixed on
+`fix/settings-race` (2026-10-17): a key change no longer rebinds the listener,
+multiple fields may be posted together, and control endpoints answer `503` with
+`Retry-After: 1` while a reload is in flight. Observed run and HTTP codes are in
+[`lan.md`](lan.md#settings-changes-never-drop-the-connection-2026-10-17).
+Writing the key and the bind address in one POST is no longer required, but it
+is still the fewest requests.
 
 ## Two agent tasks at once
 

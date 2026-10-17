@@ -32,6 +32,9 @@ interface ApiHandler {
     fun requestStarted()
     fun requestFinished()
 
+    /** A serialized reload is in flight; control endpoints answer 503. */
+    fun isRestarting(): Boolean
+
     /** The bind-time invariant failed; refuse to listen and report it. */
     fun refuseUnsafeExposure(message: String)
 }
@@ -50,73 +53,175 @@ class ApiServer(
     private val settings: Settings,
     private val api: ApiHandler,
     private val bindAddress: String,
+    private val port: Int,
+    /** Key to check at bind time; the settings value is committed after bind. */
+    private val bindKey: String? = null,
 ) {
     @Volatile private var running = false
+    @Volatile private var stopped = false
     @Volatile private var serverSocket: ServerSocket? = null
     private var acceptThread: Thread? = null
+    private var retryThread: Thread? = null
     private val clients = Executors.newCachedThreadPool { r ->
         Thread(r, "phonon-http-client").apply { isDaemon = true }
     }
 
-    fun start() {
-        if (running) return
-        running = true
-        acceptThread = thread(name = "phonon-api", isDaemon = true) {
-            while (running) {
+    /**
+     * Bind synchronously without accepting. The caller closes the old
+     * listener and opens this one inside the settings request, before its
+     * response is written, so no client that observes the response can find
+     * the port unbound. Any failure is reported to the caller rather than
+     * being retried in the background.
+     */
+    fun bind(): Boolean {
+        if (serverSocket != null) return true
+        if (stopped) return false
+        val socket = synchronized(settings.configLock) {
+            if (stopped) return false
+            val key = bindKey ?: settings.apiKey
+            // Assert the invariant at the last possible moment, and hold the
+            // settings lock across check+bind so a concurrent key change
+            // cannot race the listener onto the LAN. The socket is not bound
+            // before this check passes.
+            if (!Settings.isLoopbackBind(bindAddress) && key.isBlank()) {
+                val message = "bind_address requires api_key"
+                Log.e(TAG, "refusing to bind $bindAddress:$port: $message")
+                api.refuseUnsafeExposure(message)
+                return false
+            }
+            // The port was just released by stop(). On a busy port the
+            // kernel can take a moment to make it reusable, so retry briefly
+            // instead of losing the settings change.
+            var bound: ServerSocket? = null
+            var last: Throwable? = null
+            for (attempt in 0 until BIND_ATTEMPTS) {
+                if (stopped) return false
                 try {
-                    val ss = ServerSocket()
-                    ss.reuseAddress = true
-                    // Assert the invariant at the last possible moment, and
-                    // hold the settings lock across check+bind so a concurrent
-                    // key change cannot race the listener onto the LAN. The
-                    // socket is not bound before this check passes.
-                    synchronized(settings.configLock) {
-                        if (!Settings.isLoopbackBind(bindAddress) && settings.apiKey.isBlank()) {
-                            running = false
-                            val message = "bind_address requires api_key"
-                            Log.e(
-                                TAG,
-                                "refusing to bind $bindAddress:${settings.port}: $message",
-                            )
-                            api.refuseUnsafeExposure(message)
-                            return@thread
-                        }
-                        ss.bind(InetSocketAddress(InetAddress.getByName(bindAddress), settings.port))
-                    }
-                    serverSocket = ss
-                    Log.i(TAG, "API listening on $bindAddress:${settings.port}")
-                    while (running && !ss.isClosed) {
-                        val client = try {
-                            ss.accept()
-                        } catch (t: Throwable) {
-                            if (running) Log.e(TAG, "accept failed: ${t.message}")
-                            break
-                        }
-                        clients.execute { handle(client) }
-                    }
+                    bound = openSocket()
+                    break
                 } catch (t: Throwable) {
-                    if (running) Log.e(TAG, "could not bind $bindAddress:${settings.port}: ${t.message}")
-                }
-                if (running) {
-                    try {
-                        Thread.sleep(5_000)
-                    } catch (_: InterruptedException) {
-                        break
+                    last = t
+                    if (attempt + 1 < BIND_ATTEMPTS) {
+                        try {
+                            Thread.sleep(BIND_RETRY_MS)
+                        } catch (_: InterruptedException) {
+                        }
                     }
+                }
+            }
+            if (bound == null) {
+                Log.e(
+                    TAG,
+                    "could not bind $bindAddress:$port: ${last?.message} [$instanceTag]",
+                )
+                return false
+            }
+            // stop() may have won the race while the bind was in progress.
+            if (stopped) {
+                try {
+                    bound.close()
+                } catch (_: Throwable) {
+                }
+                return false
+            }
+            bound
+        }
+        serverSocket = socket
+        Log.i(TAG, "API listening on $bindAddress:$port [$instanceTag]")
+        return true
+    }
+
+    private val instanceTag: String
+        get() = Integer.toHexString(System.identityHashCode(this))
+
+    private fun openSocket(): ServerSocket {
+        val socket = ServerSocket()
+        try {
+            socket.reuseAddress = true
+        } catch (_: Throwable) {
+        }
+        try {
+            socket.bind(InetSocketAddress(InetAddress.getByName(bindAddress), port), 50)
+        } catch (t: Throwable) {
+            try {
+                socket.close()
+            } catch (_: Throwable) {
+            }
+            throw t
+        }
+        return socket
+    }
+
+    /** Start accepting on a socket that [bind] already opened. */
+    fun startAccepting() {
+        if (stopped || serverSocket == null) return
+        running = true
+        if (acceptThread?.isAlive == true) return
+        acceptThread = thread(name = "phonon-api", isDaemon = true) { acceptLoop() }
+    }
+
+    /** Boot path: bind and accept, retrying if the address is not up yet. */
+    fun start() {
+        if (running || stopped) return
+        running = true
+        if (bind()) {
+            startAccepting()
+            return
+        }
+        retryThread = thread(name = "phonon-api-retry", isDaemon = true) {
+            while (running && !stopped) {
+                try {
+                    Thread.sleep(5_000)
+                } catch (_: InterruptedException) {
+                    return@thread
+                }
+                if (!running || stopped) return@thread
+                if (bind()) {
+                    startAccepting()
+                    return@thread
                 }
             }
         }
     }
 
     fun stop() {
+        stopped = true
         running = false
-        try {
-            serverSocket?.close()
-        } catch (_: Throwable) {
-        }
+        val closing = serverSocket
         serverSocket = null
+        try {
+            closing?.close()
+            Log.i(TAG, "API stopped $bindAddress:$port [$instanceTag]")
+        } catch (t: Throwable) {
+            Log.w(TAG, "API stop failed $bindAddress:$port: ${t.message} [$instanceTag]")
+        }
         acceptThread?.interrupt()
-        clients.shutdownNow()
+        acceptThread = null
+        retryThread?.interrupt()
+        retryThread = null
+        // Not shutdownNow: the request that triggered a rebind is still
+        // running on this instance and must be able to write its response.
+        clients.shutdown()
+    }
+
+    private fun acceptLoop() {
+        while (running) {
+            val socket = serverSocket ?: break
+            val client = try {
+                socket.accept()
+            } catch (t: Throwable) {
+                if (running) Log.e(TAG, "accept failed: ${t.message}")
+                break
+            }
+            try {
+                clients.execute { handle(client) }
+            } catch (_: Throwable) {
+                try {
+                    client.close()
+                } catch (_: Throwable) {
+                }
+            }
+        }
     }
 
     private fun handle(socket: Socket) {
@@ -143,6 +248,17 @@ class ApiServer(
                 out, 401, "application/json; charset=utf-8",
                 """{"error":"unauthorized"}""".toByteArray(),
                 mapOf("WWW-Authenticate" to "Bearer"),
+            )
+            return
+        }
+        // A reload owns the listener for a moment while the backend is
+        // replaced. Control requests must not race it: answer with a body and
+        // a retry hint instead of disappearing with the old socket.
+        if (isControlPath(req.path) && api.isRestarting()) {
+            respond(
+                out, 503, "application/json; charset=utf-8",
+                """{"error":"server restarting","retry_after_s":1}""".toByteArray(),
+                mapOf("Retry-After" to "1"),
             )
             return
         }
@@ -229,6 +345,12 @@ class ApiServer(
             )
         }
     }
+
+    /** Routes that change or report operator state; they answer 503 mid-reload. */
+    private fun isControlPath(path: String): Boolean =
+        path == "/settings" || path == "/logs" ||
+            path.startsWith("/model/") || path.startsWith("/server/") ||
+            path.startsWith("/debug/")
 
     private fun authorized(req: Request): Boolean {
         val key = settings.apiKey
@@ -577,6 +699,8 @@ class ApiServer(
         const val TAG = "Phonon"
         const val MAX_REQUEST_BODY = 64L * 1024 * 1024
         const val MAX_CAPTURE = 4 * 1024 * 1024
+        const val BIND_ATTEMPTS = 20
+        const val BIND_RETRY_MS = 25L
         val HOP_BY_HOP = setOf(
             "host", "connection", "keep-alive", "proxy-connection", "te", "trailer",
             "transfer-encoding", "upgrade", "expect", "content-length",
