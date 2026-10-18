@@ -1,0 +1,7 @@
+Vision now works. Models that have a vision projector download it beside the
+weights, hash-checked like the model itself, and the server is started with
+--mmproj, so the OpenAI endpoint accepts images. The model card says whether the
+server will take images yet or is waiting on the projector.
+
+The claim was withdrawn in 0.1.8 because the app never passed the flag. It does
+now, and the flag is only sent when the file is actually present.
