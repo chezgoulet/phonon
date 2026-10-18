@@ -8,6 +8,20 @@ specific bind, and the non-atomic download start.
 Eleven remain. They are grouped into three gates by what a failure costs the
 person running the phone, not by how hard they are.
 
+## Status (2026-10-18)
+
+| Item | State | Evidence |
+|---|---|---|
+| A1 settings snapshot | shipped 0.1.2 | code-only (no device test yet) |
+| A2 start validation | shipped 0.1.2 | device: 409 with the missing path |
+| A3 signed records | shipped 0.1.2 / 0.1.3 | device: catalog download verified and recorded; second request accepted on the record |
+| A4 dot names | shipped 0.1.2 / 0.1.3 | scripted: path stays inside models/, dot names refused |
+| B1 settle windows | shipped 0.1.3 | code-only (timeouts 300 s → 120 s) |
+| B2 config-lock hold | **deferred to 0.1.4** | not started |
+| B3 persisted stop | shipped 0.1.3 | device: stop survives force-stop; start survives too |
+| B4 reload marking | shipped 0.1.3 | code-only |
+| C1–C3 hardening | not started | — |
+
 ## How work is accepted
 
 Every item closes with evidence, in this order of preference:
