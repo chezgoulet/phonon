@@ -55,6 +55,13 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
     @Volatile private var wantServer = false
     private var configHashAtLaunch: String? = null
 
+    /**
+     * Battery sampled on the thermal monitor's 30 s tick. /health is polled
+     * every second from the UI, and a sticky-broadcast registration plus a
+     * BatteryManager IPC per poll is work the phone does not need to repeat.
+     */
+    @Volatile private var batterySnapshot: BatterySnapshot? = null
+
     /** Serialises reloads so two settings changes cannot rebind each other's config. */
     private val reloadExecutor = Executors.newSingleThreadExecutor { r ->
         Thread(r, "phonon-reload").apply { isDaemon = true }
@@ -169,7 +176,9 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
             if (requests.lastCompletionAtMs > 0) requests.lastCompletionAtMs else JSONObject.NULL,
         )
         json.put("requests_completed", requests.completedCount)
-        val battery = BatteryHealth.snapshot(this)
+        // Cached on the 30 s thermal tick; read directly once, before the
+        // first tick, so a cold /health still reports the battery.
+        val battery = batterySnapshot ?: BatteryHealth.snapshot(this).also { batterySnapshot = it }
         json.put("pause_reason", server.pauseReason ?: JSONObject.NULL)
         if (battery.known) {
             json.put("battery_level", battery.levelPct)
@@ -787,6 +796,7 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
         // only lever — the platform owns the charger, so charge limiting is
         // documented as a ROM/root capability, not something this code claims.
         val battery = BatteryHealth.snapshot(this)
+        batterySnapshot = battery
         val pauseBelow = settings.batteryPauseBelow
         if (battery.known && !battery.charging && pauseBelow > 0 &&
             battery.levelPct in 1 until pauseBelow &&

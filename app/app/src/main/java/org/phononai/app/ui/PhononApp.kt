@@ -143,27 +143,37 @@ fun PhononApp() {
     var bypassSetup by rememberSaveable { mutableStateOf(false) }
     var showLog by remember { mutableStateOf(false) }
 
+    // The poll reads /health, the benchmark state and the download state. It
+    // used to run all three on the composition thread, where the first two
+    // touch a sticky receiver and a BatteryManager IPC and the last lists a
+    // directory — every second, for hours, on a phone that may be pinned. Read
+    // on IO and hand the result back to the composition.
     LaunchedEffect(Unit) {
         while (true) {
-            val service = AppState.service
-            val nextHealth = try {
-                service?.let { parseHealth(it.uiHealthJson()) }
-            } catch (_: Throwable) {
-                null
+            val next = withContext(Dispatchers.IO) {
+                val service = AppState.service
+                Triple(
+                    try {
+                        service?.let { parseHealth(it.uiHealthJson()) }
+                    } catch (_: Throwable) {
+                        null
+                    },
+                    try {
+                        service?.let { parseBenchmark(it.uiBenchmarkJson()) }
+                    } catch (_: Throwable) {
+                        null
+                    },
+                    try {
+                        service?.let { parseDownload(it.uiDownloadJson()) }
+                    } catch (_: Throwable) {
+                        null
+                    },
+                )
             }
-            val nextBenchmark = try {
-                service?.let { parseBenchmark(it.uiBenchmarkJson()) }
-            } catch (_: Throwable) {
-                null
-            }
-            val nextDownload = try {
-                service?.let { parseDownload(it.uiDownloadJson()) }
-            } catch (_: Throwable) {
-                null
-            }
+            val nextHealth = next.first
             health = nextHealth
-            benchmark = nextBenchmark
-            download = nextDownload
+            benchmark = next.second
+            download = next.third
             tick++
             val tps = nextHealth?.lastDecodeTps
             if (tps != null && tps > 0) {
@@ -176,10 +186,15 @@ fun PhononApp() {
         }
     }
 
-    val models = remember(tick, settings.modelPath) {
-        installedModels(context, settings.modelPath)
+    // Listing the models directory is IO too. Refresh it when the active model
+    // changes or a download finishes, rather than on every poll tick.
+    var models by remember { mutableStateOf<List<InstalledModel>>(emptyList()) }
+    var modelsLoaded by remember { mutableStateOf(false) }
+    LaunchedEffect(settings.modelPath, download?.dest, download?.done) {
+        models = withContext(Dispatchers.IO) { installedModels(context, settings.modelPath) }
+        modelsLoaded = true
     }
-    val showSetup = models.isEmpty() && !bypassSetup
+    val showSetup = modelsLoaded && models.isEmpty() && !bypassSetup
 
     CompositionLocalProvider(LocalContentColor provides PhononColors.Text) {
     Box(Modifier.fillMaxSize().background(PhononColors.Background)) {
