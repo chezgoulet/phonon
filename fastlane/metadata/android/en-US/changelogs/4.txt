@@ -1,0 +1,11 @@
+Gate B of the audit, plus the rest of Gate A.
+
+Stopping the server now survives a service restart: the operator's intent is
+persisted instead of inferred from the boot setting. Switching a model marks a
+reload in flight, so health no longer reports ready while the previous model is
+still answering. A failing reload gives control endpoints back after two
+minutes instead of five.
+
+Model names that resolve to "." or ".." are refused rather than quietly renamed,
+and a download can be started by catalog id over the API, which is the path that
+carries the hash and the signed record.
