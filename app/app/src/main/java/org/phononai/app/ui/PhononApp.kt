@@ -408,6 +408,7 @@ private fun ServeScreen(
                 kind = kind,
                 amp = (tps / 20f).coerceIn(0f, 1f),
                 reduced = reducedAvatar,
+                shape = AppState.presenceShape,
                 modifier = Modifier.size(156.dp),
             )
             Spacer(Modifier.width(18.dp))
