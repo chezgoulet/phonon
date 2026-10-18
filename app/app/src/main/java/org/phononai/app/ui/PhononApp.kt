@@ -1130,6 +1130,8 @@ private fun ModelsScreen(
                         context = context,
                         entry = entry,
                         installed = entry.fileName in installed,
+                        visionReady = entry.mmprojFileName.isNotBlank() &&
+                            entry.mmprojFileName in installed,
                         active = activeName == entry.fileName,
                         download = download,
                         recommended = recommended?.id == entry.id,
@@ -1239,6 +1241,7 @@ private fun CatalogEntryCard(
     context: Context,
     entry: ModelEntry,
     installed: Boolean,
+    visionReady: Boolean,
     active: Boolean,
     download: DownloadProgress?,
     recommended: Boolean,
@@ -1378,7 +1381,6 @@ private fun CatalogEntryCard(
         }
         if (entry.mmprojFileName.isNotBlank()) {
             Spacer(Modifier.height(4.dp))
-            val visionReady = entry.mmprojFileName in installed
             Text(
                 if (visionReady) {
                     "vision ready — this server accepts images"
