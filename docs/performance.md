@@ -131,41 +131,36 @@ session is closed in `requestFinished`, including on proxy failure. If
 process), `/health` reports `perf_hint_active: false` and the reason in
 `perf_hint_detail`; serving continues.
 
-## Avatar CPU cost
+## Avatar cost
 
-App process CPU, sampled from `/proc/<app pid>/stat` (`utime+stime`, 100 Hz)
-over 10 s. This excludes the `llama-server` child.
+The swarm ran 320 particles at the display rate (90 Hz on this device). Nothing
+about a diffuse particle body needs 90 frames a second, so the clock is now
+33 ms (30 fps) and the mote count is 160; reduced mode keeps its 20 fps and
+inherits the smaller count. The category table also dropped from twenty
+families to six — one per substance, plus the default.
 
-| State | Avatar | App CPU | Sample |
-|---|---|---:|---|
-| idle, serving, no request | full idle animation | **66.9%** | 10.1 s |
-| idle, serving, no request (repeat) | full idle animation | **66.0%** | 8.1 s |
-| generating | full (`Animate avatar while generating` on) | **66.3%** | 10.1 s |
-| generating | reduced (setting off, default) | **19.6%** | 10.0 s |
-
-The 19.6% row is a 128-token visible/tuned run at 6.478 tok/s; the 66.3% row
-is the same state with the setting on (6.827 tok/s). The reduction is ~70% of
-the avatar's cost while generating. Idle stays at ~66% by design: the setting
-only applies to the generating state, and the avatar is restored to full
-animation when the request ends.
+**App-process CPU** (`utime+stime` over 10 s, excluding the `llama-server`
+child): idle-with-full-animation fell from **66.9%** to **34.1%**.
 
 ### Decode cost (paired)
 
-Throughput, not CPU: same model (Qwen3.5-2B), same prompt, 128 greedy tokens,
-with the app on the **Serve** tab (avatar composed) against the **Settings** tab
-(avatar not composed), alternating within one app session so drift affects both
-arms equally.
+Throughput, measured the same way before and after the change: app on the
+**Serve** tab (avatar composed) against the **Settings** tab (avatar not
+composed), alternating within one app session, six pairs each.
 
-| Session | Serve tab | Settings tab | Paired difference |
-|---|---:|---:|---:|
-| reduced (default: half motes, 20 fps while generating) | 6.44 tok/s | 6.63 tok/s | **-0.19 tok/s (-2.9%)** |
-| full animation (setting on) | 5.97 tok/s | 6.72 tok/s | **-0.62 tok/s (-9.2%)** |
+| Session | Before | After |
+|---|---:|---:|
+| reduced (default) | -2.9% | **-1.5%** (8.47 vs 8.58 tok/s) |
+| full animation | -9.2% | **-2.4%** (7.05 vs 7.34 tok/s) |
 
-Six pairs per session. The absolute rates are lower than the standalone
-benchmark because the device had been serving for about forty minutes and
-settled at 34-35 C; the pairing is what makes the comparison usable. The default
-therefore costs about 3% of decode and full animation about 9%, which is why the
-setting ships off.
+Absolute rates differ between runs because the device was cooler in the second
+run (23-26 C against 34-35 C); the paired differences are the usable result.
+One pair in the full-animation session contains an outlier (a 2.29 tok/s drop
+that hit both arms as a step change); the median is quoted rather than the mean.
+
+Full animation now costs about two and a half percent of decode, which is small
+enough to be a real choice rather than a toy. The setting stays off by default
+and its label now states the price.
 
 ## Regression checks on the final build
 
