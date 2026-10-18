@@ -1,74 +1,79 @@
 #!/usr/bin/env python3
-"""Generate Phonon's launcher icon: a starburst drawn with the avatar's dots.
+"""Generate Phonon's launcher icon: the avatar's particle cloud.
 
-No frame, no glyph: twelve rays of particles around a dense core, cyan on black,
-the same vocabulary as the being on the Serve screen. Run from the repo root:
+A dense, roughly circular swarm: a bright core slightly off centre, thousands of
+points thinning outward into a diffuse edge, with a faint bloom underneath. Cyan
+on black, no frame, no glyph.
 
     python3 tools/icon/generate.py
-
-Everything is procedural and seeded, so the same star is produced every time.
 """
 import math
 import random
 from pathlib import Path
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFilter
 
 ROOT = Path(__file__).resolve().parents[2]
 RES = ROOT / "app/app/src/main/res"
 
 CYAN = (0, 229, 255)
 BLACK = (0, 0, 0, 255)
-S = 1024                      # master render
-RAYS = 12
-REACH = 0.62                  # ray length as a fraction of the half-canvas
-CORE = 0.10
-DOTS = 28
+S = 1024
+PARTICLES = 2600
+CORE_PARTICLES = 520
+RADIUS = 0.46
+CORE_RADIUS = 0.16
+CORE_OFFSET = (-0.035, 0.02)
 
 
-def star(seed=3):
+def cloud(seed=17):
     random.seed(seed)
     img = Image.new("RGBA", (S, S), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
     cx = cy = S / 2
     R = S / 2
 
-    for _ in range(90):
+    def dot(x, y, rad, alpha):
+        d.ellipse([x - rad, y - rad, x + rad, y + rad], fill=CYAN + (alpha,))
+
+    for _ in range(PARTICLES):
         a = random.uniform(0, 2 * math.pi)
-        r = random.uniform(0, CORE * R)
-        x, y = cx + math.cos(a) * r, cy + math.sin(a) * r
-        rad = random.uniform(2.0, 5.0) * (1 - 0.5 * r / (CORE * R))
-        d.ellipse([x - rad, y - rad, x + rad, y + rad],
-                  fill=CYAN + (random.randint(180, 255),))
+        u = random.random() ** 0.55          # dense centre, sparse rim
+        r = u * RADIUS * R
+        x = cx + math.cos(a) * r
+        y = cy + math.sin(a) * r
+        rad = random.uniform(0.7, 2.0) * (1.25 - 0.45 * u)
+        alpha = int(70 + 165 * (1 - u) ** 1.4)
+        dot(x, y, rad, alpha)
 
-    for k in range(RAYS):
-        base = 2 * math.pi * k / RAYS
-        for i in range(DOTS):
-            t = i / (DOTS - 1)
-            r = CORE * R + t * (REACH - CORE) * R
-            jitter = random.uniform(-1, 1) * (2.5 + 4.0 * t)
-            a = base + random.uniform(-0.012, 0.012)
-            x = cx + math.cos(a) * r - math.sin(a) * jitter
-            y = cy + math.sin(a) * r + math.cos(a) * jitter
-            rad = (5.2 * (1 - 0.72 * t)) * random.uniform(0.85, 1.15)
-            d.ellipse([x - rad, y - rad, x + rad, y + rad],
-                      fill=CYAN + (int(255 * (1 - 0.68 * t)),))
-    return img
+    ox, oy = CORE_OFFSET[0] * S, CORE_OFFSET[1] * S
+    for _ in range(CORE_PARTICLES):
+        a = random.uniform(0, 2 * math.pi)
+        u = random.random() ** 0.7
+        r = u * CORE_RADIUS * R
+        x = cx + ox + math.cos(a) * r
+        y = cy + oy + math.sin(a) * r
+        dot(x, y, random.uniform(0.7, 1.8), random.randint(170, 255))
+
+    glow = img.filter(ImageFilter.GaussianBlur(radius=S / 260))
+    out = Image.new("RGBA", (S, S), (0, 0, 0, 0))
+    out.alpha_composite(glow)
+    out.alpha_composite(img)
+    return out
 
 
-def at(master, size, background):
+def at(master, size, background=True):
     art = master.resize((size, size), Image.Resampling.LANCZOS)
-    if background:
-        base = Image.new("RGBA", (size, size), BLACK)
-        base.paste(art, (0, 0), art)
-        return base
-    return art
+    if not background:
+        return art
+    base = Image.new("RGBA", (size, size), BLACK)
+    base.alpha_composite(art)
+    return base
 
 
 def main():
-    master = star()
+    master = cloud()
     drawable = RES / "drawable-nodpi"
     drawable.mkdir(parents=True, exist_ok=True)
-    # Transparent foreground; the adaptive background stays black.
     at(master, 432, background=False).save(drawable / "ic_launcher_foreground.png")
 
     for bucket, px in {"mdpi": 48, "hdpi": 72, "xhdpi": 96, "xxhdpi": 144, "xxxhdpi": 192}.items():
@@ -84,7 +89,7 @@ def main():
     store = ROOT / "fastlane/metadata/android/en-US/images"
     store.mkdir(parents=True, exist_ok=True)
     at(master, 512, background=True).save(store / "icon.png")
-    print("wrote starburst foreground, mipmaps and store icon")
+    print("wrote particle-cloud foreground, mipmaps and store icon")
 
 
 if __name__ == "__main__":
