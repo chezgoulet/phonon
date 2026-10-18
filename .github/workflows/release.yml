@@ -6,11 +6,11 @@
 # the project keystore, and attaches the APK to a GitHub Release.
 #
 # ASSUMPTIONS / GAPS this workflow depends on (see GAPS.md):
-#   * a committed Gradle wrapper (./gradlew) also commits gradle-wrapper.jar
+#   * the Gradle wrapper lives in app/ (app/gradlew, with its jar committed)
 #   * GraphQL-free: uses the default GITHUB_TOKEN
 #   * the secrets below exist: KEYSTORE_BASE64, KEYSTORE_PASSWORD,
 #     KEY_ALIAS, KEY_PASSWORD
-#   * llama.cpp is present as a git submodule (checkout with submodules)
+#   * llama.cpp is a pinned submodule (third_party/llama.cpp) built by app/build-native.sh
 
 name: release
 
@@ -30,7 +30,7 @@ env:
   # Pin the NDK. 30.0.16138531 is r30-rc1; prefer the stable r30 30.0.16248370
   # unless the app requires the rc. Keep this in lockstep with
   # app/app/build.gradle.kts (ndkVersion) and fdroiddata/…/com.phononai.app.yml (ndk:).
-  ANDROID_NDK_VERSION: '30.0.16248370'
+  ANDROID_NDK_VERSION: '30.0.16138531'
 
 jobs:
   build-and-release:
@@ -56,6 +56,14 @@ jobs:
           yes | sdkmanager --licenses > /dev/null || true
           sdkmanager "ndk;${ANDROID_NDK_VERSION}"
           echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/${ANDROID_NDK_VERSION}" >> "$GITHUB_ENV"
+
+      - name: Build llama.cpp from the pinned submodule
+        run: |
+          set -euo pipefail
+          test -f third_party/llama.cpp/CMakeLists.txt || {
+            echo "::error::llama.cpp submodule is missing"; exit 1; }
+          ./app/build-native.sh
+          ls -l app/app/src/main/jniLibs/arm64-v8a/ | head
 
       - name: Derive version
         id: ver
@@ -104,7 +112,7 @@ jobs:
           set -euo pipefail
           # The build.gradle.kts release signing block reads these env vars so
           # CI signs without committing secrets. See GAPS.md item "signing config".
-          ./gradlew --no-daemon :app:assembleRelease
+          ./app/gradlew -p app --no-daemon :app:assembleRelease
 
       - name: Locate APK
         id: apk

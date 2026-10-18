@@ -1,8 +1,11 @@
 First public release.
 
 Phonon packages llama.cpp as a foreground service, downloads a GGUF model into
-app storage (HTTP range resume, size verified), supervises the server, and
-serves an OpenAI-compatible API (chat completions and tool calls) on the phone's
-loopback interface by default. Adds thermal pause/resume, a bounded log ring,
-device benchmarking and a one-button device report. Optional Device-Owner
+app storage (size verified), supervises the server, and serves an OpenAI-
+compatible API on the LAN behind an API key - the inference backend itself stays
+on loopback. Five model families ship in the picker (Qwen3.5, Gemma 4, MiniCPM5,
+Granite, Nemotron), each with a measured decode rate and its licence shown.
+
+Includes thermal pause and resume, a bounded log ring, an on-device benchmark,
+device report export, a six-shape particle avatar, and optional Device-Owner
 appliance mode for unattended operation.

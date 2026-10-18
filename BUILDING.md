@@ -1,9 +1,7 @@
 # Building Phonon
 
 This document describes how the Android app is built from source, with enough
-detail for a contributor or an F-Droid buildserver to reproduce an APK. It is a
-draft: values marked **REVIEW** must be confirmed against the repository before
-the F-Droid merge request is opened.
+detail for a contributor or an F-Droid buildserver to reproduce an APK.
 
 ## Repository layout (relevant parts)
 
@@ -33,8 +31,8 @@ app/                                   Gradle project root (settings.gradle.kts)
 | ABI            | `arm64-v8a` only                                 |
 | Java/Kotlin    | 17                                               |
 | AGP / Kotlin   | 8.7.3 / 1.9.24                                   |
-| versionCode    | 3                                                |
-| versionName    | 0.3.0                                            |
+| versionCode    | 1                                                |
+| versionName    | 0.1.0                                            |
 
 ## Toolchain
 
@@ -44,12 +42,12 @@ app/                                   Gradle project root (settings.gradle.kts)
 * **Android NDK `30.0.16138531`** as pinned in `app/app/build.gradle.kts`
   (`ndkVersion`).
 
-  **REVIEW / GAP:** `30.0.16138531` is the **r30-rc1** revision, i.e. a release
-  *candidate*. The stable r30 revision is **`30.0.16248370`**. The buildserver
-  installs NDKs through the SDK manager; an rc may not be offered on the stable
-  channel. Prefer pinning the stable revision (and updating `ndkVersion`) unless
-  the app genuinely needs the rc. Either spelling is accepted by the metadata
-  `ndk:` field (`r30` or the full revision).
+  This is the **r30-rc1** revision and it is pinned deliberately: every number in
+  `docs/performance.md` was produced with it, and it is the NDK installed on the
+  reference build host. If the F-Droid buildserver cannot fetch an rc through
+  `sdkmanager`, switch to the stable r30 revision **`30.0.16248370`**, update
+  `ndkVersion` and `ANDROID_NDK_VERSION` together, and re-run the benchmark
+  before publishing numbers — a different NDK is a different compiler.
 
 ## Native code: llama.cpp / ggml
 
@@ -58,72 +56,53 @@ native object be built from source on their buildserver** — prebuilt `.so` fil
 are not acceptable, and the current repo's `app/app/src/main/jniLibs/` approach
 (locally built, then copied in by `app/sync-native.sh`) does **not** satisfy this.
 
-The required change is to vendor and build llama.cpp from source. Two supported
-recipes; the metadata draft assumes the first.
+llama.cpp is a **pinned submodule** at `third_party/llama.cpp`, and the native
+artifacts are built from it before Gradle runs.
 
-### Recipe A — git submodule (preferred)
+    git submodule update --init --recursive
 
-1. Add llama.cpp as a submodule under the CMake project:
+Pinned engine revision: **`797de63b2fa7396dcc8caca76834c699ac84e1c3`**
+(`797de63`, "hexagon: add support for Q1_0 and Q2_0"). Do not float a branch;
+the measured numbers in `docs/performance.md` belong to this revision.
 
-       git submodule add https://github.com/ggml-org/llama.cpp \
-           app/app/src/main/cpp/llama.cpp
-       cd app/app/src/main/cpp/llama.cpp
-       git checkout <LLAMA_CPP_40_CHAR_COMMIT_SHA>     # pin, do not track a branch
+### Building the native artifacts
 
-2. Build it from `app/app/src/main/cpp/CMakeLists.txt`, e.g.:
+    export ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/30.0.16138531
+    ./app/build-native.sh
 
-       add_subdirectory(llama.cpp)
-       # and wire the phonon targets to link llama / ggml / mtmd
+That script configures llama.cpp for `arm64-v8a`, `android-31`, shared libraries,
+`GGML_CPU_REPACK=ON` and `LLAMA_BUILD_SERVER=ON`, builds `llama-server`, then
+installs the executable as `libllama-server.so` plus the `libggml*`/`libllama*`
+shared objects into `app/app/src/main/jniLibs/arm64-v8a/`. The rename is
+required because Android only extracts files named `lib*.so`.
 
-   The exact target list to produce (`libllama.so`, `libggml.so`,
-   `libggml-base.so`, `libggml-cpu.so`, `libmtmd.so`, and the `llama-server`
-   executable packaged as `libllama-server.so`) must be matched to the current
-   `sync-native.sh` output. **REVIEW:** `llama-server` is an executable; Android
-   only extracts files named `lib*.so`, so a rename step (a Gradle task or
-   `postbuild`) is still needed, or the server must be built as a shared library.
+`GGML_CPU_REPACK=ON` is not optional: without it Q4_K weights are not repacked
+for ARM and decode is 50–60% slower on identical weights.
 
-3. In the F-Droid metadata set `submodules: true` and keep the NDK pinned.
+`.native-build/` and `app/app/src/main/jniLibs/` are both ignored; nothing
+prebuilt is committed.
 
-   Pinned commit (`LLAMA_CPP_40_CHAR_COMMIT_SHA`): **REVIEW — record the exact
-   SHA here and in `NOTICE`.** e.g. build measured against llama.cpp commit
-   `________________________________________`.
+### F-Droid
 
-### Recipe B — clone in the recipe
-
-Keep llama.cpp out of the repo and let the metadata `prebuild:` clone it at a
-pinned SHA (see the commented block in `fdroiddata/com.phononai.app.yml`). Less
-clean; `submodules: true` is preferred.
+The metadata sets `submodules: true` and a `prebuild` step that runs
+`./app/build-native.sh` with the pinned NDK. Because the APK is built entirely
+from source in the repository, the previous prebuilt-binary blocker no longer
+applies.
 
 ### Building locally (mirrors what the buildserver does)
 
-    # NDK via sdkmanager
-    sdkmanager "ndk;30.0.16248370"      # or the rc revision, if using it
-
-    # submodule checkout
-    cd app && git submodule update --init --recursive
-
-    # build the release APK
-    ./gradlew :app:assembleRelease
-
-    # output
-    #   app/app/build/outputs/apk/release/app-release-unsigned.apk
-
-AGP passes the NDK's own cmake toolchain
-(`$NDK/build/cmake/android.toolchain.cmake`) to the CMake project; the CMake
-version used by AGP is 3.22.1 with Ninja. `-DANDROID_PLATFORM=android-31` and
-the toolchain are set automatically from `minSdk`/`ndkVersion`, so the recipe
-does not pin a toolchain file by hand.
+    git submodule update --init --recursive
+    export ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/30.0.16138531
+    ./app/build-native.sh
+    ./app/gradlew -p app :app:assembleDebug      # or :app:assembleRelease
 
 ## Gradle wrapper
 
-**GAP:** the repository contains no Gradle wrapper (`gradlew`,
-`gradle/wrapper/gradle-wrapper.jar`, `gradle-wrapper.properties`). Commit one
-pinned to a Gradle version compatible with AGP 8.7.3 (Gradle 8.9+), including
-`distributionSha256Sum`, so the F-Droid buildserver and CI build with an
-identical Gradle. Without it, the build depends on whatever Gradle the
-environment happens to provide.
+The wrapper lives in `app/` (`app/gradlew`, `app/gradle/wrapper/`), with the
+jar committed and the distribution pinned. Invoke it from the repository root
+with `-p app`, which is what CI does.
 
-    gradle wrapper --gradle-version 8.9 --distribution-type bin
+    ./app/gradlew -p app :app:assembleDebug
 
 ## Signing
 
@@ -140,11 +119,11 @@ F-Droid- and GitHub-signed APKs to have different signatures.
 |--------------|----------------------------------------------------|
 | JDK          | 17                                                 |
 | Android SDK  | platform 35, build-tools for AGP 8.7.3             |
-| Android NDK  | `30.0.16138531` (r30-rc1) — prefer `30.0.16248370` |
-| Gradle       | pin via wrapper (8.9+); currently unpinned (GAP)   |
+| Android NDK  | `30.0.16138531` (r30-rc1), pinned and measured     |
+| Gradle       | wrapper in `app/`, distribution pinned             |
 | CMake / Ninja| 3.22.1 / Ninja (provided by AGP + SDK)             |
 | ABI          | arm64-v8a                                          |
-| llama.cpp    | pinned submodule commit: **REVIEW**                |
+| llama.cpp    | `797de63b2fa7396dcc8caca76834c699ac84e1c3`         |
 
 ## Validation before submitting
 
