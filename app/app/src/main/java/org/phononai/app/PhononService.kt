@@ -90,6 +90,9 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
         // read it. Nothing is applied here: perfPlan() consults the stored
         // profile directly, so a fresh install (no profile) is unchanged.
         socTuning = SocTuning(settings)
+        // Size the context to this phone once, when the operator has not chosen
+        // one and no measured profile exists. Never overrides an operator value.
+        autoSizeContextIfNeeded()
         createNotificationChannel()
         acquireWakeLock()
 
@@ -225,6 +228,18 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
         json.put("thermal_user_override", settings.thermalUserOverride)
         json.put("thermal_status", thermal.thermalStatus ?: JSONObject.NULL)
         json.put("thermal_headroom", thermal.headroom?.toDouble() ?: JSONObject.NULL)
+        // Context sizing and the optional OpenCL backend, both device-derived.
+        val fitLabel = ContextSizing.verdictLabel(
+            modelBytes = modelFile.length(),
+            mmprojBytes = mmprojBytes,
+            context = settings.contextSize,
+            availBytes = fit.availBytes,
+        )
+        json.put("context_fit_label", fitLabel)
+        json.put("context_auto_sized", settings.contextAutoSized)
+        val opencl = GpuPrefill.present(applicationInfo.nativeLibraryDir)
+        json.put("gpu_prefill_present", opencl)
+        json.put("gpu_prefill_status", GpuPrefill.statusLine(opencl))
         if (::socTuning.isInitialized) {
             json.put("soc_tuning_profile", socTuning.activeProfileJson())
             // A stored profile measured against a different engine is not
@@ -599,7 +614,12 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
                 }
 
                 settings.modelPath = modelPath
+                // An operator-set context is authoritative: it must never be
+                // replaced by the auto-sizer on a later start. Setting it here,
+                // through the API or the Settings screen, marks it as chosen.
+                val previousContext = settings.contextSize
                 settings.contextSize = context
+                if (context != previousContext) settings.contextAutoSized = true
                 // Only a *changed* thread count is an override. Saving an
                 // unrelated field while the auto profile is active must leave
                 // auto-tuning alone, even though the UI posts the value it
@@ -871,6 +891,47 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
         settings.chargeWarningDismissedSinceMs = settings.batteryFullSinceMs
     }
 
+    /**
+     * Build the `devices/<soc>.yaml` contribution for this phone and save it
+     * where `adb pull` can reach it. Used by the Settings action; the device
+     * report embeds the same YAML.
+     */
+    fun uiFieldReportYaml(): FieldReportResult =
+        FieldReporting.build(this, settings, healthJson())
+
+    /**
+     * Size the context to this phone, once, when the operator has not chosen one
+     * and no measured profile exists. The largest size that fits within
+     * [ContextSizing.MIN_CONTEXT, model max] with 20% headroom wins; the choice
+     * and its fits/tight verdict are recorded. Never touches a context the
+     * operator has set (see [Settings.modelChosenByUser] /
+     * [Settings.contextAutoSized]).
+     */
+    private fun autoSizeContextIfNeeded() {
+        if (settings.modelChosenByUser || settings.contextAutoSized) return
+        if (settings.storedTuning() != null) return
+        val modelFile = File(settings.modelPath)
+        if (!modelFile.isFile) return
+        val mmprojBytes = settings.catalogEntryForCurrentModel()
+            ?.let { entry -> File(modelFile.parentFile, entry.mmprojFileName) }
+            ?.takeIf { it.isFile }?.length() ?: 0L
+        val modelMax = settings.catalogEntryForCurrentModel()?.contextSize
+            ?.takeIf { it >= ContextSizing.MIN_CONTEXT }
+            ?: settings.contextSize
+        val choice = ContextSizing.choose(
+            modelBytes = modelFile.length(),
+            mmprojBytes = mmprojBytes,
+            availBytes = MemoryFit.availBytes(this),
+            modelMaxContext = modelMax,
+        ) ?: return
+        settings.contextSize = choice.context
+        settings.recordAutoContext(choice.context, choice.label)
+        Log.i(
+            TAG,
+            "auto context ${choice.context} (${choice.label}) for ${modelFile.name}",
+        )
+    }
+
     private val tuningGuard = Any()
 
     private fun runTuningSweep() {
@@ -911,7 +972,7 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
                 soc = socTuning.soc,
                 decodeCpuRange = bestRange,
                 contextSize = settings.contextSize,
-                keepWarmIntervalS = settings.keepWarmIntervalS,
+                keepWarmIntervalS = settings.effectiveKeepWarmIntervalS(),
                 decode = decode,
                 prefill = prefill,
                 engineRev = SocTuning.ENGINE_REV,

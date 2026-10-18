@@ -95,11 +95,30 @@ class KeepWarm(
     @Volatile private var readyAtMs = 0L
     @Volatile private var stopped = false
 
+    /** The interval in force right now, for /health and the Settings card. */
+    @Volatile private var currentIntervalS = 0
+
+    /** Time-to-first-token of the most recent beat, in ms; 0 before the first. */
+    @Volatile private var lastTtftMs = 0L
+
+    /** Beats that produced a usable TTFT sample. */
+    @Volatile private var samples = 0
+
+    /** True once the adaptation has moved the interval off its starting value. */
+    @Volatile private var adapted = false
+
     val lastKeepaliveAtMsValue: Long get() = lastKeepaliveAtMs
     val keepaliveCount: Int get() = count
     val keepaliveFailures: Int get() = failures
+    val intervalSValue: Int
+        get() = currentIntervalS.takeIf { it > 0 }
+            ?: settings.effectiveKeepWarmIntervalS()
+    val lastTtftMsValue: Long get() = lastTtftMs
+    val samplesValue: Int get() = samples
+    val adaptedValue: Boolean get() = adapted
 
     fun start() {
+        currentIntervalS = settings.effectiveKeepWarmIntervalS()
         thread(name = "phonon-keepwarm", isDaemon = true) {
             var wasReady = false
             while (!stopped) {
@@ -129,17 +148,25 @@ class KeepWarm(
 
     fun healthFields(json: JSONObject) {
         json.put("keep_warm", settings.keepWarm)
-        json.put("keep_warm_interval_s", settings.keepWarmIntervalS)
+        json.put("keep_warm_interval_s", intervalSValue)
         json.put("last_keepalive_at", if (lastKeepaliveAtMs > 0) lastKeepaliveAtMs else JSONObject.NULL)
         json.put("keepalive_count", count)
         json.put("keepalive_failures", failures)
+        // Measured keep-warm: the TTFT of the last beat and how the interval
+        // adapted. 0 / 0 until the first beat lands, so the UI can say so.
+        json.put("keep_warm_last_ttft_ms", if (lastTtftMs > 0) lastTtftMs else JSONObject.NULL)
+        json.put("keep_warm_samples", samples)
+        json.put("keep_warm_adapted", adapted)
         if (lastFailure != null) json.put("keepalive_last_error", lastFailure)
     }
 
     private fun maybeBeat() {
-        val intervalMs = settings.keepWarmIntervalS.coerceAtLeast(
-            Settings.MIN_KEEP_WARM_INTERVAL_S,
-        ) * 1_000L
+        // Re-read the effective interval each tick: the operator's setting, a
+        // newly stored profile or a fresh adaptation must all take effect
+        // without a restart.
+        val intervalS = settings.effectiveKeepWarmIntervalS()
+        currentIntervalS = intervalS
+        val intervalMs = intervalS.coerceAtLeast(Settings.MIN_KEEP_WARM_INTERVAL_S) * 1_000L
         val now = System.currentTimeMillis()
         // The first beat lands one interval after `ready`; later beats are one
         // interval after the previous beat or the last client request.
@@ -152,7 +179,9 @@ class KeepWarm(
             count++
             val code = postBeat()
             if (code in 200..299) {
-                Log.d(TAG, "keepalive #$count ok: 1 token in ${System.currentTimeMillis() - started} ms")
+                val elapsed = System.currentTimeMillis() - started
+                Log.d(TAG, "keepalive #$count ok: 1 token in $elapsed ms")
+                adapt(elapsed)
             } else {
                 failures++
                 lastFailure = "HTTP $code"
@@ -164,6 +193,25 @@ class KeepWarm(
             Log.d(TAG, "keepalive #$count failed: $lastFailure")
         } finally {
             requests.endBeat()
+        }
+    }
+
+    /**
+     * Feed one post-idle TTFT sample into the adaptation. A one-token beat's wall
+     * time is its TTFT, and every beat is post-idle by construction, so each
+     * successful beat is a sample. Fast lengthens, slow shortens; the new value is
+     * persisted to the profile (see [Settings.persistAdaptedKeepWarm]).
+     */
+    private fun adapt(ttftMs: Long) {
+        lastTtftMs = ttftMs
+        samples++
+        val next = KeepWarmAdaptation.next(currentIntervalS, ttftMs)
+        if (next != currentIntervalS) {
+            val previous = currentIntervalS
+            currentIntervalS = next
+            adapted = true
+            settings.persistAdaptedKeepWarm(next)
+            Log.d(TAG, "keep-warm interval ${previous}s -> ${next}s (ttft ${ttftMs}ms)")
         }
     }
 

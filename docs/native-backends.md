@@ -81,3 +81,32 @@ one matching the host CPU loaded. On-device, the same scan runs over the Android
   .../lib/arm64/.../libggml-cpu-android_<level>.so` and which level it chose.
 - Confirming a phone without dotprod starts (the ARMv8.0 backend) instead of
   SIGILLing.
+
+## Optional OpenCL prefill backend (opt-in, off by default)
+
+`app/build-native.sh` can also build llama.cpp's OpenCL backend:
+
+```
+PHONON_OPENCL=1 app/build-native.sh
+```
+
+That adds `-DGGML_OPENCL=ON` and, because the backend is built with
+`GGML_BACKEND_DL`, produces `libggml-opencl.so` next to the CPU variants.
+`sync-native.sh` copies every `lib*.so`, so it lands in `jniLibs/arm64-v8a` and
+the APK. The default build is unchanged: without `PHONON_OPENCL=1` the flag is
+`-DGGML_OPENCL=OFF`, no OpenCL library is produced, and the shipped APK behaves
+exactly as before.
+
+**It is expected to help prefill only on Adreno GPUs, and it has not been tested
+on one.** Do not enable it by default. When the library is present the Settings
+screen says so ("GPU prefill: included — untested on this GPU"); the app only
+reports presence and never changes how the child is launched, so a build that
+carries the library still runs the same command line.
+
+What a device run would need to establish, and does not yet:
+
+- that the OpenCL backend is picked up and used at all on an Adreno phone;
+- that prefill throughput actually improves, without a decode regression;
+- that a phone whose GPU lacks a usable OpenCL driver falls back to the CPU
+  backend rather than failing to load.
+

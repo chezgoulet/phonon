@@ -516,6 +516,64 @@ class Settings(context: Context) {
         get() = prefs.getInt(KEY_KEEP_WARM_INTERVAL, 45)
         set(value) = prefs.edit().putInt(KEY_KEEP_WARM_INTERVAL, value).apply()
 
+    /**
+     * The last keep-warm interval the adaptation measured, or 0 when none has
+     * been measured yet. Read only after [storedTuning]'s own value: the profile
+     * is the measured record, this is the fallback that survives a restart when
+     * there is no profile yet.
+     */
+    var keepWarmAdaptedS: Int
+        get() = prefs.getInt(KEY_KEEP_WARM_ADAPTED, 0)
+        set(value) = prefs.edit().putInt(KEY_KEEP_WARM_ADAPTED, value).apply()
+
+    /**
+     * The keep-warm interval in force: the stored profile's measured value when
+     * present, else the last adapted value, else the operator's setting. See
+     * [KeepWarmAdaptation.start].
+     */
+    fun effectiveKeepWarmIntervalS(): Int =
+        KeepWarmAdaptation.start(
+            profileValueS = storedTuning()?.keepWarmIntervalS,
+            // The last adapted value wins over the operator's raw setting, but
+            // the setting is still the starting point on a phone that has not
+            // adapted yet (and still has no profile).
+            adaptedValueS = keepWarmAdaptedS.takeIf { it > 0 } ?: keepWarmIntervalS,
+        )
+
+
+    /**
+     * Persist an adapted keep-warm interval: remembered in the prefs so it
+     * survives a restart, and written into the stored profile when there is one
+     * so the profile carries the measured number rather than a default.
+     */
+    fun persistAdaptedKeepWarm(intervalS: Int) {
+        keepWarmAdaptedS = intervalS
+        val next = SocTuning.withKeepWarmInterval(socTuningJson, socKey, intervalS)
+        if (next != socTuningJson) socTuningJson = next
+    }
+
+    /**
+     * Record a context the app auto-sized for this phone. Only ever called when
+     * the operator has not chosen a context (see [modelChosenByUser]); the label
+     * is the fits/tight verdict the Settings card shows.
+     */
+    fun recordAutoContext(contextSize: Int, label: String) {
+        contextAutoSized = true
+        contextFitLabel = label
+        val next = SocTuning.withContext(socTuningJson, socKey, contextSize)
+        if (next != socTuningJson) socTuningJson = next
+    }
+
+    /** True once the app has picked a context for this phone on its own. */
+    var contextAutoSized: Boolean
+        get() = prefs.getBoolean(KEY_CONTEXT_AUTO_SIZED, false)
+        set(value) = prefs.edit().putBoolean(KEY_CONTEXT_AUTO_SIZED, value).apply()
+
+    /** The fits / tight / does-not-fit verdict for the current context. */
+    var contextFitLabel: String
+        get() = prefs.getString(KEY_CONTEXT_FIT_LABEL, "").orEmpty()
+        set(value) = prefs.edit().putString(KEY_CONTEXT_FIT_LABEL, value).apply()
+
     /** llama.cpp -lm: mmap (default), mlock or none. */
     var loadMode: String
         get() = prefs.getString(KEY_LOAD_MODE, LOAD_MODE_MMAP) ?: LOAD_MODE_MMAP
@@ -671,6 +729,9 @@ class Settings(context: Context) {
         private const val KEY_DOWNLOAD_URL = "download_url"
         private const val KEY_KEEP_WARM = "keep_warm"
         private const val KEY_KEEP_WARM_INTERVAL = "keep_warm_interval_s"
+        private const val KEY_KEEP_WARM_ADAPTED = "keep_warm_adapted_s"
+        private const val KEY_CONTEXT_AUTO_SIZED = "context_auto_sized"
+        private const val KEY_CONTEXT_FIT_LABEL = "context_fit_label"
         private const val KEY_LOAD_MODE = "load_mode"
         private const val KEY_TUNED_BY_USER = "tuned_by_user"
         private const val KEY_MODEL_CHOSEN = "model_chosen_by_user"

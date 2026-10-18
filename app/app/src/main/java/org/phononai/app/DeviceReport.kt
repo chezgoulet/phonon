@@ -41,6 +41,11 @@ object DeviceReport {
         val fit = MemoryFit.check(context, model.length(), mmproj?.length() ?: 0L, settings.contextSize)
         val oem = OemGuidance.forDevice()
         val benchmarks = settings.benchmarkHistory
+        // The same YAML the "Contribute this phone's profile" action produces,
+        // plus the SoC block and the stored tuning profile, are part of the
+        // report so one pull carries everything a reviewer needs.
+        val field = FieldReporting.build(context, settings, healthJson)
+        val opencl = GpuPrefill.present(context.applicationInfo.nativeLibraryDir)
 
         val json = JSONObject().apply {
             put("generated_at", Instant.now().toString())
@@ -63,6 +68,8 @@ object DeviceReport {
                 put("cpu_expected_backend", features.expectedBackend)
                 put("manufacturer", Build.MANUFACTURER ?: "")
             })
+            put("soc", field.soc)
+            put("tuning_profile", settings.storedTuning()?.toJson() ?: JSONObject.NULL)
             put("capabilities", JSONObject().apply {
                 put("native_required_features", NativeRequirements.requiredLabel)
                 put("missing_features", JSONArray(NativeRequirements.missing(features)))
@@ -110,15 +117,32 @@ object DeviceReport {
                 put("alias", settings.alias)
                 put("api_key_set", settings.apiKey.isNotBlank())
                 put("keep_warm", settings.keepWarm)
-                put("keep_warm_interval_s", settings.keepWarmIntervalS)
+                put("keep_warm_interval_s", settings.effectiveKeepWarmIntervalS())
+                put("keep_warm_measured_s", settings.keepWarmAdaptedS)
+                put("keep_warm_last_ttft_ms", health?.optLongOrNull("keep_warm_last_ttft_ms") ?: JSONObject.NULL)
+                put("context_fit_label", health?.optString("context_fit_label")?.ifBlank { null } ?: "unknown")
+                put("context_auto_sized", settings.contextAutoSized)
                 put("thermal_stop_c", settings.thermalStopC.toDouble())
                 put("thermal_resume_c", settings.thermalResumeC.toDouble())
                 put("gateway_endpoint", gatewayEndpoint(context, settings, health))
+            })
+            put("gpu_prefill", JSONObject().apply {
+                put("present", opencl)
+                put("status", GpuPrefill.statusLine(opencl))
+            })
+            put("field_report", JSONObject().apply {
+                put("file_name", field.fileName)
+                put("path", field.path)
+                put("yaml", field.yaml)
             })
             put("benchmarks", JSONArray().apply {
                 benchmarks.forEach { run -> put(run as Any) }
             })
         }
+
+        val socClusters = field.soc.optJSONArray("clusters")
+            ?.let { arr -> (0 until arr.length()).joinToString(", ") { arr.optString(it) } }
+            ?: "none"
 
         val text = buildString {
             appendLine("Phonon device report")
@@ -137,6 +161,21 @@ object DeviceReport {
             appendLine("  manufacturer: ${Build.MANUFACTURER ?: ""}")
             appendLine("  cpu_features: ${features.summary}")
             appendLine("  cpu_expected_backend: ${features.expectedBackend}")
+            appendLine()
+            appendLine("soc:")
+            appendLine("  soc: ${field.soc.optString("soc")}")
+            appendLine("  codename: ${field.soc.optString("codename")}")
+            appendLine("  hardware: ${field.soc.optString("hardware")}")
+            appendLine("  ram_gb: ${field.soc.optInt("ram_gb")}")
+            appendLine("  clusters: $socClusters")
+            appendLine("  allowed_cpus: ${field.soc.optString("allowed_cpus")}")
+            appendLine("  cpu_features: ${field.soc.optString("cpu_features")}")
+            appendLine("  thermal_source: ${field.soc.optString("thermal_source")}")
+            appendLine()
+            appendLine("tuning_profile: ${settings.storedTuning()?.toJson()?.toString() ?: "none"}")
+            appendLine("field_report: ${field.fileName}")
+            appendLine("field_report_path: ${field.path}")
+            appendLine("gpu_prefill: ${GpuPrefill.statusLine(opencl)}")
             appendLine()
             appendLine("capabilities:")
             appendLine("  native_required_features: ${NativeRequirements.requiredLabel.ifBlank { "(none)" }}")
@@ -181,7 +220,11 @@ object DeviceReport {
             appendLine("  alias: ${settings.alias}")
             appendLine("  api_key: ${if (settings.apiKey.isNotBlank()) "set" else "not set"}")
             appendLine("  keep_warm: ${settings.keepWarm}")
-            appendLine("  keep_warm_interval_s: ${settings.keepWarmIntervalS}")
+            appendLine("  keep_warm_interval_s: ${settings.effectiveKeepWarmIntervalS()}")
+            appendLine("  keep_warm_measured_s: ${settings.keepWarmAdaptedS}")
+            appendLine("  keep_warm_last_ttft_ms: ${health?.optLongOrNull("keep_warm_last_ttft_ms") ?: "null"}")
+            appendLine("  context_fit_label: ${health?.optString("context_fit_label")?.ifBlank { null } ?: "unknown"}")
+            appendLine("  context_auto_sized: ${settings.contextAutoSized}")
             appendLine("  thermal_stop_c: ${settings.thermalStopC}")
             appendLine("  thermal_resume_c: ${settings.thermalResumeC}")
             appendLine("  endpoint: ${gatewayEndpoint(context, settings, health)}")
@@ -245,7 +288,6 @@ object DeviceReport {
     }
 
     private val hashCache = HashMap<String, String>()
-
     @Synchronized
     private fun sha256(file: File): String {
         if (!file.isFile) return "missing"
@@ -269,3 +311,7 @@ object DeviceReport {
         return hex
     }
 }
+
+private fun JSONObject.optLongOrNull(key: String): Long? =
+    if (isNull(key) || !has(key)) null else optLong(key)
+
