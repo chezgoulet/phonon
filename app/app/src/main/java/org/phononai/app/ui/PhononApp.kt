@@ -1017,53 +1017,7 @@ private fun ModelsScreen(
         models.firstOrNull { it.active }?.name
     }
     val installed = remember(models) { models.map { it.file.name }.toSet() }
-    val device = remember { HardwareProfile.detect(context) }
-    val tier = device.tier.id
-    // A model whose tier outranks this phone will usually be killed by the
-    // system at load. Ask before spending 3 GB and an OOM on it.
-    var pendingDownload by remember { mutableStateOf<ModelEntry?>(null) }
-    fun tierRank(id: String): Int = when (id) {
-        "S" -> 0
-        "M" -> 1
-        "L" -> 2
-        else -> 0
-    }
-    fun startDownload(entry: ModelEntry) {
-        val service = AppState.service
-        if (service == null) {
-            toast(context, "Service is starting")
-            return
-        }
-        val result = service.uiDownloadModel(entry.id)
-        if (result.contains("\"error\"")) {
-            toast(context, JSONObject(result).optString("error", "Download failed"))
-        } else {
-            toast(context, "Downloading ${entry.fileName}")
-        }
-    }
-
-    pendingDownload?.let { entry ->
-        AlertDialog(
-            onDismissRequest = { pendingDownload = null },
-            title = { Text("Needs more RAM") },
-            text = {
-                Text(
-                    "${entry.displayName} is sized for ${entry.tierLabel} phones. " +
-                        "This device has ${device.ramGb} GB, so the server is likely to be " +
-                        "killed while loading. Downloading is allowed, but expect it not to run.",
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    pendingDownload = null
-                    startDownload(entry)
-                }) { Text("Download anyway", color = PhononColors.Cyan) }
-            },
-            dismissButton = {
-                TextButton(onClick = { pendingDownload = null }) { Text("Cancel") }
-            },
-        )
-    }
+    val tier = remember { HardwareProfile.detect(context).tier.id }
 
     Column(
         Modifier
@@ -1271,6 +1225,51 @@ private fun CatalogEntryCard(
     val downloadError = download?.error?.takeIf {
         download.dest.let { dest -> File(dest).name == entry.fileName }
     }
+
+    val device = remember { HardwareProfile.detect(context) }
+    var confirmDownload by remember { mutableStateOf(false) }
+    fun tierRank(id: String): Int = when (id) {
+        "S" -> 0
+        "M" -> 1
+        "L" -> 2
+        else -> 0
+    }
+    fun startDownload() {
+        val service = AppState.service
+        if (service == null) {
+            toast(context, "Service is starting")
+            return
+        }
+        val result = service.uiDownloadModel(entry.id)
+        if (result.contains("\"error\"")) {
+            toast(context, JSONObject(result).optString("error", "Download failed"))
+        } else {
+            toast(context, "Downloading ${entry.fileName}")
+        }
+    }
+
+    if (confirmDownload) {
+        AlertDialog(
+            onDismissRequest = { confirmDownload = false },
+            title = { Text("Needs more RAM") },
+            text = {
+                Text(
+                    "${entry.displayName} is sized for ${entry.tierLabel} phones. " +
+                        "This device has ${device.ramGb} GB, so the server is likely to be " +
+                        "killed while loading. Downloading is allowed, but expect it not to run.",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmDownload = false
+                    startDownload()
+                }) { Text("Download anyway", color = PhononColors.Cyan) }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmDownload = false }) { Text("Cancel") }
+            },
+        )
+    }
     Column(
         Modifier
             .fillMaxWidth()
@@ -1398,10 +1397,10 @@ private fun CatalogEntryCard(
                 } else {
                     TextButton(
                         onClick = {
-                            if (tierRank(entry.ramTier) > tierRank(tier)) {
-                                pendingDownload = entry
+                            if (tierRank(entry.ramTier) > tierRank(device.tier.id)) {
+                                confirmDownload = true
                             } else {
-                                startDownload(entry)
+                                startDownload()
                             }
                         },
                         enabled = !downloading && download?.active != true,

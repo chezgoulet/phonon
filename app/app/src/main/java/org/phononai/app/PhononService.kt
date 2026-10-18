@@ -171,7 +171,6 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
         if (battery.known) {
             json.put("battery_level", battery.levelPct)
             json.put("battery_charging", battery.charging)
-            battery.cycleCount?.let { json.put("battery_cycles", it) }
         }
         if (::hints.isInitialized) hints.healthFields(json)
         // A reload between commit and backend restart must not look `ready`

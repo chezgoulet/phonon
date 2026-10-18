@@ -4,7 +4,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.os.BatteryManager
-import android.os.Build
 
 /**
  * A read-only view of the battery, sampled on the thermal monitor's tick.
@@ -17,7 +16,6 @@ data class BatterySnapshot(
     val levelPct: Int,
     val charging: Boolean,
     val tempC: Float,
-    val cycleCount: Int?,
     val chargeCounterUah: Long?,
 ) {
     val known: Boolean get() = levelPct in 0..100
@@ -37,15 +35,12 @@ object BatteryHealth {
             status == BatteryManager.BATTERY_STATUS_FULL
         val tempC = (intent?.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, 0) ?: 0) / 10f
 
+        // Cycle count is not exposed by the compile SDK this build uses, so it
+        // is not reported rather than guessed from a raw property id.
         val manager = context.getSystemService(BatteryManager::class.java)
-        val cycles = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            manager?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CYCLE_COUNT)?.takeIf { it >= 0 }
-        } else {
-            null
-        }
         val counter = manager?.getLongProperty(BatteryManager.BATTERY_PROPERTY_CHARGE_COUNTER)
             ?.takeIf { it > 0 }
 
-        return BatterySnapshot(pct, charging, tempC, cycles, counter)
+        return BatterySnapshot(pct, charging, tempC, counter)
     }
 }
