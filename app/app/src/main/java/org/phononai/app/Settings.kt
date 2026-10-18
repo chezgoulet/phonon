@@ -593,7 +593,9 @@ class Settings(context: Context) {
 
         /** Only value written by builds before the default was removed. */
         private const val LEGACY_DEV_MODEL_URL = "http://127.0.0.1:9000/gemma-4-E2B-it-Q4_0.gguf"
-        const val DEFAULT_ALIAS = ModelCatalog.DEFAULT_ID
+        // Not a compile-time constant any more: the default id lives in
+        // assets/catalog.json with the rest of the catalog.
+        val DEFAULT_ALIAS = ModelCatalog.DEFAULT_ID
         const val DEFAULT_BIND_ADDRESS = "127.0.0.1"
         const val BIND_ANY = "0.0.0.0"
         const val LOAD_MODE_MMAP = "mmap"
