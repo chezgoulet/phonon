@@ -143,27 +143,37 @@ fun PhononApp() {
     var bypassSetup by rememberSaveable { mutableStateOf(false) }
     var showLog by remember { mutableStateOf(false) }
 
+    // The poll reads /health, the benchmark state and the download state. It
+    // used to run all three on the composition thread, where the first two
+    // touch a sticky receiver and a BatteryManager IPC and the last lists a
+    // directory — every second, for hours, on a phone that may be pinned. Read
+    // on IO and hand the result back to the composition.
     LaunchedEffect(Unit) {
         while (true) {
-            val service = AppState.service
-            val nextHealth = try {
-                service?.let { parseHealth(it.uiHealthJson()) }
-            } catch (_: Throwable) {
-                null
+            val next = withContext(Dispatchers.IO) {
+                val service = AppState.service
+                Triple(
+                    try {
+                        service?.let { parseHealth(it.uiHealthJson()) }
+                    } catch (_: Throwable) {
+                        null
+                    },
+                    try {
+                        service?.let { parseBenchmark(it.uiBenchmarkJson()) }
+                    } catch (_: Throwable) {
+                        null
+                    },
+                    try {
+                        service?.let { parseDownload(it.uiDownloadJson()) }
+                    } catch (_: Throwable) {
+                        null
+                    },
+                )
             }
-            val nextBenchmark = try {
-                service?.let { parseBenchmark(it.uiBenchmarkJson()) }
-            } catch (_: Throwable) {
-                null
-            }
-            val nextDownload = try {
-                service?.let { parseDownload(it.uiDownloadJson()) }
-            } catch (_: Throwable) {
-                null
-            }
+            val nextHealth = next.first
             health = nextHealth
-            benchmark = nextBenchmark
-            download = nextDownload
+            benchmark = next.second
+            download = next.third
             tick++
             val tps = nextHealth?.lastDecodeTps
             if (tps != null && tps > 0) {
@@ -176,10 +186,15 @@ fun PhononApp() {
         }
     }
 
-    val models = remember(tick, settings.modelPath) {
-        installedModels(context, settings.modelPath)
+    // Listing the models directory is IO too. Refresh it when the active model
+    // changes or a download finishes, rather than on every poll tick.
+    var models by remember { mutableStateOf<List<InstalledModel>>(emptyList()) }
+    var modelsLoaded by remember { mutableStateOf(false) }
+    LaunchedEffect(settings.modelPath, download?.dest, download?.done) {
+        models = withContext(Dispatchers.IO) { installedModels(context, settings.modelPath) }
+        modelsLoaded = true
     }
-    val showSetup = models.isEmpty() && !bypassSetup
+    val showSetup = modelsLoaded && models.isEmpty() && !bypassSetup
 
     CompositionLocalProvider(LocalContentColor provides PhononColors.Text) {
     Box(Modifier.fillMaxSize().background(PhononColors.Background)) {
@@ -1545,6 +1560,7 @@ private class SettingsDraft(context: Context) {
     var keepWarm by mutableStateOf(s.keepWarm)
     var reasoning by mutableStateOf(s.reasoning)
     var autoStart by mutableStateOf(s.autoStart)
+    var rateLimitPerMin by mutableStateOf(s.rateLimitPerMin.toString())
     var perfThreads by mutableStateOf(plan.threads.toString())
     var perfCpuRange by mutableStateOf(plan.cpuRange)
     var perfPrio by mutableStateOf(plan.prio.toString())
@@ -1821,6 +1837,7 @@ private fun SettingsScreen(
         val stop = draft.thermalStop.toFloatOrNull() ?: return "Pause threshold must be a number"
         val resume = draft.thermalResume.toFloatOrNull() ?: return "Resume threshold must be a number"
         val warmInterval = draft.keepWarmInterval.toIntOrNull() ?: return "Keep-warm interval must be a number"
+        val rateLimit = draft.rateLimitPerMin.toIntOrNull() ?: return "Rate limit must be a number"
         val body = JSONObject().apply {
             put(
                 "model_path",
@@ -1845,6 +1862,7 @@ private fun SettingsScreen(
             put("keep_warm", draft.keepWarm)
             put("reasoning", draft.reasoning)
             put("auto_start", draft.autoStart)
+            put("rate_limit_per_min", rateLimit)
         }
         val result = service.updateSettings(body.toString())
         if (jsonHasError(result)) {
@@ -2194,6 +2212,19 @@ private fun SettingsScreen(
                 Spacer(Modifier.height(8.dp))
                 ToggleRow("Reasoning", draft.reasoning) { draft.reasoning = it }
                 ToggleRow("Start on boot", draft.autoStart) { draft.autoStart = it }
+                Spacer(Modifier.height(10.dp))
+                PhononField(
+                    value = draft.rateLimitPerMin,
+                    onValueChange = { draft.rateLimitPerMin = it },
+                    label = "Rate limit (requests/min per client)",
+                    keyboardType = KeyboardType.Number,
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "Shared by the control routes and /v1, per source address. 0 disables the limiter.",
+                    color = PhononColors.TextDim,
+                    fontSize = 11.sp,
+                )
                 Spacer(Modifier.height(4.dp))
                 HorizontalDivider(color = PhononColors.Border)
                 TextButton(onClick = onShowLog) {
