@@ -117,11 +117,12 @@ object ModelCatalog {
             url = "https://huggingface.co/unsloth/Qwen3.5-4B-GGUF/resolve/main/Qwen3.5-4B-Q4_K_M.gguf",
             sizeBytes = 2_740_937_888L,
             sha256 = "00fe7986ff5f6b463e62455821146049db6f9313603938a70800d1fb69ef11a4",
-            contextSize = 32_768,
+            contextSize = 16_384,
             quant = "Q4_K_M",
-            decodeRuns = emptyList(),
-            tradeOff = "Better answers than the 2B; unmeasured here and tight on 8 GB RAM.",
-            ramTier = "M",
+            decodeRuns = listOf(4.13, 3.94),
+            tradeOff = "Better answers than the 2B at about 4 tok/s. Runs on 8 GB at 16K " +
+                "with ~600 MB free; at 32K it fits but leaves ~250 MB.",
+            ramTier = "S",
         ),
         ModelEntry(
             id = "qwen3.5-9b",
@@ -162,9 +163,10 @@ object ModelCatalog {
             sha256 = "a555b900214b477d8880e7832e0b8925e139b0159640036b09fe472b6f2097f2",
             contextSize = 16_384,
             quant = "Q4_0",
-            decodeRuns = emptyList(),
-            tradeOff = "The larger multimodal Gemma; unmeasured here and a 12 GB choice.",
-            ramTier = "M",
+            decodeRuns = listOf(4.12, 3.85),
+            tradeOff = "The larger multimodal Gemma at about 4 tok/s. Runs on 8 GB at 16K " +
+                "with ~560 MB free.",
+            ramTier = "S",
             multimodal = true,
         ),
         ModelEntry(

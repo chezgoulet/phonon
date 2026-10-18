@@ -21,10 +21,10 @@ run 1 / run 2.
 | Family | Model | Quant | Context | Download | Pixel 7 decode | Tier |
 |---|---|---|---:|---:|---|---|
 | Qwen3.5 | Qwen3.5-2B | Q4_K_M | 32K | 1.28 GB | **9.20 / 8.84 tok/s** | 8 GB |
-| Qwen3.5 | Qwen3.5-4B | Q4_K_M | 32K | 2.74 GB | unmeasured | 12 GB |
+| Qwen3.5 | Qwen3.5-4B | Q4_K_M | 16K | 2.74 GB | **4.13 / 3.94 tok/s** | 8 GB (tight) |
 | Qwen3.5 | Qwen3.5-9B | Q4_K_M | 48K | 5.68 GB | unmeasured | 16 GB |
 | Gemma 4 | Gemma 4 E2B | Q4_0 | 16K | 2.84 GB | **7.05 / 6.74 tok/s** | 8 GB |
-| Gemma 4 | Gemma 4 E4B | Q4_0 | 16K | 4.59 GB | unmeasured | 12 GB |
+| Gemma 4 | Gemma 4 E4B | Q4_0 | 16K | 4.59 GB | **4.12 / 3.85 tok/s** | 8 GB (tight) |
 | MiniCPM5 | MiniCPM5-2B | Q4_K_M | 32K | 1.56 GB | **6.82 / 6.57 tok/s** | 8 GB |
 | Granite | Granite 4.2 3B | Q4_K_M | 32K | 2.24 GB | **4.41 / 4.39 tok/s** | 8 GB |
 | Nemotron | Nemotron 3 Nano 4B | Q4_K_M | 32K | 2.84 GB | **3.57 / 3.46 tok/s** | 8 GB |
@@ -116,3 +116,19 @@ declares for the pinned file. The downloader:
 A model whose RAM tier outranks the device is not silently downloaded: the
 picker asks first, states the device's RAM and the model's tier, and allows an
 explicit override.
+
+## 4B class on an 8 GB phone
+
+Both 4B models were measured on the reference Pixel 7 rather than assumed
+impossible. At 16K context they load, serve and return tool calls at about
+4 tok/s:
+
+| Model | Context | Decode | RSS | Free after load |
+|---|---|---|---|---|
+| Qwen3.5-4B | 16K | 4.13 / 3.94 tok/s | 3.54 GB | 616 MB |
+| Gemma 4 E4B | 16K | 4.12 / 3.85 tok/s | 3.73 GB | 562 MB |
+
+Qwen3.5-4B at 32K also runs, but leaves about 250 MB free, which is not enough
+headroom for anything else on the phone. The catalog therefore defaults both to
+16K on 8 GB devices: the point is to offer a configuration that works, not a
+bigger context that does not.
