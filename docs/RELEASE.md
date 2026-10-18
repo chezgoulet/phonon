@@ -57,7 +57,7 @@ is pending reproducible builds.
 
 ## Licence
 
-AGPL-3.0. The bundled inference engine is llama.cpp (MIT); model weights are
+Apache License 2.0. The bundled inference engine is llama.cpp (MIT); model weights are
 downloaded by the user and carry their own licences.
 
 ## Cutting the release (when approved)
