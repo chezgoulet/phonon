@@ -61,7 +61,7 @@ jobs:
         run: |
           set -euo pipefail
           SDK="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
-          SDKM="$(find "$SDK/cmdline-tools" -maxdepth 2 -name sdkmanager -type f | sort | tail -n1)"
+          SDKM="$(find "$SDK/cmdline-tools" -maxdepth 4 -name sdkmanager -type f | sort | tail -n1)"
           test -n "$SDKM" || { echo "::error::no sdkmanager"; exit 1; }
           yes | "$SDKM" --licenses > /dev/null || true
           # The pinned NDK is an r30 release candidate, which lives on a preview channel.
