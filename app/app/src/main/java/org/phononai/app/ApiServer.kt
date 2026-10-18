@@ -15,7 +15,12 @@ import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
 import java.security.MessageDigest
+import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.Executors
+import java.util.concurrent.RejectedExecutionException
+import java.util.concurrent.ScheduledFuture
+import java.util.concurrent.ThreadPoolExecutor
+import java.util.concurrent.TimeUnit
 import kotlin.concurrent.thread
 
 interface ApiHandler {
@@ -65,9 +70,28 @@ class ApiServer(
     @Volatile private var serverSocket: ServerSocket? = null
     private var acceptThread: Thread? = null
     private var retryThread: Thread? = null
-    private val clients = Executors.newCachedThreadPool { r ->
-        Thread(r, "phonon-http-client").apply { isDaemon = true }
+    /**
+     * Bounded on purpose: a cached pool grows one thread per accepted
+     * connection without limit, so a burst of stalled readers could exhaust
+     * the process. Past the queue the pool rejects and the connection is
+     * answered 503 and closed instead.
+     */
+    private val clients = ThreadPoolExecutor(
+        MAX_WORKERS,
+        MAX_WORKERS,
+        30L,
+        TimeUnit.SECONDS,
+        ArrayBlockingQueue(MAX_QUEUED),
+        { r -> Thread(r, "phonon-http-client").apply { isDaemon = true } },
+    )
+
+    /** Drops a connection whose reader has stopped draining our writes. */
+    private val stallWatchdog = Executors.newSingleThreadScheduledExecutor { r ->
+        Thread(r, "phonon-http-stall").apply { isDaemon = true }
     }
+
+    /** Shared budget for the control routes and /v1; see [RateLimiter]. */
+    private val rateLimiter = RateLimiter({ settings.rateLimitPerMin }, Settings.RATE_LIMIT_BURST)
 
     /**
      * Bind synchronously without accepting. The caller closes the old
@@ -205,6 +229,7 @@ class ApiServer(
         // Not shutdownNow: the request that triggered a rebind is still
         // running on this instance and must be able to write its response.
         clients.shutdown()
+        stallWatchdog.shutdownNow()
     }
 
     private fun acceptLoop() {
@@ -218,6 +243,22 @@ class ApiServer(
             }
             try {
                 clients.execute { handle(client) }
+            } catch (_: RejectedExecutionException) {
+                // The pool is bounded; refuse politely rather than park the
+                // connection in an unbounded wait for a worker.
+                try {
+                    respond(
+                        BufferedOutputStream(client.getOutputStream()), 503,
+                        "application/json; charset=utf-8",
+                        """{"error":"server busy","retry_after_s":1}""".toByteArray(),
+                        mapOf("Retry-After" to "1"),
+                    )
+                } catch (_: Throwable) {
+                }
+                try {
+                    client.close()
+                } catch (_: Throwable) {
+                }
             } catch (_: Throwable) {
                 try {
                     client.close()
@@ -230,19 +271,81 @@ class ApiServer(
     private fun handle(socket: Socket) {
         socket.use { s ->
             s.soTimeout = 30_000
+            val guard = GuardedOutput(s.getOutputStream())
+            val watchdog = armStallGuard(s, guard)
             try {
                 val input = BufferedInputStream(s.getInputStream())
-                val output = BufferedOutputStream(s.getOutputStream())
-                val req = readRequest(input, output) ?: return
+                val output = BufferedOutputStream(guard)
+                val req = readRequest(input, output, s.inetAddress.hostAddress ?: "") ?: return
                 route(req, output)
                 output.flush()
             } catch (t: Throwable) {
                 Log.w(TAG, "request failed: ${t.javaClass.simpleName}: ${t.message}")
+            } finally {
+                watchdog?.cancel(false)
             }
         }
     }
 
+    /**
+     * A socket has no write timeout: a reader that stops reading parks the
+     * worker in write() until the kernel gives up, which can be long enough to
+     * matter. This closes the connection once no bytes have moved for
+     * [WRITE_STALL_MS]. Progress, not a start-to-finish deadline, is the test,
+     * so a slow but live streaming generation is untouched.
+     */
+    private fun armStallGuard(socket: Socket, guard: GuardedOutput): ScheduledFuture<*>? = try {
+        stallWatchdog.scheduleWithFixedDelay(
+            {
+                if (System.currentTimeMillis() - guard.lastProgressMs > WRITE_STALL_MS) {
+                    Log.w(TAG, "dropping stalled client $socket")
+                    try {
+                        socket.close()
+                    } catch (_: Throwable) {
+                    }
+                }
+            },
+            WRITE_STALL_MS,
+            WRITE_STALL_MS,
+            TimeUnit.MILLISECONDS,
+        )
+    } catch (_: Throwable) {
+        null
+    }
+
+    /** Timestamps write progress so the stall watchdog can see a reader stop. */
+    private class GuardedOutput(private val out: OutputStream) : OutputStream() {
+        @Volatile
+        var lastProgressMs = System.currentTimeMillis()
+            private set
+
+        override fun write(b: Int) {
+            out.write(b)
+            lastProgressMs = System.currentTimeMillis()
+        }
+
+        override fun write(b: ByteArray, off: Int, len: Int) {
+            out.write(b, off, len)
+            lastProgressMs = System.currentTimeMillis()
+        }
+
+        override fun flush() = out.flush()
+
+        override fun close() = out.close()
+    }
+
     private fun route(req: Request, out: OutputStream) {
+        // Per source address, shared by the control routes and /v1. Checked
+        // before auth so a flood cannot reach the key comparison either; a
+        // configured rate_limit_per_min of 0 disables it.
+        if (req.path != "/health" && !rateLimiter.allow(req.remoteAddress)) {
+            respond(
+                out, 429, "application/json; charset=utf-8",
+                """{"error":"rate limit exceeded","retry_after_s":1}""".toByteArray(),
+                mapOf("Retry-After" to "1"),
+            )
+            return
+        }
         // /health stays unauthenticated so a liveness probe works without the
         // key. Everything else on the operator port requires the key when one
         // is configured. With no key and loopback binding this is unchanged.
@@ -578,7 +681,11 @@ class ApiServer(
         }
     }
 
-    private fun readRequest(input: BufferedInputStream, out: OutputStream): Request? {
+    private fun readRequest(
+        input: BufferedInputStream,
+        out: OutputStream,
+        remoteAddress: String,
+    ): Request? {
         val requestLine = readLine(input) ?: return null
         if (requestLine.isBlank()) return null
         val parts = requestLine.split(' ')
@@ -586,9 +693,13 @@ class ApiServer(
         val method = parts[0]
         val rawTarget = parts[1]
         var headers = LinkedHashMap<String, String>()
+        var headerLines = 0
         while (true) {
             val line = readLine(input) ?: break
             if (line.isEmpty()) break
+            // A per-line length cap alone still allows an unbounded number of
+            // lines; bound the count too and close the connection beyond it.
+            if (++headerLines > MAX_HEADER_LINES) throw IOException("too many header lines")
             val idx = line.indexOf(':')
             if (idx <= 0) continue
             headers[line.substring(0, idx).trim().lowercase()] =
@@ -610,7 +721,7 @@ class ApiServer(
         val q = rawTarget.indexOf('?')
         val path = if (q < 0) rawTarget else rawTarget.substring(0, q)
         val query = if (q < 0) "" else rawTarget.substring(q + 1)
-        return Request(method, path, query, headers, body)
+        return Request(method, path, query, headers, body, remoteAddress)
     }
 
     private fun readChunkedBody(input: BufferedInputStream): ByteArray {
@@ -697,6 +808,7 @@ class ApiServer(
         401 -> "Unauthorized"
         404 -> "Not Found"
         409 -> "Conflict"
+        429 -> "Too Many Requests"
         500 -> "Internal Server Error"
         502 -> "Bad Gateway"
         503 -> "Service Unavailable"
@@ -709,6 +821,7 @@ class ApiServer(
         val query: String,
         val headers: Map<String, String>,
         val body: ByteArray,
+        val remoteAddress: String,
     )
 
     private companion object {
@@ -716,7 +829,64 @@ class ApiServer(
         const val MAX_REQUEST_BODY = 64L * 1024 * 1024
         const val MAX_CAPTURE = 4 * 1024 * 1024
         const val BIND_ATTEMPTS = 20
+        const val MAX_HEADER_LINES = 100
+        const val MAX_WORKERS = 32
+        const val MAX_QUEUED = 32
+
+        /** No bytes written for this long means the reader has stopped reading. */
+        const val WRITE_STALL_MS = 120_000L
+
+        /** Upper bound on clients the rate limiter remembers at once. */
+        const val MAX_TRACKED = 1024
         const val BIND_RETRY_MS = 25L
+        /**
+         * Token bucket per source address. Control routes and /v1 share one
+         * budget so a misbehaving client cannot flood either, and the budget
+         * follows the live `rate_limit_per_min` setting. 0 disables the
+         * limiter.
+         */
+        class RateLimiter(
+            private val perMinute: () -> Int,
+            private val burst: Int,
+        ) {
+            private class Bucket(var tokens: Double, var lastMs: Long)
+
+            private val lock = Any()
+
+            // Insertion-ordered and size-capped: a bound on how many clients
+            // the limiter itself can remember. Eviction is oldest-first, not
+            // true LRU, which is enough to stop the table growing without
+            // limit under spoofed addresses.
+            private val buckets = LinkedHashMap<String, Bucket>()
+
+            fun allow(client: String): Boolean {
+                val rate = perMinute()
+                if (rate <= 0) return true
+                val now = System.currentTimeMillis()
+                synchronized(lock) {
+                    val bucket = buckets[client] ?: Bucket(burst.toDouble(), now).also {
+                        if (buckets.size >= MAX_TRACKED) {
+                            val oldest = buckets.entries.iterator()
+                            if (oldest.hasNext()) {
+                                oldest.next()
+                                oldest.remove()
+                            }
+                        }
+                        buckets[client] = it
+                    }
+                    val elapsed = (now - bucket.lastMs).coerceAtLeast(0L)
+                    bucket.tokens = (bucket.tokens + elapsed * (rate / 60_000.0))
+                        .coerceAtMost(burst.toDouble())
+                    bucket.lastMs = now
+                    if (bucket.tokens >= 1.0) {
+                        bucket.tokens -= 1.0
+                        return true
+                    }
+                    return false
+                }
+            }
+        }
+
         val HOP_BY_HOP = setOf(
             "host", "connection", "keep-alive", "proxy-connection", "te", "trailer",
             "transfer-encoding", "upgrade", "expect", "content-length",

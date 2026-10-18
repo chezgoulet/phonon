@@ -29,7 +29,25 @@ class Settings(context: Context) {
     val hardware: DeviceProfile get() = HardwareProfile.detect(appContext)
 
     fun defaultModelPath(): String =
-        File(File(filesDir, "models"), hardware.tier.modelFile).absolutePath
+        File(modelsDir, hardware.tier.modelFile).absolutePath
+
+    /** The one directory a model file may live in; see [isInsideModelsDir]. */
+    val modelsDir: File get() = File(filesDir, "models")
+
+    /**
+     * True when [path] canonicalises to a file inside `files/models`. The API
+     * can set `model_path`, so it must not be able to point the child at
+     * `/etc/passwd` or anywhere else outside app storage.
+     */
+    fun isInsideModelsDir(path: String): Boolean {
+        val dir = modelsDir.canonicalFile
+        val candidate = try {
+            File(path).canonicalFile
+        } catch (_: Throwable) {
+            return false
+        }
+        return candidate.parentFile == dir || candidate == dir
+    }
 
     /** The catalog entry for the currently selected file, if it is one we know. */
     fun catalogEntryForCurrentModel(): ModelEntry? =
@@ -304,6 +322,17 @@ class Settings(context: Context) {
         get() = prefs.getString(KEY_API_KEY, "") ?: ""
         set(value) = prefs.edit().putString(KEY_API_KEY, value).apply()
 
+    /**
+     * Requests per minute per client address, shared by the control routes and
+     * /v1. 0 disables the limiter. The default is deliberately far above what
+     * an agent doing real work produces on a phone whose requests take minutes.
+     */
+    var rateLimitPerMin: Int
+        get() = prefs.getInt(KEY_RATE_LIMIT_PER_MIN, DEFAULT_RATE_LIMIT_PER_MIN)
+        set(value) = prefs.edit()
+            .putInt(KEY_RATE_LIMIT_PER_MIN, value.coerceIn(0, MAX_RATE_LIMIT_PER_MIN))
+            .apply()
+
     var alias: String
         get() = prefs.getString(KEY_ALIAS, DEFAULT_ALIAS) ?: DEFAULT_ALIAS
         set(value) = prefs.edit().putString(KEY_ALIAS, value).apply()
@@ -391,6 +420,7 @@ class Settings(context: Context) {
         put("battery_pause_below", batteryPauseBelow)
         put("battery_resume_above", batteryResumeAbove)
         put("api_key_set", apiKey.isNotBlank())
+        put("rate_limit_per_min", rateLimitPerMin)
         put("alias", alias)
         put("auto_start", autoStart)
         put("download_url", downloadUrl)
@@ -419,6 +449,11 @@ class Settings(context: Context) {
         const val DEFAULT_KEEP_WARM_INTERVAL_S = 45
         const val MAX_CONTEXT = 65_536
         const val MAX_BENCHMARK_HISTORY = 10
+
+        /** Control and /v1 requests per minute per client; 0 disables. */
+        const val DEFAULT_RATE_LIMIT_PER_MIN = 600
+        const val MAX_RATE_LIMIT_PER_MIN = 60_000
+        const val RATE_LIMIT_BURST = 100
 
         fun isLoopbackBind(value: String): Boolean {
             val v = value.trim()
@@ -496,5 +531,6 @@ class Settings(context: Context) {
         private const val KEY_ANIMATE_GENERATING = "animate_avatar_while_generating"
         private const val KEY_PRESENCE_SHAPE = "visual_shape_presence"
         private const val KEY_SERVING_REQUESTED = "serving_requested"
+        private const val KEY_RATE_LIMIT_PER_MIN = "rate_limit_per_min"
     }
 }

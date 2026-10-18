@@ -346,10 +346,16 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
                 var loadMode = settings.loadMode
                 var thermalStop = settings.thermalStopC
                 var thermalResume = settings.thermalResumeC
+                var rateLimit = settings.rateLimitPerMin
 
                 if (json.has("model_path")) {
                     val value = json.optString("model_path").trim()
                     if (value.isBlank()) return error("model_path must not be blank")
+                    // The API sets this path; contain it to the app's own
+                    // models directory rather than any file on the device.
+                    if (!settings.isInsideModelsDir(value)) {
+                        return error("model_path must be inside the models directory")
+                    }
                     modelPath = value
                 }
                 if (json.has("context")) {
@@ -389,6 +395,15 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
                     alias = value
                 }
                 if (json.has("api_key")) apiKey = json.optString("api_key")
+                if (json.has("rate_limit_per_min")) {
+                    val value = json.optInt("rate_limit_per_min", rateLimit)
+                    if (value < 0 || value > Settings.MAX_RATE_LIMIT_PER_MIN) {
+                        return error(
+                            "rate_limit_per_min must be 0..${Settings.MAX_RATE_LIMIT_PER_MIN}",
+                        )
+                    }
+                    rateLimit = value
+                }
                 if (json.has("auto_start")) autoStart = json.optBoolean("auto_start", autoStart)
                 if (json.has("download_url")) {
                     val value = json.optString("download_url").trim()
@@ -481,6 +496,7 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
                 settings.reasoning = reasoning
                 settings.alias = alias
                 settings.apiKey = apiKey
+                settings.rateLimitPerMin = rateLimit
                 settings.autoStart = autoStart
                 settings.downloadUrl = downloadUrl
                 settings.keepWarm = keepWarm

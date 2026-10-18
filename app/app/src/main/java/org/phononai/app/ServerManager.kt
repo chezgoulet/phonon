@@ -97,6 +97,14 @@ class ServerManager(
             ) {
                 return
             }
+            // model_path is settable over the API; never exec against a path
+            // that is not inside the app's own models directory.
+            if (!settings.isInsideModelsDir(settings.modelPath)) {
+                lastError = "model path outside app storage: ${settings.modelPath}"
+                ringLog.append(lastError!!)
+                setState(ServerState.ERROR)
+                return
+            }
             val model = File(settings.modelPath)
             if (!model.isFile) {
                 lastError = "model not found: ${model.absolutePath}"
@@ -345,6 +353,13 @@ class ServerManager(
         val bin = File(context.applicationInfo.nativeLibraryDir, BIN_NAME)
         if (!bin.isFile) {
             lastError = "missing native binary: ${bin.absolutePath}"
+            isDesired = false
+            setState(ServerState.ERROR)
+            ringLog.append(lastError!!)
+            return
+        }
+        if (!settings.isInsideModelsDir(settings.modelPath)) {
+            lastError = "model path outside app storage: ${settings.modelPath}"
             isDesired = false
             setState(ServerState.ERROR)
             ringLog.append(lastError!!)

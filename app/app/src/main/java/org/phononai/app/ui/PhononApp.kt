@@ -1560,6 +1560,7 @@ private class SettingsDraft(context: Context) {
     var keepWarm by mutableStateOf(s.keepWarm)
     var reasoning by mutableStateOf(s.reasoning)
     var autoStart by mutableStateOf(s.autoStart)
+    var rateLimitPerMin by mutableStateOf(s.rateLimitPerMin.toString())
     var perfThreads by mutableStateOf(plan.threads.toString())
     var perfCpuRange by mutableStateOf(plan.cpuRange)
     var perfPrio by mutableStateOf(plan.prio.toString())
@@ -1836,6 +1837,7 @@ private fun SettingsScreen(
         val stop = draft.thermalStop.toFloatOrNull() ?: return "Pause threshold must be a number"
         val resume = draft.thermalResume.toFloatOrNull() ?: return "Resume threshold must be a number"
         val warmInterval = draft.keepWarmInterval.toIntOrNull() ?: return "Keep-warm interval must be a number"
+        val rateLimit = draft.rateLimitPerMin.toIntOrNull() ?: return "Rate limit must be a number"
         val body = JSONObject().apply {
             put(
                 "model_path",
@@ -1860,6 +1862,7 @@ private fun SettingsScreen(
             put("keep_warm", draft.keepWarm)
             put("reasoning", draft.reasoning)
             put("auto_start", draft.autoStart)
+            put("rate_limit_per_min", rateLimit)
         }
         val result = service.updateSettings(body.toString())
         if (jsonHasError(result)) {
@@ -2209,6 +2212,19 @@ private fun SettingsScreen(
                 Spacer(Modifier.height(8.dp))
                 ToggleRow("Reasoning", draft.reasoning) { draft.reasoning = it }
                 ToggleRow("Start on boot", draft.autoStart) { draft.autoStart = it }
+                Spacer(Modifier.height(10.dp))
+                PhononField(
+                    value = draft.rateLimitPerMin,
+                    onValueChange = { draft.rateLimitPerMin = it },
+                    label = "Rate limit (requests/min per client)",
+                    keyboardType = KeyboardType.Number,
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "Shared by the control routes and /v1, per source address. 0 disables the limiter.",
+                    color = PhononColors.TextDim,
+                    fontSize = 11.sp,
+                )
                 Spacer(Modifier.height(4.dp))
                 HorizontalDivider(color = PhononColors.Border)
                 TextButton(onClick = onShowLog) {
