@@ -15,6 +15,41 @@ Model and server for every row:
   `ignore_eos: true`, non-streaming, through the app's own
   `/v1/chat/completions` proxy
 
+## Current numbers (0.1.7)
+
+The build now targets ARMv8.2 with dot-product instructions, and prefill has its
+own thread count. Pixel 7, Qwen3.5-2B Q4_K_M, 32K context, 128 greedy tokens
+unless stated:
+
+| Where | Decode | Prefill |
+|---|---|---|
+| through the app | **13.19 / 12.50 tok/s** | 53 tok/s (short prompt) |
+| through the app, 2,415-token prompt | 10.52 tok/s | **69 tok/s — 35 s instead of 157 s** |
+| raw server, `-t 2 --cpu-range 6-7` | 13.95 / 13.54 tok/s | 58 tok/s |
+| raw server, adding `-tb 4` | — | **82 tok/s** |
+
+The prefill number is the one that changes what the product is. An agent's
+trimmed system prompt and tool schemas are about 2.8K tokens; at the previous
+15 tok/s that was three minutes before the model read the task. It is now under
+a minute.
+
+### Why the earlier attribution was wrong
+
+The 0.1.x build passed `GGML_CPU_REPACK=ON` but no `-march`, so the cross-compile
+targeted baseline ARMv8. The dot-product kernels were therefore absent, and the
+repack selector requires them: Q4_K weights were never repacked. The 50–60% gain
+recorded below was real as a measurement but was credited to the wrong cause —
+the rebuild also coincided with a change from a background to a visible
+process, which moves the child onto the fast cores. This page previously said
+repack was "the real lever". It was not; instruction selection was, and the two
+effects were confounded. Both are now separated: `-march=armv8.2-a+dotprod+fp16`
+is the lever, and `-tb` is the prefill lever.
+
+A portable alternative is `GGML_CPU_ALL_VARIANTS=ON` with `GGML_BACKEND_DL=ON`,
+which selects kernels at runtime. It is not used here because every device this
+project targets has dotprod, and the single-variant build is simpler to package
+and to reproduce.
+
 ## What changed
 
 1. **Runtime profile.** The service reads `Cpus_allowed_list` from
@@ -227,9 +262,11 @@ repack (87 symbol references in `libggml-cpu.so`). Same phone, 32K context,
 A **~50–60% improvement with no quantization change**, and Q4_0 versus Q4_K_M is
 now within noise — so keep Q4_K_M and its better quality.
 
-Requirement for any future build: `GGML_CPU_REPACK=ON` **and** a llama.cpp
-revision that carries the Q4_K repack kernels. The engineering sample that
-preceded this measured 5.5 tok/s precisely because it lacked them.
+**Correction (0.1.7).** This section credits repacking for that gain. It should
+not: the build had no `-march`, so dotprod was absent and repacking never
+engaged, and the same rebuild also moved the process from background to visible.
+See "Current numbers" above. Repacking remains required, but it is not what
+moved the number.
 
 ## Speculative decoding: a negative result (2026-10-18)
 
