@@ -240,7 +240,10 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
                 DownloadState.success(dest.absolutePath)
                 Log.i(TAG, "download complete: ${dest.absolutePath} (${dest.length()} bytes)")
                 synchronized(settings.configLock) {
-                    if (settings.autoStart && !server.thermalPaused) {
+                    // If the server was running, it is running the previous
+                    // model: apply the new one. If it was stopped, leave it
+                    // stopped — autoStart governs boot, not this decision.
+                    if (server.isDesired && !server.thermalPaused) {
                         wantServer = true
                         configHashAtLaunch = currentConfigHash()
                         server.start()

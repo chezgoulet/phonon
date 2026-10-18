@@ -159,6 +159,13 @@ class ServerManager(
     @Volatile var pauseReason: String? = null
 
     /**
+     * The model file the running child was actually launched with. Health must
+     * report what is serving, not what settings would launch next: they differ
+     * between selecting a model and restarting the server.
+     */
+    @Volatile private var launchedModelName: String? = null
+
+    /**
      * Stop serving because the device is too warm, without cutting a completion
      * in half. New requests are refused as soon as the state leaves READY; the
      * child is killed only once the requests already streaming have finished,
@@ -279,7 +286,7 @@ class ServerManager(
         val reported = if (state == ServerState.READY && pid <= 0) ServerState.RESTARTING else state
         return JSONObject().apply {
             put("state", reported.wire)
-            put("model", File(settings.modelPath).name)
+            put("model", launchedModelName ?: File(settings.modelPath).name)
             put("pid", if (pid > 0) pid else JSONObject.NULL)
             put("uptime_s", up ?: JSONObject.NULL)
             put("battery_temp_c", batteryTempC?.toDouble() ?: JSONObject.NULL)
@@ -334,6 +341,7 @@ class ServerManager(
     }
 
     private fun launchLocked(gen: Int) {
+        launchedModelName = File(settings.modelPath).name
         val bin = File(context.applicationInfo.nativeLibraryDir, BIN_NAME)
         if (!bin.isFile) {
             lastError = "missing native binary: ${bin.absolutePath}"
