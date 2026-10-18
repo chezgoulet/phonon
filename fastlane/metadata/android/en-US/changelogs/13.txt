@@ -1,0 +1,13 @@
+The app can now measure instead of guessing, and it can say what it found.
+
+'Tune this phone' in Settings runs a short sweep: three decode configurations and
+two prefill thread counts through the app's own endpoint, keeps the best of each,
+saves a profile keyed by the phone's SoC, and restarts the server with it. The
+profile records the llama.cpp revision it was measured against, so an engine
+update discards it instead of applying stale tuning. The sweep is manual, takes a
+couple of minutes, and never changes the chosen model.
+
+Settings also gains vendor guidance: background-restriction behaviour for the
+phone's manufacturer, with a link to the right settings screen where a known
+intent exists and a link to dontkillmyapp.com, and a warning when the phone has
+been held at 100% on the charger for more than four hours.
