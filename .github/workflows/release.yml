@@ -77,6 +77,13 @@ jobs:
           echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
           echo "versionName=$VNAME versionCode=$VCODE tag=${GITHUB_REF_NAME}"
 
+      - name: Tag must match versionName
+        run: |
+          set -euo pipefail
+          test "v${{ steps.ver.outputs.name }}" = "${{ github.ref_name }}" || {
+            echo "::error::tag ${{ github.ref_name }} does not match versionName ${{ steps.ver.outputs.name }}"
+            exit 1; }
+
       # Monotonicity guard: the new versionCode must exceed the highest
       # versionCode ever released. We read it from existing v* tags' Gradle files.
       - name: Enforce monotonic versionCode
@@ -119,7 +126,8 @@ jobs:
           set -euo pipefail
           APK=$(find app/app/build/outputs/apk/release -name '*.apk' | head -n1)
           test -n "$APK" || { echo "::error::no release APK produced"; exit 1; }
-          "$ANDROID_SDK_ROOT/build-tools/35.0.0/apksigner" verify --print-certs "$APK" >/dev/null \
+          APKSIGNER="$(ls -d "$ANDROID_SDK_ROOT"/build-tools/* | sort -V | tail -n1)/apksigner"
+          "$APKSIGNER" verify --print-certs "$APK" >/dev/null \
             || { echo "::error::release APK is not signed"; exit 1; }
 
       - name: Locate APK
