@@ -142,8 +142,10 @@ class ServerManager(
             isDesired = false
             thermalPaused = false
             generation++
-            killLocked()
+            // Flip the state before the kill so the supervisor's own stop path
+            // cannot be observed as "ready" while the child is going away.
             setState(ServerState.STOPPED)
+            killLocked()
         }
     }
 
@@ -225,8 +227,12 @@ class ServerManager(
         // running, report what would be chosen now.
         val detected = settings.perfPlan()
         val plan = if (pid > 0) planAtLaunch ?: detected else detected
+        // A READY state with no live pid is a restart window, not readiness.
+        // The process can exit between the supervisor's checks; health must
+        // never report ready while there is nothing to serve.
+        val reported = if (state == ServerState.READY && pid <= 0) ServerState.RESTARTING else state
         return JSONObject().apply {
-            put("state", state.wire)
+            put("state", reported.wire)
             put("model", File(settings.modelPath).name)
             put("pid", if (pid > 0) pid else JSONObject.NULL)
             put("uptime_s", up ?: JSONObject.NULL)
