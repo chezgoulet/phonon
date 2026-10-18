@@ -1,0 +1,12 @@
+Performance, mostly prefill — the part of an agent turn that was taking minutes.
+
+The native build now targets ARMv8.2 with dot-product instructions. The previous
+cross-compile targeted baseline ARMv8, so the dot-product kernels were missing
+and the repacking that the documentation credited never engaged. On the Pixel 7
+this alone takes decode from about 9.2 to 13.7 tok/s and a 2,415-token prefill
+from 15 to 58 tok/s.
+
+Prefill also gets its own thread count: two threads remain for decode, which is
+bandwidth-bound, while batch processing uses four, which lifts the same prefill
+to 82 tok/s. Phones whose fastest cluster is a single prime core no longer
+auto-tune to one thread.
