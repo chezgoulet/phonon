@@ -1,0 +1,16 @@
+Phones can now be reported back, and two settings stop being guesses.
+
+'Contribute this phone' produces a devices/<soc>.yaml snippet from what the app
+actually detected — layout, frequencies, CPU features, RAM, thermal source, and
+the measured tuning profile if one exists — and adds the same block to the device
+report. The device report is how a bug report arrives with evidence.
+
+Keep-warm is measured rather than fixed: the app watches whether the first request
+after an idle period is still fast and adapts the interval, within 15-300 s,
+storing it in the per-SoC profile. Context is sized to the phone's available
+memory on first run instead of coming from a table, and a context you set yourself
+is never overridden.
+
+The native build accepts an opt-in OpenCL backend (PHONON_OPENCL=1) for Adreno
+GPUs. It is off by default, is expected to help prefill only on Adreno, and has
+not been tested on one; the app says exactly that where it is shown.

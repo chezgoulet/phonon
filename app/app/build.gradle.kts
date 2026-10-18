@@ -15,8 +15,8 @@ android {
         // Every API above 29 is behind a Build.VERSION guard.
         minSdk = 29
         targetSdk = 35
-        versionCode = 13
-        versionName = "0.1.12"
+        versionCode = 14
+        versionName = "0.1.13"
 
         ndk {
             abiFilters += "arm64-v8a"
