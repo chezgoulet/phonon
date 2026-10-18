@@ -1,0 +1,8 @@
+The model catalog is now a data file the project site reads, so the page's model
+list, licences and measurements come from the repository at the release tag
+instead of being hand-copied.
+
+Releases now carry a SHA256SUMS file beside the APK, and the release workflow
+asks the site to rebuild as its last, best-effort step.
+
+No app behaviour changes in this release.
