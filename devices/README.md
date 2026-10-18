@@ -67,3 +67,16 @@ release, that is not an error — it is what these two fields are for.
 Set `app_version` to the version the measuring build reported. If the source
 document does not name one, `null` it and say so in `notes`; do not infer the
 version from the date the document was written.
+
+## Contributing a device from the phone
+
+The app's **Settings → Contribute this phone's profile** action renders exactly
+this YAML from live detection and the phone's own tuning profile, previews it,
+and saves it to the app's files (and the device report JSON) for a pull. It
+always writes `status: candidate` and `units: 1`: a phone contributing itself is
+a starting point for review, not a review. Copy the snippet into the repo as
+`devices/<soc>.yaml` and follow the rules above before promoting `status`.
+
+New keys are **not** added by the app: it emits only the fields in the template,
+so a contributed file diffs cleanly against the schema.
+

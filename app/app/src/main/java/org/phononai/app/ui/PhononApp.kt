@@ -90,7 +90,9 @@ import org.json.JSONObject
 import org.phononai.app.AppState
 import org.phononai.app.DeviceReport
 import org.phononai.app.DeviceReportResult
+import org.phononai.app.FieldReportResult
 import org.phononai.app.HardwareProfile
+import org.phononai.app.KeepWarmAdaptation
 import org.phononai.app.Kiosk
 import org.phononai.app.MemoryFit
 import org.phononai.app.ModelCatalog
@@ -1939,6 +1941,8 @@ private fun SettingsScreen(
     var perfMessage by remember { mutableStateOf<String?>(null) }
     var report by remember { mutableStateOf<DeviceReportResult?>(null) }
     var reportPreparing by remember { mutableStateOf(false) }
+    var fieldReport by remember { mutableStateOf<FieldReportResult?>(null) }
+    var fieldPreparing by remember { mutableStateOf(false) }
     val activeModel = models.firstOrNull { it.active }
 
     fun save(): String? {
@@ -2120,6 +2124,56 @@ private fun SettingsScreen(
                 fontSize = 11.sp,
                 lineHeight = 16.sp,
             )
+            Spacer(Modifier.height(8.dp))
+            TextButton(
+                enabled = !fieldPreparing,
+                onClick = {
+                    if (fieldPreparing) return@TextButton
+                    val service = AppState.service
+                    if (service == null) {
+                        toast(context, "Service is starting")
+                        return@TextButton
+                    }
+                    fieldPreparing = true
+                    scope.launch {
+                        val result = withContext(Dispatchers.IO) {
+                            try {
+                                service.uiFieldReportYaml()
+                            } catch (t: Throwable) {
+                                null
+                            }
+                        }
+                        fieldPreparing = false
+                        if (result == null) {
+                            toast(context, "Could not build the profile")
+                        } else {
+                            fieldReport = result
+                        }
+                    }
+                },
+            ) {
+                Text(
+                    if (fieldPreparing) "Preparing profile…" else "Contribute this phone's profile",
+                    color = if (fieldPreparing) PhononColors.TextDim else PhononColors.Cyan,
+                    fontSize = 13.sp,
+                )
+            }
+            Text(
+                "Writes a devices/<soc>.yaml snippet from live detection plus the tuning " +
+                    "profile if one exists. Saved to the app's files so it can be pulled.",
+                color = PhononColors.TextDim.copy(alpha = 0.8f),
+                fontSize = 11.sp,
+                lineHeight = 16.sp,
+            )
+            // The optional OpenCL prefill backend, if this build carries it.
+            Spacer(Modifier.height(4.dp))
+            Text(
+                health?.gpuPrefillStatus?.takeIf { it.isNotBlank() }
+                    ?: org.phononai.app.GpuPrefill.NOT_INCLUDED,
+                color = PhononColors.TextDim,
+                fontSize = 11.sp,
+                lineHeight = 16.sp,
+            )
         }
         Spacer(Modifier.height(12.dp))
 
@@ -2289,10 +2343,20 @@ private fun SettingsScreen(
             )
             Spacer(Modifier.height(4.dp))
             Text(
-                "${draft.contextSize.toIntOrNull()?.div(1024) ?: "—"}K context · ${draft.threads} threads · reasoning ${if (draft.reasoning) "on" else "off"}",
+                "${draft.contextSize.toIntOrNull()?.div(1024) ?: "—"}K context (${health?.contextFitLabel?.ifBlank { "unknown" } ?: "unknown"}) · ${draft.threads} threads · reasoning ${if (draft.reasoning) "on" else "off"}",
                 color = PhononColors.TextDim,
                 fontSize = 12.sp,
             )
+            if (health?.contextAutoSized == true) {
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    "Context sized to this phone's available memory — change it under Advanced " +
+                        "and Save to take it over.",
+                    color = PhononColors.TextDim,
+                    fontSize = 11.sp,
+                    lineHeight = 15.sp,
+                )
+            }
         }
         Spacer(Modifier.height(12.dp))
 
@@ -2351,6 +2415,19 @@ private fun SettingsScreen(
                 onValueChange = { draft.keepWarmInterval = it },
                 label = "Interval (seconds, min ${Settings.MIN_KEEP_WARM_INTERVAL_S})",
                 keyboardType = KeyboardType.Number,
+            )
+            // The interval above is the operator's starting point; the beat
+            // adapts it from measured time-to-first-token and reports back here.
+            Spacer(Modifier.height(6.dp))
+            Text(
+                KeepWarmAdaptation.describe(
+                    intervalS = health?.keepWarmIntervalS ?: KeepWarmAdaptation.DEFAULT_S,
+                    samples = health?.keepWarmSamples ?: 0,
+                    adapted = health?.keepWarmAdapted == true,
+                ) + (health?.keepWarmLastTtftMs?.let { " · last beat TTFT ${it} ms" } ?: ""),
+                color = PhononColors.TextDim,
+                fontSize = 11.sp,
+                lineHeight = 16.sp,
             )
         }
         Spacer(Modifier.height(12.dp))
@@ -2628,6 +2705,75 @@ private fun SettingsScreen(
                         report = null
                     }) { Text("Copy", color = PhononColors.Cyan) }
                     TextButton(onClick = { report = null }) {
+                        Text("Close", color = PhononColors.TextDim)
+                    }
+                }
+            },
+        )
+    }
+
+    fieldReport?.let { result ->
+        AlertDialog(
+            onDismissRequest = { fieldReport = null },
+            containerColor = PhononColors.Surface,
+            title = { Text("Device profile", color = PhononColors.Text) },
+            text = {
+                Column {
+                    Text(
+                        "The devices/<soc>.yaml snippet for this phone. Copy it into the repo " +
+                            "as ${result.fileName}.",
+                        color = PhononColors.TextDim,
+                        fontSize = 12.sp,
+                        lineHeight = 17.sp,
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    Column(
+                        Modifier
+                            .heightIn(max = 380.dp)
+                            .verticalScroll(rememberScrollState()),
+                    ) {
+                        Text(
+                            result.yaml,
+                            color = PhononColors.Text,
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 10.sp,
+                            lineHeight = 14.sp,
+                        )
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "Saved to ${result.path}",
+                        color = PhononColors.TextDim.copy(alpha = 0.8f),
+                        fontSize = 10.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val send = Intent(Intent.ACTION_SEND).apply {
+                        type = "text/plain"
+                        putExtra(Intent.EXTRA_SUBJECT, result.fileName)
+                        putExtra(Intent.EXTRA_TEXT, result.yaml)
+                    }
+                    try {
+                        context.startActivity(Intent.createChooser(send, "Share device profile"))
+                    } catch (_: Throwable) {
+                        toast(context, "No share target. Profile saved to ${result.path}")
+                    }
+                    fieldReport = null
+                }) { Text("Share", color = PhononColors.Cyan) }
+            },
+            dismissButton = {
+                Row {
+                    TextButton(onClick = {
+                        val clipboard = context.getSystemService(ClipboardManager::class.java)
+                        clipboard.setPrimaryClip(ClipData.newPlainText(result.fileName, result.yaml))
+                        toast(context, "Profile copied")
+                        fieldReport = null
+                    }) { Text("Copy", color = PhononColors.Cyan) }
+                    TextButton(onClick = { fieldReport = null }) {
                         Text("Close", color = PhononColors.TextDim)
                     }
                 }

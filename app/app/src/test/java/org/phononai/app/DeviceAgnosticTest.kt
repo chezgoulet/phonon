@@ -421,4 +421,240 @@ class DeviceAgnosticTest {
             OemGuidance.sittingFull(full.copy(levelPct = 99), now - OemGuidance.FULL_CHARGE_WARN_MS, now),
         )
     }
+
+    // --- devices/<soc>.yaml rendering (field reporting) -------------------
+
+    @Test
+    fun yamlMatchesThePantherShapeExactly() {
+        val report = DeviceYaml.Report(
+            device = "Google Pixel 7",
+            codename = "panther",
+            soc = "Google Tensor G2",
+            ramGb = 8,
+            android = 17,
+            rooted = false,
+            runtimeBuild = null,
+            model = "gemma-4-E2B-it-Q4_K_M",
+            context = 8192,
+            threads = 4,
+            mtp = true,
+            status = DeviceYaml.STATUS_CANDIDATE,
+            units = 2,
+            measured = DeviceYaml.Measured(
+                prefillTps = 17.86,
+                decodeTps = 10.04,
+                batteryTempC = 26.2,
+            ),
+            notes = "hello",
+        )
+        val expected = """
+            device: Google Pixel 7
+            codename: panther
+            soc: Google Tensor G2
+            ram_gb: 8
+            android: 17
+            rooted: false
+            runtime: llama.cpp
+            runtime_build: null
+            model: gemma-4-E2B-it-Q4_K_M
+            context: 8192
+            threads: 4
+            mtp: true
+            status: candidate
+            units: 2
+            measured:
+              prefill_tps: 17.86
+              decode_tps: 10.04
+              ttft_s: null
+              after_5min_tps: null
+              after_15min_tps: null
+              peak_mem_mb: null
+              battery_temp_c: 26.2
+            notes: >-
+              hello
+        """.trimIndent() + "\n"
+        assertEquals(expected, DeviceYaml.render(report))
+    }
+
+    @Test
+    fun yamlLeavesUnmeasuredFiguresNull() {
+        val yaml = DeviceYaml.render(
+            DeviceYaml.Report(
+                device = "d", codename = "c", soc = "Some SoC",
+                ramGb = 8, android = 15, rooted = false,
+                model = "m", context = 4096, threads = 4,
+            ),
+        )
+        // No estimates: every measured field is null until measured.
+        assertTrue(yaml.contains("  prefill_tps: null\n"))
+        assertTrue(yaml.contains("  decode_tps: null\n"))
+        assertTrue(yaml.contains("  battery_temp_c: null\n"))
+        assertTrue(yaml.contains("runtime_build: null\n"))
+        assertTrue(yaml.endsWith("notes: ''\n"))
+    }
+
+    @Test
+    fun yamlFoldsAMultiLineNoteWithIndentation() {
+        val yaml = DeviceYaml.render(
+            DeviceYaml.Report(
+                device = "d", codename = "c", soc = "SoC",
+                ramGb = 8, android = 15, rooted = false,
+                model = "m", context = 4096, threads = 4,
+                notes = "first line\n\nsecond line",
+            ),
+        )
+        assertTrue(yaml.endsWith("notes: >-\n  first line\n\n  second line\n"))
+    }
+
+    @Test
+    fun yamlScalarQuotesOnlyWhenItMust() {
+        assertEquals("Google Pixel 7", DeviceYaml.scalar("Google Pixel 7"))
+        assertEquals("''", DeviceYaml.scalar(""))
+        assertEquals("'a: b'", DeviceYaml.scalar("a: b"))
+        assertEquals("'#lead'", DeviceYaml.scalar("#lead"))
+        assertEquals("'  true story'", DeviceYaml.scalar("  true story"))
+        assertEquals("'it''s'", DeviceYaml.scalar("it's"))
+    }
+
+    @Test
+    fun yamlSlugIsFilesystemSafe() {
+        assertEquals("google-tensor-g2", DeviceYaml.slug("Google Tensor G2"))
+        assertEquals("gs201", DeviceYaml.slug("gs201"))
+        assertEquals("unknown", DeviceYaml.slug(""))
+    }
+
+    // --- measured keep-warm adaptation ------------------------------------
+
+    @Test
+    fun keepWarmStartPrefersProfileThenAdaptedThenDefault() {
+        assertEquals(45, KeepWarmAdaptation.start(null, null))
+        assertEquals(120, KeepWarmAdaptation.start(120, null))
+        assertEquals(30, KeepWarmAdaptation.start(null, 30))
+        assertEquals(300, KeepWarmAdaptation.start(400, null))
+        assertEquals(15, KeepWarmAdaptation.start(5, null))
+        // A zero means "unset", never a real value.
+        assertEquals(45, KeepWarmAdaptation.start(0, 0))
+    }
+
+    @Test
+    fun keepWarmAdaptsOnFastAndSlowBeats() {
+        // Fast: cache survived, lengthen.
+        assertEquals(60, KeepWarmAdaptation.next(45, 1_000))
+        // Slow: cache evicted, shorten.
+        assertEquals(30, KeepWarmAdaptation.next(45, 20_000))
+        // In between: unchanged.
+        assertEquals(45, KeepWarmAdaptation.next(45, 5_000))
+        // A failed beat (no sample) changes nothing.
+        assertEquals(45, KeepWarmAdaptation.next(45, 0))
+        // Clamped at both ends.
+        assertEquals(300, KeepWarmAdaptation.next(295, 500))
+        assertEquals(15, KeepWarmAdaptation.next(20, 40_000))
+    }
+
+    @Test
+    fun keepWarmSaysWhenThereIsNoDataYet() {
+        assertTrue(KeepWarmAdaptation.describe(45, 0, false).contains("no measured beats"))
+        assertTrue(KeepWarmAdaptation.describe(45, 1, false).contains("measuring"))
+        assertTrue(KeepWarmAdaptation.describe(60, 3, true).contains("60 s"))
+    }
+
+    // --- persistence helpers for the adapted values -----------------------
+
+    @Test
+    fun withKeepWarmIntervalUpdatesOnlyTheMatchingProfile() {
+        val json = profileJson(SocTuning.ENGINE_REV)
+        val updated = SocTuning.withKeepWarmInterval(json, "Tensor G2", 90)
+        assertEquals(90, SocTuning.lookup(updated, "Tensor G2", SocTuning.ENGINE_REV)!!.keepWarmIntervalS)
+        // The decode figures are untouched.
+        assertEquals(14.4, SocTuning.lookup(updated, "Tensor G2", SocTuning.ENGINE_REV)!!.decodeTps, 0.001)
+        // An unknown SoC leaves the JSON alone.
+        assertEquals(json, SocTuning.withKeepWarmInterval(json, "Other", 90))
+    }
+
+    @Test
+    fun withContextRecordsTheSizedContext() {
+        val json = profileJson(SocTuning.ENGINE_REV)
+        val updated = SocTuning.withContext(json, "Tensor G2", 16_384)
+        assertEquals(16_384, SocTuning.lookup(updated, "Tensor G2", SocTuning.ENGINE_REV)!!.contextSize)
+    }
+
+    // --- context sized to the phone ---------------------------------------
+
+    private val twoBModel = 1_280_835_840L
+
+    @Test
+    fun contextChoosesTheLargestSizeThatFitsWithHeadroom() {
+        val choice = ContextSizing.choose(twoBModel, 0L, 4_000_000_000L, 32_768)!!
+        assertEquals(32_768, choice.context)
+        assertTrue(choice.fits)
+        assertFalse(choice.tight)
+    }
+
+    @Test
+    fun contextFallsToTheFloorWhenNothingFits() {
+        // 0.5 GB available: even 4K cannot fit with 20% headroom held back.
+        val choice = ContextSizing.choose(twoBModel, 0L, 500_000_000L, 8192)!!
+        assertEquals(ContextSizing.MIN_CONTEXT, choice.context)
+        assertFalse(choice.fits)
+        assertTrue(choice.tight)
+        assertEquals("does not fit", choice.label)
+    }
+
+    @Test
+    fun contextIsTightWhenItSitsAgainstTheCeiling() {
+        val choice = ContextSizing.choose(twoBModel, 0L, 875_000_000L, 8192)!!
+        assertEquals(4096, choice.context)
+        assertTrue(choice.fits)
+        assertTrue(choice.tight)
+        assertEquals("tight", choice.label)
+    }
+
+    @Test
+    fun contextIsNeverChosenWithoutAnHonestMemoryFigure() {
+        assertNull(ContextSizing.choose(twoBModel, 0L, 0L, 32_768))
+        assertNull(ContextSizing.choose(0L, 0L, 4_000_000_000L, 32_768))
+        assertNull(ContextSizing.choose(twoBModel, 0L, 4_000_000_000L, 2048))
+    }
+
+    @Test
+    fun contextHeadroomCostsExactlyTheMargin() {
+        val req = ContextSizing.requiredBytes(1_000_000_000L, 0L, 8192)
+        // KV (memory model) + margin + the dirty eighth of the weights.
+        assertEquals(
+            MemoryFit.estimateKvCacheBytes(1_000_000_000L, 8192) +
+                MemoryFit.WORKING_MARGIN_BYTES + 125_000_000L,
+            req,
+        )
+        assertEquals(800_000_000L, ContextSizing.budgetBytes(1_000_000_000L))
+        // required at 8K for a 1 GB model is ~710 MB: fits a 1 GB avail, not 0.8 GB.
+        assertTrue(ContextSizing.fits(1_000_000_000L, 0L, 8192, 1_000_000_000L))
+        assertFalse(ContextSizing.fits(1_000_000_000L, 0L, 8192, 800_000_000L))
+    }
+
+    @Test
+    fun contextVerdictLabelCoversEveryCase() {
+        assertEquals("unknown", ContextSizing.verdictLabel(twoBModel, 0L, 8192, 0L))
+        assertEquals("fits", ContextSizing.verdictLabel(twoBModel, 0L, 4096, 4_000_000_000L))
+        assertEquals("does not fit", ContextSizing.verdictLabel(twoBModel, 0L, 65_536, 1_000_000_000L))
+    }
+
+    // --- optional OpenCL prefill backend ----------------------------------
+
+    @Test
+    fun gpuPrefillReportsPresenceHonestly() {
+        assertFalse(GpuPrefill.present(null))
+        assertFalse(GpuPrefill.present("/no/such/dir/phonon-xyz"))
+        assertEquals(GpuPrefill.NOT_INCLUDED, GpuPrefill.statusLine(false))
+        assertEquals(GpuPrefill.INCLUDED_UNTESTED, GpuPrefill.statusLine(true))
+
+        val dir = java.nio.file.Files.createTempDirectory("phonon-opencl").toFile()
+        try {
+            assertFalse(GpuPrefill.present(dir.absolutePath))
+            java.io.File(dir, GpuPrefill.LIB_NAME).writeText("x")
+            assertTrue(GpuPrefill.present(dir.absolutePath))
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
 }
+

@@ -171,6 +171,38 @@ class SocTuning(private val settings: Settings) {
             }
         }
 
+        /**
+         * Return [json] with [soc]'s stored keep-warm interval replaced by
+         * [intervalS]. A pure helper so the measured-keep-warm adaptation is
+         * unit tested without a device; the input is returned unchanged when
+         * there is no profile for [soc] to update.
+         */
+        fun withKeepWarmInterval(json: String, soc: String, intervalS: Int): String =
+            updateProfile(json, soc) { it.copy(keepWarmIntervalS = intervalS) }
+
+        /**
+         * Return [json] with [soc]'s stored context replaced by [contextSize].
+         * The auto-sized context is recorded here so the profile explains why
+         * the phone runs the context it does.
+         */
+        fun withContext(json: String, soc: String, contextSize: Int): String =
+            updateProfile(json, soc) { it.copy(contextSize = contextSize) }
+
+        private inline fun updateProfile(
+            json: String,
+            soc: String,
+            transform: (TuningProfile) -> TuningProfile,
+        ): String {
+            val p = storedRaw(json, soc) ?: return json
+            val root = try {
+                JSONObject(json)
+            } catch (_: Throwable) {
+                return json
+            }
+            root.put(soc, transform(p).toJson())
+            return root.toString()
+        }
+
         /** A stored profile's engine revision when it differs from [engineRev]. */
         fun staleEngineRev(json: String, soc: String, engineRev: String): String? {
             val p = storedRaw(json, soc) ?: return null
