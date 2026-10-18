@@ -59,6 +59,18 @@ data class ModelEntry(
     val tradeOff: String,
     val ramTier: String,
     val multimodal: Boolean = false,
+    /** SPDX identifier, and whether the OSI recognises it. */
+    val license: String = "",
+    val osiApproved: Boolean = true,
+    /** Architecture in one phrase: dense, hybrid, MoE with active params. */
+    val arch: String = "",
+    /** What this model is actually good at, in the operator's terms. */
+    val jobFit: String = "",
+    /** The device the numbers came from; blank when unmeasured. */
+    val measuredOn: String = "",
+    /** A vendor-reported figure and where it came from, if any. */
+    val vendorClaim: String = "",
+    val source: String = "",
 ) {
     val measured: Boolean get() = decodeRuns.isNotEmpty()
 
@@ -108,6 +120,11 @@ object ModelCatalog {
             decodeRuns = listOf(9.20, 8.84),
             tradeOff = "Fastest here and the 8 GB default: 32K context with headroom to spare.",
             ramTier = "S",
+            license = "Apache-2.0",
+            osiApproved = true,
+            arch = "dense 2B, hybrid attention",
+            jobFit = "agent work: the fastest measured model, and the default",
+            measuredOn = "Pixel 7",
         ),
         ModelEntry(
             id = "qwen3.5-4b",
@@ -123,6 +140,11 @@ object ModelCatalog {
             tradeOff = "Better answers than the 2B at about 4 tok/s. Runs on 8 GB at 16K " +
                 "with ~600 MB free; at 32K it fits but leaves ~250 MB.",
             ramTier = "S",
+            license = "Apache-2.0",
+            osiApproved = true,
+            arch = "dense 4B, hybrid attention",
+            jobFit = "better answers when speed matters less",
+            measuredOn = "Pixel 7",
         ),
         ModelEntry(
             id = "qwen3.5-9b",
@@ -137,6 +159,11 @@ object ModelCatalog {
             decodeRuns = emptyList(),
             tradeOff = "Highest-quality Qwen option; unmeasured and only sensible on 16 GB.",
             ramTier = "L",
+            license = "Apache-2.0",
+            osiApproved = true,
+            arch = "dense 9B, hybrid attention",
+            jobFit = "12-16 GB phones only; unmeasured here",
+            measuredOn = "",
         ),
         ModelEntry(
             id = "gemma-4-e2b",
@@ -152,6 +179,11 @@ object ModelCatalog {
             tradeOff = "Multimodal and Gemma's own tool format, at a measured ~2 tok/s less than Qwen 2B.",
             ramTier = "S",
             multimodal = true,
+            license = "Apache-2.0",
+            osiApproved = true,
+            arch = "dense E2B",
+            jobFit = "chat and images, at about two tok/s less than Qwen",
+            measuredOn = "Pixel 7",
         ),
         ModelEntry(
             id = "gemma-4-e4b",
@@ -168,6 +200,11 @@ object ModelCatalog {
                 "with ~560 MB free.",
             ramTier = "S",
             multimodal = true,
+            license = "Apache-2.0",
+            osiApproved = true,
+            arch = "dense E4B",
+            jobFit = "larger Gemma; runs on 8 GB at 16K",
+            measuredOn = "Pixel 7",
         ),
         ModelEntry(
             id = "minicpm5-2b",
@@ -182,6 +219,13 @@ object ModelCatalog {
             decodeRuns = listOf(6.82, 6.57),
             tradeOff = "Apache-2.0. 2B-class tool-use leader (tau2-Bench 97.1); about 25% slower than Qwen 2B here.",
             ramTier = "S",
+            license = "Apache-2.0",
+            osiApproved = true,
+            arch = "dense 2B, Llama architecture",
+            jobFit = "tool use per gigabyte, if its agent behaviour holds up",
+            measuredOn = "Pixel 7",
+            vendorClaim = "tau2-Bench Telecom 97.1 (vendor-reported)",
+            source = "https://huggingface.co/openbmb/MiniCPM5-2B",
         ),
         ModelEntry(
             id = "granite-4.2-3b",
@@ -196,6 +240,11 @@ object ModelCatalog {
             decodeRuns = listOf(4.41, 4.39),
             tradeOff = "Apache-2.0 with Granite's tool-calling focus; about half Qwen's speed here.",
             ramTier = "S",
+            license = "Apache-2.0",
+            osiApproved = true,
+            arch = "dense 3B",
+            jobFit = "tool calling on IBM's line; about half Qwen's speed",
+            measuredOn = "Pixel 7",
         ),
         ModelEntry(
             id = "nemotron-3-nano-4b",
@@ -210,6 +259,11 @@ object ModelCatalog {
             decodeRuns = listOf(3.57, 3.46),
             tradeOff = "NVIDIA Open Model License (non-OSI), 4B class; the slowest measured here.",
             ramTier = "S",
+            license = "NVIDIA Open Model License",
+            osiApproved = false,
+            arch = "dense 4B",
+            jobFit = "slowest measured; offered for completeness",
+            measuredOn = "Pixel 7",
         ),
     )
 

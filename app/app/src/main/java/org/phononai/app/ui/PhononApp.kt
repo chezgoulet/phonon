@@ -1345,8 +1345,15 @@ private fun CatalogEntryCard(
             )
             if (entry.measured) {
                 Spacer(Modifier.width(6.dp))
+                // Say whose numbers these are. A reference figure presented as
+                // this phone's would be a lie the moment a different phone runs.
+                val onThisDevice = entry.measuredOn.equals(device.model, ignoreCase = true)
                 Text(
-                    "on the Pixel 7, ${ModelCatalog.MEASURED_DATE}",
+                    if (onThisDevice) {
+                        "on this phone, ${ModelCatalog.MEASURED_DATE}"
+                    } else {
+                        "on ${entry.measuredOn} (reference), ${ModelCatalog.MEASURED_DATE}"
+                    },
                     color = PhononColors.TextDim,
                     fontSize = 11.sp,
                 )
@@ -1359,6 +1366,25 @@ private fun CatalogEntryCard(
             fontSize = 12.5.sp,
             lineHeight = 18.sp,
         )
+        Spacer(Modifier.height(6.dp))
+        val profile = buildList {
+            if (entry.arch.isNotBlank()) add(entry.arch)
+            if (entry.license.isNotBlank()) add(entry.license)
+            if (!entry.osiApproved) add("not OSI-approved")
+            if (entry.jobFit.isNotBlank()) add(entry.jobFit)
+        }.joinToString(" · ")
+        if (profile.isNotBlank()) {
+            Text(profile, color = PhononColors.TextDim, fontSize = 11.5.sp, lineHeight = 16.sp)
+        }
+        if (entry.vendorClaim.isNotBlank()) {
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "${entry.vendorClaim} — vendor-reported, not measured here",
+                color = PhononColors.Warn,
+                fontSize = 11.sp,
+                lineHeight = 15.sp,
+            )
+        }
         Spacer(Modifier.height(10.dp))
 
         if (downloading) {
@@ -2661,8 +2687,9 @@ private fun SetupScreen(
                 Text("Choose a model", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    "Qwen3.5 decodes at about 9.2 tok/s on this phone; Gemma 4 at about 7.0 tok/s, " +
-                        "with a multimodal path and its own tool format in exchange.",
+                    "Qwen3.5 decodes at about 9.2 tok/s on the Pixel 7 reference; Gemma 4 at " +
+                        "about 7.0. Both are text-only in this build — Gemma's image path is " +
+                        "not wired up yet, whatever the model itself can do.",
                     color = PhononColors.TextDim,
                     fontSize = 13.sp,
                     lineHeight = 18.sp,
