@@ -12,8 +12,8 @@ android {
         applicationId = "org.phononai.app"
         minSdk = 31
         targetSdk = 35
-        versionCode = 8
-        versionName = "0.1.7"
+        versionCode = 9
+        versionName = "0.1.8"
 
         ndk {
             abiFilters += "arm64-v8a"

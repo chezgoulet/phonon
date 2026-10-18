@@ -132,3 +132,32 @@ Qwen3.5-4B at 32K also runs, but leaves about 250 MB free, which is not enough
 headroom for anything else on the phone. The catalog therefore defaults both to
 16K on 8 GB devices: the point is to offer a configuration that works, not a
 bigger context that does not.
+
+## What a catalog entry must say
+
+Every entry carries the same profile, and the UI shows all of it:
+
+| Field | Why |
+|---|---|
+| architecture | dense, hybrid or MoE, with active parameters where relevant |
+| licence and OSI status | a non-OSI licence is not a blocker for sideloading, but it is a fact |
+| job fit | what the model is good at, in the operator's terms |
+| measured decode and prefill | only when measured; otherwise `unmeasured` |
+| measured on | the device the numbers came from |
+| vendor claims | labelled as vendor-reported, with a source |
+| weaknesses | the trade-off text |
+
+**Provenance rule.** A number is never presented as "this phone's" unless it was
+measured on the device showing it. Reference figures from the Pixel 7 are
+labelled "(reference)" wherever another device sees them. When a device runs its
+own benchmark, that result replaces the reference figure for that entry.
+
+**Vendor claims are not measurements.** MiniCPM5-2B's τ²-Bench Telecom score of
+97.1 is reported by OpenBMB and has not been reproduced here; it appears on the
+card with that label and its source. The same rule applies to any future claim:
+vendor number, source, and "not measured here".
+
+**Multimodal is not delivered.** The app never passes `--mmproj`, so no model can
+accept an image regardless of what the model itself supports. Gemma 4 E2B/E4B
+and Qwen3.5 are text-only in this build until the projector is downloaded and
+wired; the catalog does not claim otherwise.
