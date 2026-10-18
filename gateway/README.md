@@ -46,20 +46,6 @@ So an agent turn is minutes, not seconds. That is workable for a serial
 overnight lane and painful for interactive use. Shrinking the system prompt and
 tool schemas is worth more than any decoding optimisation.
 
-## Not working yet: opencode through the gateway
-
-Pointing opencode 2 at `litellm/phone-a` fails in two ways:
-
-1. With the default agent and 8K declared context: `The compaction request
-   cannot be reduced further...` — opencode's own prompt accounting trips
-   before the request is sent.
-2. With the trimmed `phone-coder` agent: `The socket connection was closed
-   unexpectedly`.
-
-The gateway itself is not at fault: the same 2.3K-token request succeeds with
-curl in 145 s. The next step is to find which client-side timeout closes the
-socket, and to shrink the prompt further (a two-tool agent is the target).
-
 ## Production shape
 
 In a real deployment, each phone is a deployment with a pinned alias

@@ -78,7 +78,7 @@ it, and it is the single highest-leverage feature for adoption.
 1. No Google accounts, no secondary users (accounts can be removed without a
    factory reset).
 2. Install the APK.
-3. `adb shell dpm set-device-owner org.phononai.app/.DeviceAdminReceiver`
+3. `adb shell dpm set-device-owner org.phononai.app/.PhononDeviceAdmin`
 
 Bulk deployment later uses **QR provisioning**: a payload scanned during initial
 setup installs the app and sets Device Owner. Provisioning scripts and per-OEM

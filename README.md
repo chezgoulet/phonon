@@ -11,7 +11,7 @@ This is a ground-up rebuild. The previous Phonon (2026) was a broad project with
 a Go coordinator, an NPU story and an e-waste framing. It is retired. What
 survives is the measurement discipline and a small amount of code.
 
-## Status: v0.1.0 release candidate
+## Status: v0.1.5
 
 The app packages `llama-server` (built from the pinned llama.cpp submodule at
 compile time), downloads a GGUF into app storage, supervises the server from a
@@ -27,9 +27,9 @@ Kiosk, thermal pause and resume, an on-device benchmark and device-report export
 are implemented; the Device Owner path needs a device with no accounts
 configured and says so when it cannot be used.
 
-Not yet done: no release tag has been cut, a second phone has not been measured,
-and reproducible builds are unproven. Those are tracked in
-[`docs/FDROID-GAPS.md`](docs/FDROID-GAPS.md).
+Released: **v0.1.5** — see the releases page. Not yet done: a second phone has
+not been measured, reproducible builds are unproven, and the F-Droid metadata is
+not written. Those are tracked in [`docs/FDROID-GAPS.md`](docs/FDROID-GAPS.md).
 
 Nothing in this repository claims a speed that has not been measured on the
 device it applies to. Device files carry `null` until someone runs the script.
@@ -64,7 +64,7 @@ Charging optimization, 80% limit) and by thermal-aware scheduling — see
 
 | Device | Codename | Status |
 |---|---|---|
-| Google Pixel 7 | `panther` | owned; measurements pending |
+| Google Pixel 7 | `panther` | owned; measured — 9.20 / 8.84 tok/s burst, 6.31 sustained |
 
 Community device support is data, not prose: one manifest per device, with
 measured numbers produced by the repository's own script. See

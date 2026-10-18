@@ -53,8 +53,10 @@ generating is not a phone that is down.
 
 Measured with opencode 1.18.13: the default request carries ten tools and costs
 about 4.4K tokens before the task text. A trimmed agent — a short system prompt
-and four tools (bash, edit, read, write) — costs about 2.8K. On an 8K window
-that leaves roughly 5.2K for the task and its turns.
+and four tools (bash, edit, read, write) — costs about 2.8K. The app ships a
+32K context, so the trimmed agent leaves roughly 29K for the task and its turns,
+and the default one still fits. An 8K window is available as a low-context
+profile for small phones, and there the trimmed agent leaves about 5.2K.
 
 Consequences: one file per task, no repository exploration, and a fresh session
 per task. The agent searches through bash because `glob` and `grep` schemas cost

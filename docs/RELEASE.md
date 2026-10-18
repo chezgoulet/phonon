@@ -81,7 +81,7 @@ Everything below is ready; the tag is the only step that publishes.
    and a completion returns content.
 6. Paste these notes into the release and publish.
 
-**Testers carrying a 0.4.0 build must uninstall it first.** The public scheme
-restarts at `versionCode = 1`, so the old build is a "downgrade" to Android and
+**Testers carrying a pre-reset build (0.4.x, never published) must uninstall
+it first.** The public scheme restarts at `versionCode = 1`, so the old build is a "downgrade" to Android and
 `adb install -r` will refuse it.
 
