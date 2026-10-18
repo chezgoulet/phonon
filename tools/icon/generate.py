@@ -1,89 +1,90 @@
 #!/usr/bin/env python3
-"""Generate Phonon's launcher icon: a portrait frame around a particle brain.
+"""Generate Phonon's launcher icon: a starburst drawn with the avatar's dots.
 
-The brain artwork lives in tools/icon/brain-source.png — a particle swarm shaped
-into a side profile, cyan on black. This script only composes it: crop to the
-particles, normalise the brightness so downscaling keeps the dots crisp, place it
-inside the frame, and write every asset Android and the stores need.
+No frame, no glyph: twelve rays of particles around a dense core, cyan on black,
+the same vocabulary as the being on the Serve screen. Run from the repo root:
 
     python3 tools/icon/generate.py
+
+Everything is procedural and seeded, so the same star is produced every time.
 """
+import math
+import random
 from pathlib import Path
-from PIL import Image, ImageDraw, ImageEnhance
+from PIL import Image, ImageDraw
 
 ROOT = Path(__file__).resolve().parents[2]
 RES = ROOT / "app/app/src/main/res"
-SRC = Path(__file__).resolve().parent / "brain-source.png"
 
-INK = (215, 227, 223, 255)
+CYAN = (0, 229, 255)
 BLACK = (0, 0, 0, 255)
-
-# Fractions of the canvas: a portrait frame inside the 72-unit visible area of
-# the 108-unit adaptive canvas, with the brain filling it.
-FX, FY, FW, FH = 0.30, 0.24, 0.40, 0.52
-GLYPH_FRACTION = 0.30
-STROKE_FRACTION = 0.011
-
-
-def master():
-    im = Image.open(SRC).convert("RGB")
-    grey = im.convert("L")
-    box = grey.point(lambda v: 255 if v > 60 else 0).getbbox()
-    im = im.crop(box)
-    im = ImageEnhance.Brightness(im).enhance(1.45)
-    im = ImageEnhance.Contrast(im).enhance(1.5)
-    return im
+S = 1024                      # master render
+RAYS = 12
+REACH = 0.62                  # ray length as a fraction of the half-canvas
+CORE = 0.10
+DOTS = 28
 
 
-def glyph_at(size, src):
-    g = src.copy()
-    g.thumbnail((size, size), Image.Resampling.LANCZOS)
-    px = g.load()
-    for y in range(g.height):
-        for x in range(g.width):
-            r, gg, b = px[x, y]
-            if max(r, gg, b) < 26:
-                px[x, y] = (0, 0, 0)
-    canvas = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    canvas.paste(g, ((size - g.width) // 2, (size - g.height) // 2))
-    return canvas
-
-
-def compose(size, src):
-    img = Image.new("RGBA", (size, size), BLACK)
+def star(seed=3):
+    random.seed(seed)
+    img = Image.new("RGBA", (S, S), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
-    d.rectangle([FX * size, FY * size, (FX + FW) * size, (FY + FH) * size],
-                outline=INK, width=max(1, round(STROKE_FRACTION * size)))
-    g = glyph_at(int(GLYPH_FRACTION * size), src)
-    img.paste(g, ((size - g.width) // 2, (size - g.height) // 2), g)
+    cx = cy = S / 2
+    R = S / 2
+
+    for _ in range(90):
+        a = random.uniform(0, 2 * math.pi)
+        r = random.uniform(0, CORE * R)
+        x, y = cx + math.cos(a) * r, cy + math.sin(a) * r
+        rad = random.uniform(2.0, 5.0) * (1 - 0.5 * r / (CORE * R))
+        d.ellipse([x - rad, y - rad, x + rad, y + rad],
+                  fill=CYAN + (random.randint(180, 255),))
+
+    for k in range(RAYS):
+        base = 2 * math.pi * k / RAYS
+        for i in range(DOTS):
+            t = i / (DOTS - 1)
+            r = CORE * R + t * (REACH - CORE) * R
+            jitter = random.uniform(-1, 1) * (2.5 + 4.0 * t)
+            a = base + random.uniform(-0.012, 0.012)
+            x = cx + math.cos(a) * r - math.sin(a) * jitter
+            y = cy + math.sin(a) * r + math.cos(a) * jitter
+            rad = (5.2 * (1 - 0.72 * t)) * random.uniform(0.85, 1.15)
+            d.ellipse([x - rad, y - rad, x + rad, y + rad],
+                      fill=CYAN + (int(255 * (1 - 0.68 * t)),))
     return img
 
 
+def at(master, size, background):
+    art = master.resize((size, size), Image.Resampling.LANCZOS)
+    if background:
+        base = Image.new("RGBA", (size, size), BLACK)
+        base.paste(art, (0, 0), art)
+        return base
+    return art
+
+
 def main():
-    src = master()
+    master = star()
     drawable = RES / "drawable-nodpi"
     drawable.mkdir(parents=True, exist_ok=True)
-    # Adaptive foreground: a square PNG, part of the 108-unit canvas equivalent.
-    compose(432, src).save(drawable / "ic_launcher_foreground.png")
+    # Transparent foreground; the adaptive background stays black.
+    at(master, 432, background=False).save(drawable / "ic_launcher_foreground.png")
 
     for bucket, px in {"mdpi": 48, "hdpi": 72, "xhdpi": 96, "xxhdpi": 144, "xxxhdpi": 192}.items():
         d = RES / f"mipmap-{bucket}"
         d.mkdir(parents=True, exist_ok=True)
-        art = compose(px, src)
+        art = at(master, px, background=True)
         art.save(d / "ic_launcher.png")
         mask = Image.new("L", art.size, 0)
         ImageDraw.Draw(mask).ellipse([0, 0, px - 1, px - 1], fill=255)
         rounded = art.copy(); rounded.putalpha(mask)
         rounded.save(d / "ic_launcher_round.png")
 
-    old = RES / "drawable/ic_launcher_foreground.xml"
-    if old.exists():
-        old.unlink()
-
     store = ROOT / "fastlane/metadata/android/en-US/images"
     store.mkdir(parents=True, exist_ok=True)
-    compose(512, src).save(store / "icon.png")
-    print("wrote adaptive foreground, mipmaps and store icon")
+    at(master, 512, background=True).save(store / "icon.png")
+    print("wrote starburst foreground, mipmaps and store icon")
 
 
 if __name__ == "__main__":
