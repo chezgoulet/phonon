@@ -8,6 +8,7 @@ import java.io.IOException
 import java.io.InputStream
 import java.net.HttpURLConnection
 import java.net.URL
+import java.security.MessageDigest
 
 /**
  * Downloads one GGUF into filesDir/models.
@@ -18,16 +19,28 @@ import java.net.URL
  *  - resumes with an HTTP Range request when a `.part` exists (a server that
  *    ignores Range and answers 200 restarts the file — that is detected, not
  *    papered over);
- *  - no checksum is reported because none is computed.
+ *  - refuses to start when the destination volume cannot hold the file;
+ *  - verifies the SHA-256 from the catalog when one is supplied, and deletes
+ *    the file rather than installing a model that does not match.
  */
 class ModelDownloader(private val context: Context) {
 
-    fun download(url: String, dest: File, onProgress: (Long, Long) -> Unit): File {
+    fun download(
+        url: String,
+        dest: File,
+        expectedSha256: String? = null,
+        onProgress: (Long, Long) -> Unit,
+    ): File {
         dest.parentFile?.mkdirs()
         if (dest.isFile && dest.length() > 0 && !File(dest.path + PART_SUFFIX).exists()) {
-            Log.i(TAG, "destination already exists, ${dest.length()} bytes: $dest")
-            onProgress(dest.length(), dest.length())
-            return dest
+            val problem = checksumProblem(dest, expectedSha256)
+            if (problem == null) {
+                Log.i(TAG, "destination already exists, ${dest.length()} bytes: $dest")
+                onProgress(dest.length(), dest.length())
+                return dest
+            }
+            Log.w(TAG, "existing file rejected ($problem); downloading again: $dest")
+            dest.delete()
         }
 
         val part = File(dest.path + PART_SUFFIX)
@@ -75,6 +88,17 @@ class ModelDownloader(private val context: Context) {
             if (expectedTotal <= 0) throw IOException("server declared a zero-length body")
             if (!append) offset = 0
 
+            // Refuse up front rather than filling the volume and failing at the
+            // last byte. The margin covers the rename and the next download.
+            val remaining = expectedTotal - offset
+            val usable = dest.parentFile?.usableSpace ?: Long.MAX_VALUE
+            if (remaining > 0 && usable < remaining + SPACE_MARGIN_BYTES) {
+                throw IOException(
+                    "not enough free space: need ${mb(remaining + SPACE_MARGIN_BYTES)} MB, " +
+                        "have ${mb(usable)} MB",
+                )
+            }
+
             onProgress(offset, expectedTotal)
             var written = offset
             val buffer = ByteArray(256 * 1024)
@@ -106,17 +130,52 @@ class ModelDownloader(private val context: Context) {
                 )
             }
 
+            val problem = checksumProblem(part, expectedSha256)
+            if (problem != null) {
+                // A wrong file is worse than no file: keep nothing, so the next
+                // attempt starts clean instead of resuming into the same bytes.
+                part.delete()
+                throw IOException("checksum mismatch: $problem — downloaded file deleted")
+            }
+
             if (dest.exists()) dest.delete()
             if (!part.renameTo(dest)) {
                 part.copyTo(dest, overwrite = true)
                 part.delete()
             }
-            Log.i(TAG, "downloaded $url -> $dest ($actual bytes, size verified against Content-Length)")
+            val verified = if (expectedSha256.isNullOrBlank()) "" else ", sha256 verified"
+            Log.i(TAG, "downloaded $url -> $dest ($actual bytes, size verified$verified)")
             return dest
         } finally {
             conn.disconnect()
         }
     }
+
+    /** Null when the file matches; a human-readable reason when it does not. */
+    private fun checksumProblem(file: File, expected: String?): String? {
+        if (expected.isNullOrBlank()) return null
+        val actual = sha256(file)
+        return if (actual.equals(expected, ignoreCase = true)) {
+            null
+        } else {
+            "expected ${expected.take(12)}…, got ${actual.take(12)}…"
+        }
+    }
+
+    private fun sha256(file: File): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        file.inputStream().use { input ->
+            val buffer = ByteArray(256 * 1024)
+            while (true) {
+                val n = input.read(buffer)
+                if (n < 0) break
+                digest.update(buffer, 0, n)
+            }
+        }
+        return digest.digest().joinToString("") { "%02x".format(it) }
+    }
+
+    private fun mb(bytes: Long): Long = bytes / (1024 * 1024)
 
     private fun open(url: String, offset: Long): HttpURLConnection {
         val conn = URL(url).openConnection() as HttpURLConnection
@@ -147,5 +206,6 @@ class ModelDownloader(private val context: Context) {
     private companion object {
         const val TAG = "Phonon"
         const val PART_SUFFIX = ".part"
+        const val SPACE_MARGIN_BYTES = 64L * 1024 * 1024
     }
 }

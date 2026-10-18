@@ -72,6 +72,8 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
 
         server = ServerManager(this, settings)
         server.listener = this
+        // Thermal pause drains in-flight completions instead of cutting them.
+        server.drainProbe = { requests.inFlightCount }
 
         thermal = ThermalMonitor(this) { temp -> onBatteryTemp(temp) }
         thermal.start()
@@ -164,6 +166,13 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
             if (requests.lastCompletionAtMs > 0) requests.lastCompletionAtMs else JSONObject.NULL,
         )
         json.put("requests_completed", requests.completedCount)
+        val battery = BatteryHealth.snapshot(this)
+        json.put("pause_reason", server.pauseReason ?: JSONObject.NULL)
+        if (battery.known) {
+            json.put("battery_level", battery.levelPct)
+            json.put("battery_charging", battery.charging)
+            battery.cycleCount?.let { json.put("battery_cycles", it) }
+        }
         if (::hints.isInitialized) hints.healthFields(json)
         // A reload between commit and backend restart must not look `ready`
         // just because the previous process is still up.
@@ -215,7 +224,8 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
         DownloadState.begin(chosen, dest.absolutePath)
         thread(name = "phonon-download", isDaemon = true) {
             try {
-                ModelDownloader(this).download(chosen, dest) { done, total ->
+                val expectedSha = entryId?.let { ModelCatalog.byId(it) }?.sha256
+                ModelDownloader(this).download(chosen, dest, expectedSha) { done, total ->
                     DownloadState.progress(done, total)
                 }
                 val entry = entryId?.let { ModelCatalog.byId(it) }
@@ -746,6 +756,31 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
         if (destroyed) return
         val stop = settings.thermalStopC
         val resume = settings.thermalResumeC
+
+        // Battery policy: do not run an unplugged phone flat. This is the app's
+        // only lever — the platform owns the charger, so charge limiting is
+        // documented as a ROM/root capability, not something this code claims.
+        val battery = BatteryHealth.snapshot(this)
+        val pauseBelow = settings.batteryPauseBelow
+        if (battery.known && !battery.charging && pauseBelow > 0 &&
+            battery.levelPct in 1 until pauseBelow &&
+            !server.thermalPaused && server.isDesired
+        ) {
+            Log.i(TAG, "battery: ${battery.levelPct}% unplugged, pausing server")
+            server.pauseForBattery()
+            updateNotification()
+            return
+        }
+        if (server.thermalPaused && server.pauseReason == "battery" &&
+            (battery.charging || battery.levelPct >= settings.batteryResumeAbove)
+        ) {
+            Log.i(TAG, "battery: ${battery.levelPct}% charging=${battery.charging}, resuming server")
+            configHashAtLaunch = currentConfigHash()
+            server.resumeFromThermal()
+            updateNotification()
+            return
+        }
+
         if (!server.thermalPaused && server.isDesired && temp >= stop) {
             Log.i(TAG, "thermal: ${temp}C >= ${stop}C, pausing server")
             server.pauseForThermal()

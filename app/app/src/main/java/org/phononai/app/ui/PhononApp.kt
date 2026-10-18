@@ -355,7 +355,7 @@ private fun ServeScreen(
         AvatarKind.Loading -> "Starting"
         AvatarKind.Ready -> "Serving"
         AvatarKind.Generating -> "Generating"
-        AvatarKind.Paused -> "Paused — too warm"
+        AvatarKind.Paused -> if (health?.pauseReason == "battery") "Paused — battery low" else "Paused — too warm"
         AvatarKind.Error -> "Error"
     }
     val modelName = modelLabel(
@@ -368,7 +368,11 @@ private fun ServeScreen(
         AvatarKind.Loading -> "loading $modelName into memory"
         AvatarKind.Ready -> "$modelName · $contextK · top-app"
         AvatarKind.Generating -> "$modelName · ${health?.lastDecodeTps?.let { "%.1f tok/s decode".format(it) } ?: "decode in flight"}"
-        AvatarKind.Paused -> "resumes at ${restartThreshold(settings.thermalResumeC)} °C"
+        AvatarKind.Paused -> if (health?.pauseReason == "battery") {
+            "resumes at ${settings.batteryResumeAbove}% or on a charger"
+        } else {
+            "resumes at ${restartThreshold(settings.thermalResumeC)} °C"
+        }
         AvatarKind.Error -> health?.error ?: "the model server did not start"
     }
     // The detected tier is part of the model line, not a hidden field.
@@ -1013,7 +1017,53 @@ private fun ModelsScreen(
         models.firstOrNull { it.active }?.name
     }
     val installed = remember(models) { models.map { it.file.name }.toSet() }
-    val tier = remember { HardwareProfile.detect(context).tier.id }
+    val device = remember { HardwareProfile.detect(context) }
+    val tier = device.tier.id
+    // A model whose tier outranks this phone will usually be killed by the
+    // system at load. Ask before spending 3 GB and an OOM on it.
+    var pendingDownload by remember { mutableStateOf<ModelEntry?>(null) }
+    fun tierRank(id: String): Int = when (id) {
+        "S" -> 0
+        "M" -> 1
+        "L" -> 2
+        else -> 0
+    }
+    fun startDownload(entry: ModelEntry) {
+        val service = AppState.service
+        if (service == null) {
+            toast(context, "Service is starting")
+            return
+        }
+        val result = service.uiDownloadModel(entry.id)
+        if (result.contains("\"error\"")) {
+            toast(context, JSONObject(result).optString("error", "Download failed"))
+        } else {
+            toast(context, "Downloading ${entry.fileName}")
+        }
+    }
+
+    pendingDownload?.let { entry ->
+        AlertDialog(
+            onDismissRequest = { pendingDownload = null },
+            title = { Text("Needs more RAM") },
+            text = {
+                Text(
+                    "${entry.displayName} is sized for ${entry.tierLabel} phones. " +
+                        "This device has ${device.ramGb} GB, so the server is likely to be " +
+                        "killed while loading. Downloading is allowed, but expect it not to run.",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    pendingDownload = null
+                    startDownload(entry)
+                }) { Text("Download anyway", color = PhononColors.Cyan) }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDownload = null }) { Text("Cancel") }
+            },
+        )
+    }
 
     Column(
         Modifier
@@ -1348,16 +1398,10 @@ private fun CatalogEntryCard(
                 } else {
                     TextButton(
                         onClick = {
-                            val service = AppState.service
-                            if (service == null) {
-                                toast(context, "Service is starting")
+                            if (tierRank(entry.ramTier) > tierRank(tier)) {
+                                pendingDownload = entry
                             } else {
-                                val result = service.uiDownloadModel(entry.id)
-                                if (result.contains("\"error\"")) {
-                                    toast(context, JSONObject(result).optString("error", "Download failed"))
-                                } else {
-                                    toast(context, "Downloading ${entry.fileName}")
-                                }
+                                startDownload(entry)
                             }
                         },
                         enabled = !downloading && download?.active != true,

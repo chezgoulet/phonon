@@ -270,6 +270,16 @@ class Settings(context: Context) {
         get() = prefs.getFloat(KEY_THERMAL_RESUME, 40f)
         set(value) = prefs.edit().putFloat(KEY_THERMAL_RESUME, value).apply()
 
+    /** Pause serving when discharging below this level. 0 disables the policy. */
+    var batteryPauseBelow: Int
+        get() = prefs.getInt(KEY_BATTERY_PAUSE_BELOW, 15)
+        set(value) = prefs.edit().putInt(KEY_BATTERY_PAUSE_BELOW, value.coerceIn(0, 90)).apply()
+
+    /** Resume when the level climbs back to this (or the charger is connected). */
+    var batteryResumeAbove: Int
+        get() = prefs.getInt(KEY_BATTERY_RESUME_ABOVE, 25)
+        set(value) = prefs.edit().putInt(KEY_BATTERY_RESUME_ABOVE, value.coerceIn(1, 100)).apply()
+
     var apiKey: String
         get() = prefs.getString(KEY_API_KEY, "") ?: ""
         set(value) = prefs.edit().putString(KEY_API_KEY, value).apply()
@@ -358,6 +368,8 @@ class Settings(context: Context) {
         put("reasoning", reasoning)
         put("thermal_stop_c", thermalStopC.toDouble())
         put("thermal_resume_c", thermalResumeC.toDouble())
+        put("battery_pause_below", batteryPauseBelow)
+        put("battery_resume_above", batteryResumeAbove)
         put("api_key_set", apiKey.isNotBlank())
         put("alias", alias)
         put("auto_start", autoStart)
@@ -442,6 +454,8 @@ class Settings(context: Context) {
         private const val KEY_REASONING = "reasoning"
         private const val KEY_THERMAL_STOP = "thermal_stop_c"
         private const val KEY_THERMAL_RESUME = "thermal_resume_c"
+        private const val KEY_BATTERY_PAUSE_BELOW = "battery_pause_below"
+        private const val KEY_BATTERY_RESUME_ABOVE = "battery_resume_above"
         private const val KEY_API_KEY = "api_key"
         private const val KEY_ALIAS = "alias"
         private const val KEY_AUTO_START = "auto_start"

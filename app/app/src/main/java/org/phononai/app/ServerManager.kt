@@ -127,6 +127,7 @@ class ServerManager(
         synchronized(lock) {
             isDesired = false
             thermalPaused = false
+            pauseReason = null
             generation++
             killLocked()
             lastError = message
@@ -141,6 +142,7 @@ class ServerManager(
         synchronized(lock) {
             isDesired = false
             thermalPaused = false
+            pauseReason = null
             generation++
             // Flip the state before the kill so the supervisor's own stop path
             // cannot be observed as "ready" while the child is going away.
@@ -150,14 +152,57 @@ class ServerManager(
     }
 
     /** Thermal stop: remember that the operator still wants the server. */
-    fun pauseForThermal() {
+    /** Set by the service: how many client requests are streaming right now. */
+    @Volatile var drainProbe: (() -> Int)? = null
+
+    /** "thermal" or "battery" while paused; null when not paused. */
+    @Volatile var pauseReason: String? = null
+
+    /**
+     * Stop serving because the device is too warm, without cutting a completion
+     * in half. New requests are refused as soon as the state leaves READY; the
+     * child is killed only once the requests already streaming have finished,
+     * or after [DRAIN_MAX_MS], whichever comes first.
+     */
+    fun pauseForThermal() = pauseServing("thermal")
+
+    /** Pause because the battery is low and the device is not on a charger. */
+    fun pauseForBattery() = pauseServing("battery")
+
+    private fun pauseServing(reason: String) {
         synchronized(lock) {
             if (thermalPaused || !isDesired) return
             thermalPaused = true
-            generation++
-            killLocked()
-            ringLog.append("thermal pause: server stopped")
+            pauseReason = reason
             setState(ServerState.THERMAL_PAUSE)
+        }
+        val probe = drainProbe
+        if (probe == null || probe() <= 0) {
+            synchronized(lock) {
+                generation++
+                killLocked()
+                ringLog.append("pause ($reason): server stopped")
+                setState(ServerState.THERMAL_PAUSE)
+            }
+            return
+        }
+        ringLog.append("pause ($reason): waiting for ${probe()} in-flight request(s)")
+        thread(name = "phonon-thermal-drain", isDaemon = true) {
+            val deadline = System.currentTimeMillis() + DRAIN_MAX_MS
+            while (System.currentTimeMillis() < deadline && probe() > 0) {
+                Thread.sleep(200)
+            }
+            val left = probe()
+            synchronized(lock) {
+                if (!thermalPaused) return@thread
+                generation++
+                killLocked()
+                ringLog.append(
+                    if (left > 0) "pause ($reason): stopped with $left request(s) still open"
+                    else "pause ($reason): drained, server stopped",
+                )
+                setState(ServerState.THERMAL_PAUSE)
+            }
         }
     }
 
@@ -182,6 +227,7 @@ class ServerManager(
         synchronized(lock) {
             isDesired = false
             thermalPaused = false
+            pauseReason = null
             generation++
             killLocked()
             setState(ServerState.STOPPED)
@@ -613,6 +659,8 @@ class ServerManager(
     }
 
     private companion object {
+        /** Upper bound on how long a thermal pause waits for in-flight work. */
+        private const val DRAIN_MAX_MS = 120_000L
         const val TAG = "Phonon"
         const val BIN_NAME = "libllama-server.so"
         const val READY_TIMEOUT_MS = 300_000L
