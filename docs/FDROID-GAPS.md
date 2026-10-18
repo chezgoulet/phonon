@@ -1,6 +1,6 @@
 # Gap analysis — current repo vs F-Droid main-repo acceptance
 
-State inspected on `sasquatch` at `/home/c/phonon` (branch `feat/v1-features`,
+State inspected on `the build host` at `$HOME/phonon` (branch `feat/v1-features`,
 remote `https://github.com/chezgoulet/phonon.git`, **0 tags**), 2026-10-17.
 Requirements taken from the F-Droid docs read the same day (Build Metadata
 Reference, Anti-Features, Inclusion Policy, Submitting Quick Start Guide, All
@@ -16,7 +16,7 @@ confirmation.
 1. **[BLOCKER] llama.cpp/ggml are prebuilt, not built from source.**
    The app's native libs live in `app/app/src/main/jniLibs/arm64-v8a/*.so` and
    are *gitignored*. They were copied in by `app/sync-native.sh` from a local
-   build (`/home/c/llama.cpp/build-android-arm64`). F-Droid checks out from git
+   build (`$HOME/llama.cpp/build-android-arm64`). F-Droid checks out from git
    and builds on its own server, so those files are absent there and the built
    APK would contain **no** llama.cpp at all. The inclusion policy is explicit:
    native/binary dependencies must be built from source (or from a trusted

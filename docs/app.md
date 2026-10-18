@@ -2,7 +2,7 @@
 
 Date: 2026-10-17
 Branch: `feat/app-v0`
-Device: stock Pixel 7 (`panther`), serial `2A091FDH200AJ1`, Android 17 /
+Device: stock Pixel 7 (`panther`), serial `<device-serial>`, Android 17 /
 SDK 37, arm64-v8a, unrooted. No other device was used.
 
 ## Status, honestly
@@ -79,7 +79,7 @@ app/app/src/main/java/org/phononai/app/
 
 ### Native packaging
 
-`app/sync-native.sh [BUILD_DIR]`, default `/home/c/llama.cpp/build-android-arm64/bin`:
+`app/sync-native.sh [BUILD_DIR]`, default `$HOME/llama.cpp/build-android-arm64/bin`:
 
 - copies `llama-server` → `jniLibs/arm64-v8a/libllama-server.so` (Android only
   extracts `lib*.so`);
@@ -215,12 +215,12 @@ and the next start is refused with a visible error. See [`lan.md`](lan.md).
 ## Build and install
 
 ```bash
-export JAVA_HOME=/home/c/jdk-17
-export ANDROID_HOME=/home/c/Android/Sdk
+export JAVA_HOME=$HOME/jdk-17
+export ANDROID_HOME=$HOME/Android/Sdk
 export PATH=$ANDROID_HOME/platform-tools:$PATH
 ./app/sync-native.sh
 cd app
-GRADLE=$(find /home/c/.gradle/wrapper/dists/gradle-8.12.1-bin -name gradle -type f | head -1)
+GRADLE=$(find $HOME/.gradle/wrapper/dists/gradle-8.12.1-bin -name gradle -type f | head -1)
 $GRADLE --no-daemon --console=plain assembleDebug
 ```
 
@@ -236,7 +236,7 @@ BUILD SUCCESSFUL in 13s
 ### 1. assembleDebug and APK size
 
 ```
-/home/c/phonon/app/app/build/outputs/apk/debug/app-debug.apk
+$HOME/phonon/app/app/build/outputs/apk/debug/app-debug.apk
 56,419,651 bytes
 sha256 d7d9acd2e06322bb36d21200890b1f855745991bebe0be80143f7ceecda10184
 ```
@@ -258,12 +258,12 @@ A stripped release build would be smaller; that was not built or claimed.
 ### 2. Uninstall / install
 
 ```
-$ adb -s 2A091FDH200AJ1 uninstall dev.phonon.spike
+$ adb -s <device-serial> uninstall dev.phonon.spike
 Failure [DELETE_FAILED_INTERNAL_ERROR]
-$ adb -s 2A091FDH200AJ1 install -r -t .../app-debug.apk
+$ adb -s <device-serial> install -r -t .../app-debug.apk
 Performing Streamed Install
 Success
-$ adb -s 2A091FDH200AJ1 shell pm list packages | grep phonon
+$ adb -s <device-serial> shell pm list packages | grep phonon
 package:org.phononai.app
 ```
 
@@ -291,9 +291,9 @@ The app's default URL remains `http://127.0.0.1:9000/gemma-4-E2B-it-Q4_0.gguf`
 as specified. The demonstration passed the 9001 URL explicitly.
 
 ```bash
-cd /home/c/models
+cd $HOME/models
 python3 -m http.server 9001 --bind 127.0.0.1
-adb -s 2A091FDH200AJ1 reverse tcp:9001 tcp:9001
+adb -s <device-serial> reverse tcp:9001 tcp:9001
 curl -sS -X POST http://127.0.0.1:8080/model/download \
   -H 'Content-Type: application/json' \
   -d '{"url":"http://127.0.0.1:9001/gemma-4-E2B-it-Q4_0.gguf"}'
@@ -311,7 +311,7 @@ Final progress JSON:
 File on the device:
 
 ```
-$ adb -s 2A091FDH200AJ1 shell "run-as org.phononai.app ls -l files/models files/logs"
+$ adb -s <device-serial> shell "run-as org.phononai.app ls -l files/models files/logs"
 files/models:
 -rw------- 1 u0_a415 u0_a415 2841481184 2026-10-17 13:19 gemma-4-E2B-it-Q4_0.gguf
 files/logs:
@@ -326,7 +326,7 @@ keeps the `.part` on a mismatch. **No checksum is computed or claimed.**
 ### 4. Service starts the server, `/health` ready
 
 ```bash
-adb -s 2A091FDH200AJ1 forward tcp:8080 tcp:8080
+adb -s <device-serial> forward tcp:8080 tcp:8080
 curl -sS http://127.0.0.1:8080/health
 ```
 
@@ -425,7 +425,7 @@ process):
 
 ```bash
 PID=$(curl -s http://127.0.0.1:8080/health | python3 -c 'import sys,json;print(json.load(sys.stdin)["pid"])')
-adb -s 2A091FDH200AJ1 shell "run-as org.phononai.app sh -c \"kill -9 $PID\""
+adb -s <device-serial> shell "run-as org.phononai.app sh -c \"kill -9 $PID\""
 # poll /health until state=ready AND pid != $PID
 ```
 
@@ -523,17 +523,17 @@ Consequences, in order of preference:
 After the reboot:
 
 ```
-$ adb -s 2A091FDH200AJ1 shell 'dumpsys trust | grep -E "deviceLocked|trustState"'
- User "Christopher" (id=0, flags=0x4c13) (current): trustState=UNTRUSTED,
+$ adb -s <device-serial> shell 'dumpsys trust | grep -E "deviceLocked|trustState"'
+ User "<name>" (id=0, flags=0x4c13) (current): trustState=UNTRUSTED,
  trustManaged=0, deviceLocked=1, isActiveUnlockRunning=0, strongAuthRequired=0x1
-$ adb -s 2A091FDH200AJ1 shell 'dumpsys window | grep isKeyguardShowing'
+$ adb -s <device-serial> shell 'dumpsys window | grep isKeyguardShowing'
     isKeyguardShowing=true
-$ adb -s 2A091FDH200AJ1 shell 'locksettings verify --old ""'
+$ adb -s <device-serial> shell 'locksettings verify --old ""'
 User has a lock credential, but old credential was not provided
-$ adb -s 2A091FDH200AJ1 shell \
+$ adb -s <device-serial> shell \
     'run-as org.phononai.app ls files/models'
 run-as: couldn't stat /data/user/0/org.phononai.app: No such file or directory
-$ adb -s 2A091FDH200AJ1 shell \
+$ adb -s <device-serial> shell \
     'am start-foreground-service -n org.phononai.app/.PhononService'
 Starting service: Intent { cmp=org.phononai.app/.PhononService }
 Error: Not found; no service started.
@@ -644,7 +644,7 @@ works, but it cannot evict the weights of a running server: Linux's
 `POSIX_FADV_DONTNEED` skips pages that another process has mapped. Arm A is
 therefore fast, and arms B–D were not run.
 
-**Conditions.** Pixel 7, serial `2A091FDH200AJ1`, same model and server
+**Conditions.** Pixel 7, serial `<device-serial>`, same model and server
 configuration as above, battery at 24.2 °C, `load_mode=mmap`. The device reported
 `deviceLocked=1` / keyguard showing throughout; the already-running app,
 `run-as`, the API port and `/proc` access all stayed usable, so this did not
@@ -712,10 +712,10 @@ first 8-token request after this cold-cache restart was still fast — 2.875 s,
 
 ```bash
 PID=$(curl -s http://127.0.0.1:8080/health | python3 -c 'import sys,json;print(json.load(sys.stdin)["pid"])')
-adb -s 2A091FDH200AJ1 shell "run-as org.phononai.app cat /proc/$PID/status" | grep -E 'VmRSS|RssFile'
+adb -s <device-serial> shell "run-as org.phononai.app cat /proc/$PID/status" | grep -E 'VmRSS|RssFile'
 curl -sS -X POST http://127.0.0.1:8080/debug/evict
 sleep 3
-adb -s 2A091FDH200AJ1 shell "run-as org.phononai.app cat /proc/$PID/status" | grep -E 'VmRSS|RssFile'
+adb -s <device-serial> shell "run-as org.phononai.app cat /proc/$PID/status" | grep -E 'VmRSS|RssFile'
 curl -sS -o /tmp/a.json -w 'wall=%{time_total}\n' http://127.0.0.1:8080/v1/chat/completions \
   -H 'Content-Type: application/json' \
   -d '{"model":"gemma-4-e2b","messages":[{"role":"user","content":"Say hello."}],
@@ -857,11 +857,11 @@ in-process `madvise` hook); neither was available here.
 ## Reproducing on an unlocked device
 
 ```bash
-adb -s 2A091FDH200AJ1 forward tcp:8080 tcp:8080
+adb -s <device-serial> forward tcp:8080 tcp:8080
 # install if needed
-adb -s 2A091FDH200AJ1 install -r -t app/app/build/outputs/apk/debug/app-debug.apk
+adb -s <device-serial> install -r -t app/app/build/outputs/apk/debug/app-debug.apk
 # start the activity once (or reboot with the screen unlocked)
-adb -s 2A091FDH200AJ1 shell am start -n org.phononai.app/.MainActivity
+adb -s <device-serial> shell am start -n org.phononai.app/.MainActivity
 # then re-run items 4–8 above
 ```
 

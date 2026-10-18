@@ -56,7 +56,7 @@ returns `[]` and `/v1` returns 503. The state machine should report
 
 ```bash
 # stage a model and serve it to the phone over the USB cable
-python3 -m http.server 9002 --directory /home/c/models &
+python3 -m http.server 9002 --directory $HOME/models &
 adb -s <serial> reverse tcp:9002 tcp:9002
 curl -X POST http://127.0.0.1:8080/model/download \
   -d '{"url":"http://127.0.0.1:9002/Qwen3.5-2B-Q4_K_M.gguf"}'

@@ -5,7 +5,7 @@ front of one or more phones, with per-phone routing, timeouts and metrics.
 
 ## Bench setup (verified 2026-10-17)
 
-The test phone is connected by USB to sasquatch, so it is reachable on the host
+The test phone is connected by USB to the build host, so it is reachable on the host
 at `127.0.0.1:8080` through `adb forward tcp:8080 tcp:8080`. The container runs
 with `--network host` so that address is the same inside it.
 

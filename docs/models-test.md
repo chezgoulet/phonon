@@ -1,6 +1,6 @@
 # Model-family acceptance run (2026-10-17)
 
-Device: stock Pixel 7 (`panther`), serial `2A091FDH200AJ1`, Android 17,
+Device: stock Pixel 7 (`panther`), serial `<device-serial>`, Android 17,
 7.83 GB reported RAM, tier S. App 0.4.0 debug, engine `797de63` with
 `GGML_CPU_REPACK=ON`. No reboot, no data clear. Phone on USB power, screen on,
 activity visible (`top-app`), 2 threads on cores 6-7.

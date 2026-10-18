@@ -81,10 +81,10 @@ and `android:extractNativeLibs="true"` in the manifest.
 ### Environment
 
 ```bash
-export JAVA_HOME=/home/c/jdk-17
-export ANDROID_HOME=/home/c/Android/Sdk
-export ANDROID_NDK_HOME=/home/c/Android/Sdk/ndk/30.0.16138531
-export PATH=/home/c/.local/bin:/home/c/jdk-17/bin:$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:/usr/local/bin:/usr/bin:/bin
+export JAVA_HOME=$HOME/jdk-17
+export ANDROID_HOME=$HOME/Android/Sdk
+export ANDROID_NDK_HOME=$HOME/Android/Sdk/ndk/30.0.16138531
+export PATH=$HOME/.local/bin:$HOME/jdk-17/bin:$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:/usr/local/bin:/usr/bin:/bin
 ```
 
 The emulator was started headless with the AVD `ozy35`:
@@ -110,7 +110,7 @@ Enforcing
 The two build commands are wrapped by `app/build-probe.sh`:
 
 ```bash
-NDK=/home/c/Android/Sdk/ndk/30.0.16138531
+NDK=$HOME/Android/Sdk/ndk/30.0.16138531
 TC=$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin
 $TC/x86_64-linux-android31-clang -O2 -fPIE -pie \
   -o app/app/src/main/jniLibs/x86_64/libphonon_probe.so app/app/src/main/jni/probe.c
@@ -132,8 +132,8 @@ for Android 15 devices. Its only dependencies are `libdl.so` and `libc.so`.
 ### Build
 
 ```bash
-cd /home/c/phonon/app
-GRADLE=$(find /home/c/.gradle/wrapper/dists/gradle-8.12.1-bin -name gradle -type f | head -1)
+cd $HOME/phonon/app
+GRADLE=$(find $HOME/.gradle/wrapper/dists/gradle-8.12.1-bin -name gradle -type f | head -1)
 $GRADLE --no-daemon --console=plain assembleDebug
 ```
 
@@ -145,7 +145,7 @@ BUILD SUCCESSFUL in 6s
 APK:
 
 ```
-/home/c/phonon/app/app/build/outputs/apk/debug/app-debug.apk
+$HOME/phonon/app/app/build/outputs/apk/debug/app-debug.apk
 2,348,971 bytes
 sha256 0245e39e618b1b55d036767d19fd2363476396cefcc6e32cc82ebabf04fd0875
 ```
@@ -164,7 +164,7 @@ The manifest in the built APK has `extractNativeLibs=true`, `minSdk 31`,
 
 ```bash
 adb -s emulator-5554 install -r -t \
-  /home/c/phonon/app/app/build/outputs/apk/debug/app-debug.apk
+  $HOME/phonon/app/app/build/outputs/apk/debug/app-debug.apk
 adb -s emulator-5554 logcat -c
 adb -s emulator-5554 shell am start -W -n dev.phonon.spike/.MainActivity
 ```

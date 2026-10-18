@@ -2,7 +2,7 @@
 
 Date: 2026-10-17
 Branch: `fix/lan-binding` (builds on `feat/lan-binding`)
-Device: stock Pixel 7 (`panther`), serial `2A091FDH200AJ1`, Android 17,
+Device: stock Pixel 7 (`panther`), serial `<device-serial>`, Android 17,
 arm64-v8a, unrooted. No other device was used.
 
 The app can bind its operator API and `llama-server` to a LAN address so a
@@ -221,7 +221,7 @@ HTTP 200
 $ curl -sS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8080/v1/models
 200
 
-$ adb -s 2A091FDH200AJ1 shell 'ss -ltn | grep -E "8080|8081"'
+$ adb -s <device-serial> shell 'ss -ltn | grep -E "8080|8081"'
 LISTEN      0      0      127.0.0.1:8081               0.0.0.0:*                  
 LISTEN      0      0       [::ffff:127.0.0.1]:8080                     *:*                  
 ```
@@ -245,7 +245,7 @@ HTTP 200
 $ curl -sS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8080/v1/models
 200
 
-$ adb -s 2A091FDH200AJ1 shell 'ss -ltn | grep -E "8080|8081"'
+$ adb -s <device-serial> shell 'ss -ltn | grep -E "8080|8081"'
 LISTEN      0      0      127.0.0.1:8081               0.0.0.0:*                  
 LISTEN      0      0       [::ffff:127.0.0.1]:8080                     *:*                  
 ```
@@ -293,7 +293,7 @@ $ curl -sS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8080/settings
 $ curl -sS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8080/health
 200
 
-$ adb -s 2A091FDH200AJ1 shell 'ss -ltn | grep -E "8080|8081"'
+$ adb -s <device-serial> shell 'ss -ltn | grep -E "8080|8081"'
 LISTEN 0 0 0.0.0.0:8081  0.0.0.0:*
 LISTEN 0 0       *:8080       *:*
 ```
@@ -362,7 +362,7 @@ HTTP 200
 $ curl -sS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8080/v1/models
 200
 
-$ adb -s 2A091FDH200AJ1 shell 'ss -ltn | grep -E "8080|8081"'
+$ adb -s <device-serial> shell 'ss -ltn | grep -E "8080|8081"'
 LISTEN      0      0      127.0.0.1:8081               0.0.0.0:*                  
 LISTEN      0      0       [::ffff:127.0.0.1]:8080                     *:*                  
 ```
@@ -414,7 +414,7 @@ the requested address, is bound, and that `llama-server --host` matches it in
 ## Off-host verification (2026-10-17, GrapheneOS Pixel 7)
 
 Device: Pixel 7, GrapheneOS user build, Wi-Fi on VLAN 10, address
-`10.0.10.195/24`, app installed from this branch.
+`192.0.2.11/24`, app installed from this branch.
 
 Steps and results:
 
@@ -422,12 +422,12 @@ Steps and results:
 2. Set `bind_address=0.0.0.0` **with the bearer token** → 200; `bind_address`
    persisted as `0.0.0.0`; listeners became `*:8080` (operator) and
    `0.0.0.0:8081` (llama-server).
-3. From sasquatch over the LAN:
+3. From the build host over the LAN:
    - `GET /health` → **200**;
    - `GET /v1/models` without a key → **401**;
    - `GET /v1/models` with the key → **200**;
    - a completion returned `Hello!` at **14.36 tok/s decode** in 1.19 s.
-4. LiteLLM deployment `phone-b` pointed at `http://10.0.10.195:8080/v1` with the
+4. LiteLLM deployment `phone-b` pointed at `http://192.0.2.11:8080/v1` with the
    key; `GET /v1/models` through the gateway lists `phone-a` and `phone-b`, and a
    completion for `phone-b` returned correctly.
 
@@ -447,7 +447,7 @@ pinned-alias concurrency test needs both devices attached.
 
 ## Settings changes never drop the connection (2026-10-17)
 
-Branch `fix/settings-race`. Same stock Pixel 7, serial `2A091FDH200AJ1`,
+Branch `fix/settings-race`. Same stock Pixel 7, serial `<device-serial>`,
 Android 17, arm64-v8a, unrooted. Installed debug APK: 12,142,615 bytes, SHA-256
 `ba670808673a68340779ce49b7a774bb8f1e215b84eba5e29dac45f1cba53562`,
 version 0.2.0. The device served Qwen3.5-2B Q4_K_M at 32K context. The key was
@@ -455,7 +455,7 @@ generated on the device for step 1, used only over the USB forward, and cleared
 in step 4; it is not recorded here.
 
 The test commands ran on the host through
-`adb -s 2A091FDH200AJ1 forward tcp:18080 tcp:8080`; `ss` is from the device's
+`adb -s <device-serial> forward tcp:18080 tcp:8080`; `ss` is from the device's
 unprivileged shell with the unrelated netlink warning suppressed.
 
 ### What changed
@@ -497,7 +497,7 @@ Content-Length: 421
 
 {"...","bind_address":"0.0.0.0","api_key_set":true,...}
 
-$ adb -s 2A091FDH200AJ1 shell 'ss -ltn | grep -E "8080|8081"'
+$ adb -s <device-serial> shell 'ss -ltn | grep -E "8080|8081"'
 LISTEN      0      0            *:8080                     *:*                  
 ```
 
@@ -521,7 +521,7 @@ $ curl -sS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:18080/v1/models
 $ curl -sS -o /dev/null -w '%{http_code}\n' \
     -H 'Authorization: Bearer <key>' http://127.0.0.1:18080/v1/models
 200
-$ adb -s 2A091FDH200AJ1 shell 'ss -ltn | grep -E "8080|8081"'
+$ adb -s <device-serial> shell 'ss -ltn | grep -E "8080|8081"'
 LISTEN      0      0      0.0.0.0:8081               0.0.0.0:*                  
 LISTEN      0      0            *:8080                     *:*                  
 ```
@@ -556,7 +556,7 @@ $ curl ... -X POST .../settings -H 'Authorization: Bearer <key>' \
 retry HTTP 200
 stored bind: 0.0.0.0
 
-$ adb -s 2A091FDH200AJ1 shell 'ss -ltn | grep -E "8080|8081"'
+$ adb -s <device-serial> shell 'ss -ltn | grep -E "8080|8081"'
 LISTEN      0      0      0.0.0.0:8081               0.0.0.0:*                  
 LISTEN      0      0            *:8080                     *:*                  
 ```
@@ -612,7 +612,7 @@ HTTP 200
 $ curl -sS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:18080/v1/models
 200
 
-$ adb -s 2A091FDH200AJ1 shell 'ss -ltn | grep -E "8080|8081"'
+$ adb -s <device-serial> shell 'ss -ltn | grep -E "8080|8081"'
 LISTEN      0      0      127.0.0.1:8081               0.0.0.0:*                  
 LISTEN      0      0       [::ffff:127.0.0.1]:8080                     *:*                  
 ```
@@ -636,7 +636,7 @@ HTTP 200
 {"state":"ready",...,"bind_address":"127.0.0.1","api_key_set":false,
  "exposed_off_host":false,...}
 
-$ adb -s 2A091FDH200AJ1 shell 'ss -ltn | grep -E "8080|8081"'
+$ adb -s <device-serial> shell 'ss -ltn | grep -E "8080|8081"'
 LISTEN      0      0      127.0.0.1:8081               0.0.0.0:*                  
 LISTEN      0      0       [::ffff:127.0.0.1]:8080                     *:*                  
 ```

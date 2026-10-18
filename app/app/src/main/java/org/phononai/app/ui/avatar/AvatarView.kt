@@ -229,7 +229,7 @@ class AvatarView @JvmOverloads constructor(
         private const val A_SEEKER = 16    // idle "eye": a darting, blinking pupil
         private const val A_BORE = 17      // idle "water": an all-over liquid ripple field
         private const val A_RADAR = 18     // idle "radar": range rings + sweep + storm cells
-        private const val A_TAKU = 19      // idle "octopus": a travelling, limb-propelled being
+        private const val OCTOPUS_IDLE = 19      // idle "octopus": a travelling, limb-propelled being
         private const val A_SPHERE = 20    // idle "sphere": a full ball that bounces + spins
     }
 
@@ -316,7 +316,7 @@ class AvatarView @JvmOverloads constructor(
     private val cellX = FloatArray(3)
     private val cellY = FloatArray(3)
     private val cellR = FloatArray(3)
-    // A_TAKU: the octopus transport state machine. A small phase machine (0 = WANDER,
+    // OCTOPUS_IDLE: the octopus transport state machine. A small phase machine (0 = WANDER,
     // 1 = FIXATE, 2 = MOVE-ON) driving a persistent BODY OFFSET (ox,oy) that eases
     // toward [tox,toy], plus an eased heading [hAng]->[thAng] and the travelled arm
     // wave. All primitives, allocated once; phase changes set a target and let the
@@ -895,7 +895,7 @@ class AvatarView @JvmOverloads constructor(
         "eye" -> A_SEEKER
         "water" -> A_BORE
         "radar" -> A_RADAR
-        "octopus" -> A_TAKU
+        "octopus" -> OCTOPUS_IDLE
         "sphere" -> A_SPHERE
         else -> null             // "hearth"/"drift"/unknown -> A_ORB
     }
@@ -1000,7 +1000,7 @@ class AvatarView @JvmOverloads constructor(
                             (1f + 0.22f * fsin(time * 0.9f + cf * 1.9f))
                 }
             }
-            A_TAKU -> {
+            OCTOPUS_IDLE -> {
                 takuTick(dt)
                 hCS = fcos(hAng); hSN = fsin(hAng)
             }
@@ -1008,7 +1008,7 @@ class AvatarView @JvmOverloads constructor(
         }
     }
 
-    /** Wave 1 (A_TAKU): the octopus transport machine — Christopher's WANDER / FIXATE /
+    /** The octopus transport machine — the product's WANDER / FIXATE /
      *  MOVE-ON. Runs once per frame, allocates nothing. Phase changes set a target; the
      *  body offset (ox,oy) and heading (hAng) ease toward it, so the octopus glides
      *  along a curved drift, then pauses and orients toward an "interesting" point, then
@@ -1190,7 +1190,7 @@ class AvatarView @JvmOverloads constructor(
             A_WAVEform -> { haloW = bodyR * 2.25f; haloH = bodyR * 0.85f }
             A_SEEKER -> { haloW = bodyR * 1.75f; haloH = bodyR * 1.05f }
             A_BORE -> { haloW = bodyR * 2.1f; haloH = bodyR * 1.0f }
-            A_TAKU -> { haloW = bodyR * 2.0f; haloH = bodyR * 1.55f }
+            OCTOPUS_IDLE -> { haloW = bodyR * 2.0f; haloH = bodyR * 1.55f }
             A_SPHERE -> { haloW = bodyR * 1.95f; haloH = bodyR * 1.95f }
             else -> {}
         }
@@ -1236,7 +1236,7 @@ class AvatarView @JvmOverloads constructor(
             A_SEEKER -> { springK = 32f; flowGain = 7.0f; tremor = 3.3f; spinMul = 0.10f }
             A_BORE -> { springK = 30f; flowGain = 8.0f; tremor = 3.6f; spinMul = 0.10f }
             A_RADAR -> { springK = 38f; flowGain = 4.5f; tremor = 2.2f; spinMul = 0.50f }
-            A_TAKU -> { springK = 36f; flowGain = 6.0f; tremor = 2.6f; spinMul = 0.10f }
+            OCTOPUS_IDLE -> { springK = 36f; flowGain = 6.0f; tremor = 2.6f; spinMul = 0.10f }
             A_SPHERE -> { springK = 34f; flowGain = 7.0f; tremor = 2.8f; spinMul = 0.20f }
             else -> { springK = 26f; flowGain = 6.5f; tremor = 3.2f; spinMul = 0.60f }
         }
@@ -1589,7 +1589,7 @@ class AvatarView @JvmOverloads constructor(
                     fty = cellY[c] + fsin(a3) * rr3 * 0.92f + p.jy * br * 0.05f
                 }
             }
-            A_TAKU -> {
+            OCTOPUS_IDLE -> {
                 // idle "octopus": a limb-propelled being that ROAMS. Every coordinate here
                 // orbits a persistent BODY OFFSET (ox,oy) eased by the transport machine
                 // (WANDER -> FIXATE -> MOVE-ON), so it travels — no other archetype moves

@@ -34,7 +34,7 @@ server:
   keep_warm_interval_s: 45
   thermal_stop_c: 45.0
   thermal_resume_c: 40.0
-  endpoint: http://10.0.10.125:8080/v1
+  endpoint: http://192.0.2.10:8080/v1
 
 benchmarks:
   - timestamp: 2026-10-17T23:14:02.397Z

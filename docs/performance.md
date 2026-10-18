@@ -1,7 +1,7 @@
 # Performance modes: visible and background
 
 Measured 2026-10-17 on the reference Pixel 7 (`panther`, serial
-`2A091FDH200AJ1`), stock Android 17, no root, no kiosk (Device Owner was not
+`<device-serial>`), stock Android 17, no root, no kiosk (Device Owner was not
 available on this phone). The visible mode was produced by keeping the activity
 on screen; that is the same `top-app` cpuset kiosk pins. No reboot, no data
 clear, no model change.

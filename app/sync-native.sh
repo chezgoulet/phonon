@@ -8,7 +8,7 @@
 # built with GGML_CPU_REPACK=ON so Q4_K weights are repacked for ARM.
 set -euo pipefail
 
-BUILD_DIR="${1:-/home/c/llama.cpp/build-android-arm64-repack/bin}"
+BUILD_DIR="${1:-$HOME/llama.cpp/build-android-arm64-repack/bin}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 DEST="$HERE/app/src/main/jniLibs/arm64-v8a"
 

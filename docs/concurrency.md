@@ -4,8 +4,8 @@ Verified 2026-10-17 with both Pixel 7s serving on the LAN.
 
 | Node | Device | Address | Key |
 |---|---|---|---|
-| `phone-a` | stock Pixel 7 | `10.0.10.125:8080` | per-phone, stored outside the repo |
-| `phone-b` | GrapheneOS Pixel 7 | `10.0.10.195:8080` | per-phone, stored outside the repo |
+| `phone-a` | stock Pixel 7 | `192.0.2.10:8080` | per-phone, stored outside the repo |
+| `phone-b` | GrapheneOS Pixel 7 | `192.0.2.11:8080` | per-phone, stored outside the repo |
 
 Both run the same app, Qwen3.5-2B Q4_K_M at 32K context, bound to `0.0.0.0`
 with a mandatory API key, screen held awake so the service stays in the

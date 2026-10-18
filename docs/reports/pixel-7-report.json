@@ -40,7 +40,7 @@
     "keep_warm_interval_s": 45,
     "thermal_stop_c": 45,
     "thermal_resume_c": 40,
-    "gateway_endpoint": "http:\/\/10.0.10.125:8080\/v1"
+    "gateway_endpoint": "http:\/\/192.0.2.10:8080\/v1"
   },
   "benchmarks": [
     {

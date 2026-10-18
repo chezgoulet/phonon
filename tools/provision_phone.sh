@@ -15,7 +15,7 @@
 set -euo pipefail
 
 # Non-interactive shells do not source the login PATH.
-export PATH="${ANDROID_HOME:-/home/c/Android/Sdk}/platform-tools:${PATH}"
+export PATH="${ANDROID_HOME:-$HOME/Android/Sdk}/platform-tools:${PATH}"
 command -v adb >/dev/null 2>&1 || { echo "adb not found on PATH" >&2; exit 1; }
 
 SERIAL="${1:?usage: provision_phone.sh <serial> <host_port> <alias> [model_url]}"

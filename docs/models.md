@@ -14,7 +14,7 @@ there are no model names or URLs elsewhere in the UI.
 
 Decode is 128 greedy tokens, `temperature: 0`, `ignore_eos: true`, through
 llama.cpp `797de63` with `GGML_CPU_REPACK=ON`, 2 threads pinned to cores 6-7 on
-the reference Pixel 7 (`panther`, serial `2A091FDH200AJ1`, 7.83 GB reported
+the reference Pixel 7 (`panther`, serial `<device-serial>`, 7.83 GB reported
 RAM). **Measured 2026-10-17.** Two back-to-back runs per model, reported as
 run 1 / run 2.
 

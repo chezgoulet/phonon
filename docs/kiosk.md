@@ -201,7 +201,7 @@ app-attributed screen wake lock are.
 
 ## Observed results
 
-Device: stock Pixel 7 (`panther`), serial `2A091FDH200AJ1`, Android 17.
+Device: stock Pixel 7 (`panther`), serial `<device-serial>`, Android 17.
 No reboot and no lock-credential change was performed.
 
 ### Device Owner could not be entered on this phone
@@ -211,7 +211,7 @@ Telegram and Pocket Casts accounts, and `pm list users` showed one user. The
 exact command and error:
 
 ```
-$ adb -s 2A091FDH200AJ1 shell dpm set-device-owner org.phononai.app/.PhononDeviceAdmin
+$ adb -s <device-serial> shell dpm set-device-owner org.phononai.app/.PhononDeviceAdmin
 
 Exception occurred while executing 'set-device-owner':
 java.lang.IllegalStateException: Not allowed to set the device owner because there are already some accounts on the device.

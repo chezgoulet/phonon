@@ -41,7 +41,7 @@ enum class ModelFamily(val key: String, val label: String, val summary: String) 
  * there are no model names or URLs elsewhere in the UI.
  *
  * [decodeRuns] are the two 128-token greedy runs measured on the reference
- * Pixel 7 (serial 2A091FDH200AJ1) with llama.cpp `797de63` and
+ * Pixel 7 (serial <device-serial>) with llama.cpp `797de63` and
  * `GGML_CPU_REPACK=ON`, 2 threads on cores 6-7. Empty means **unmeasured**:
  * the UI says so rather than guessing.
  */

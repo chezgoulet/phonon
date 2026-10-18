@@ -1,6 +1,6 @@
 # Phonon UI renders — observed on device
 
-Device: stock Pixel 7 (`panther`), serial `2A091FDH200AJ1`, Android 17.
+Device: stock Pixel 7 (`panther`), serial `<device-serial>`, Android 17.
 Model: `Qwen3.5-2B-Q4_K_M.gguf`, 32,768 context.
 Serving state on the performance captures: app 0.4.0, auto profile
 (2 threads pinned to the fastest allowed cluster), `bind_address=0.0.0.0`,
@@ -78,7 +78,7 @@ device-report export on the same Pixel 7.
 because the phone has accounts:
 
 ```
-$ adb -s 2A091FDH200AJ1 shell dpm set-device-owner org.phononai.app/.PhononDeviceAdmin
+$ adb -s <device-serial> shell dpm set-device-owner org.phononai.app/.PhononDeviceAdmin
 
 Exception occurred while executing 'set-device-owner':
 java.lang.IllegalStateException: Not allowed to set the device owner because there are already some accounts on the device.
