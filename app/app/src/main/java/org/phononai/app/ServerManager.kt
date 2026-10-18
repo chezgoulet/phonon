@@ -369,13 +369,16 @@ class ServerManager(
         add("--jinja")
         add("--reasoning"); add(if (settings.reasoning) "on" else "off")
         add("--alias"); add(settings.alias)
-        add("--host"); add(settings.bindAddress)
+        // The backend is loopback-only by design: the app's authenticated
+        // proxy is the single LAN listener. Binding it to the operator address
+        // exposed llama-server's unauthenticated /props and /metrics.
+        add("--host"); add("127.0.0.1")
         add("--port"); add(settings.backendPort.toString())
         add("--log-file"); add(logFile.absolutePath)
         add("-lm"); add(settings.loadMode)
-        if (settings.apiKey.isNotBlank()) {
-            add("--api-key"); add(settings.apiKey)
-        }
+        // No --api-key on the backend: argv is world-readable on Android, so the
+        // key would appear in `ps` for any shell user. The proxy enforces auth
+        // and the backend only listens on loopback.
     }
 
     private fun waitForExit(gen: Int, p: Process) {
