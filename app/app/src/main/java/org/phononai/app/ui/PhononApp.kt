@@ -56,6 +56,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -78,9 +79,15 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import org.phononai.app.AppState
+import org.phononai.app.DeviceReport
+import org.phononai.app.DeviceReportResult
+import org.phononai.app.HardwareProfile
 import org.phononai.app.Kiosk
 import org.phononai.app.PhononService
 import org.phononai.app.Settings
@@ -122,6 +129,7 @@ fun PhononApp() {
     val context = LocalContext.current
     val settings = remember { Settings(context) }
     var health by remember { mutableStateOf<Health?>(null) }
+    var benchmark by remember { mutableStateOf<BenchmarkState?>(null) }
     var download by remember { mutableStateOf<DownloadProgress?>(null) }
     var tick by remember { mutableIntStateOf(0) }
     var tpsHistory by remember { mutableStateOf<List<Float>>(emptyList()) }
@@ -137,12 +145,18 @@ fun PhononApp() {
             } catch (_: Throwable) {
                 null
             }
+            val nextBenchmark = try {
+                service?.let { parseBenchmark(it.uiBenchmarkJson()) }
+            } catch (_: Throwable) {
+                null
+            }
             val nextDownload = try {
                 service?.let { parseDownload(it.uiDownloadJson()) }
             } catch (_: Throwable) {
                 null
             }
             health = nextHealth
+            benchmark = nextBenchmark
             download = nextDownload
             tick++
             val tps = nextHealth?.lastDecodeTps
@@ -188,6 +202,13 @@ fun PhononApp() {
                         settings = settings,
                         kind = kind,
                         tpsHistory = tpsHistory,
+                        benchmark = benchmark,
+                        onRunBenchmark = {
+                            if (AppState.service?.uiStartBenchmark() != true) {
+                                toast(context, "Benchmark needs a serving model")
+                            }
+                        },
+                        onCancelBenchmark = { AppState.service?.uiCancelBenchmark() },
                     )
                     Tab.Models -> ModelsScreen(
                         context = context,
@@ -317,7 +338,12 @@ private fun ServeScreen(
     settings: Settings,
     kind: AvatarKind,
     tpsHistory: List<Float>,
+    benchmark: BenchmarkState?,
+    onRunBenchmark: () -> Unit,
+    onCancelBenchmark: () -> Unit,
 ) {
+    val context = LocalContext.current
+    val tierLine = remember { HardwareProfile.detect(context).summary }
     val accent = accentFor(kind)
     val stateWord = when (kind) {
         AvatarKind.Stopped -> "Stopped"
@@ -332,14 +358,16 @@ private fun ServeScreen(
             ?: File(settings.modelPath).name,
     )
     val contextK = "${settings.contextSize / 1024}K context"
-    val meta = when (kind) {
-        AvatarKind.Stopped -> "Server is off · the key stays on this phone"
-        AvatarKind.Loading -> "Loading $modelName into memory"
+    val stateMeta = when (kind) {
+        AvatarKind.Stopped -> "server off · the key stays on this phone"
+        AvatarKind.Loading -> "loading $modelName into memory"
         AvatarKind.Ready -> "$modelName · $contextK · top-app"
         AvatarKind.Generating -> "$modelName · ${health?.lastDecodeTps?.let { "%.1f tok/s decode".format(it) } ?: "decode in flight"}"
-        AvatarKind.Paused -> "Resumes automatically at ${restartThreshold(settings.thermalResumeC)} °C"
-        AvatarKind.Error -> health?.error ?: "The model server did not start"
+        AvatarKind.Paused -> "resumes at ${restartThreshold(settings.thermalResumeC)} °C"
+        AvatarKind.Error -> health?.error ?: "the model server did not start"
     }
+    // The detected tier is part of the model line, not a hidden field.
+    val meta = "$tierLine · $stateMeta"
     val tps = health?.lastDecodeTps?.toFloat() ?: 0f
     val animatedTps by animateFloatAsState(
         targetValue = tps,
@@ -351,19 +379,22 @@ private fun ServeScreen(
     val paused = kind == AvatarKind.Paused
     val temperatureFraction = ((temp ?: 0f) / 60f).coerceIn(0.04f, 1f)
 
+    // Scrollable: the benchmark card adds a result block, and a fixed column
+    // clipped the activity row behind the primary action on a 6.1" phone.
     Column(
         Modifier
             .fillMaxSize()
+            .verticalScroll(rememberScrollState())
             .padding(horizontal = 22.dp),
     ) {
-        Spacer(Modifier.height(26.dp))
+        Spacer(Modifier.height(16.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             // AvatarView draws the particle body at 0.32 × the shorter side.
             // Measured on the Pixel 7: a 140 dp slot gave a 77 dp visible orb,
-            // so 172 dp yields a ~92 dp visible cloud with the 1.55 × halo
-            // still inside the bounds. The old 92 dp slot produced the ~60 dp
-            // smudge this fixes.
-            Avatar(kind = kind, amp = (tps / 20f).coerceIn(0f, 1f), modifier = Modifier.size(172.dp))
+            // so 156 dp yields a ~84 dp visible cloud with the 1.55 × halo
+            // still inside the bounds. The benchmark card below needs the
+            // height; the orb stays legible at this size.
+            Avatar(kind = kind, amp = (tps / 20f).coerceIn(0f, 1f), modifier = Modifier.size(156.dp))
             Spacer(Modifier.width(18.dp))
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -455,9 +486,13 @@ private fun ServeScreen(
             paused = paused,
             settings = settings,
         )
-        // Pin the activity line to the bottom of the content area instead of
-        // leaving a dead third of the screen above the primary action.
-        Spacer(Modifier.weight(1f))
+        Spacer(Modifier.height(14.dp))
+        BenchmarkCard(
+            state = benchmark,
+            onRun = onRunBenchmark,
+            onCancel = onCancelBenchmark,
+        )
+        Spacer(Modifier.height(12.dp))
         RecentActivity(health = health, accent = accent)
         Spacer(Modifier.height(18.dp))
     }
@@ -667,6 +702,104 @@ private fun ThermalCard(
             fontSize = 13.sp,
             lineHeight = 18.sp,
         )
+    }
+}
+
+@Composable
+private fun BenchmarkCard(
+    state: BenchmarkState?,
+    onRun: () -> Unit,
+    onCancel: () -> Unit,
+) {
+    val last = state?.last
+    val running = state?.running == true
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(PhononColors.Surface)
+            .border(1.dp, PhononColors.Border, RoundedCornerShape(18.dp))
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                "BENCHMARK",
+                color = PhononColors.TextDim,
+                fontSize = 11.sp,
+                letterSpacing = 0.9.sp,
+            )
+            Spacer(Modifier.weight(1f))
+            if (running) {
+                Text("RUNNING", color = PhononColors.Cyan, fontSize = 10.sp, letterSpacing = 0.9.sp)
+                Spacer(Modifier.width(8.dp))
+            }
+            TextButton(onClick = if (running) onCancel else onRun) {
+                Text(
+                    if (running) "Cancel" else if (last == null) "Run benchmark" else "Run again",
+                    color = if (running) PhononColors.Warn else PhononColors.Cyan,
+                    fontSize = 13.sp,
+                )
+            }
+        }
+        when {
+            running -> Text(
+                "128 tokens, temperature 0, through this phone's own API. Serving continues.",
+                color = PhononColors.TextDim,
+                fontSize = 12.sp,
+                lineHeight = 17.sp,
+            )
+            last != null -> {
+                Row(verticalAlignment = Alignment.Bottom) {
+                    Text(
+                        "%.1f".format(last.decodeTps),
+                        color = PhononColors.Text,
+                        fontSize = 24.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        letterSpacing = (-0.4).sp,
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text("tok/s decode", color = PhononColors.TextDim, fontSize = 12.sp,
+                        modifier = Modifier.padding(bottom = 4.dp))
+                    Spacer(Modifier.weight(1f))
+                    Text(
+                        last.load,
+                        color = if (last.load == "cold") PhononColors.Warn else PhononColors.TextDim,
+                        fontSize = 11.sp,
+                    )
+                }
+                Spacer(Modifier.height(3.dp))
+                Text(
+                    "prefill %.1f tok/s · TTFT %.1f s · %s".format(
+                        last.prefillTps,
+                        last.ttftMs / 1000.0,
+                        formatTemp(last.batteryTempC),
+                    ),
+                    color = PhononColors.TextDim,
+                    fontSize = 12.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    "128 tokens · peak %.2f GB RSS · %s".format(
+                        last.peakRssMb / 1024.0,
+                        last.timestamp.substringAfter('T').take(5),
+                    ),
+                    color = PhononColors.TextDim.copy(alpha = 0.8f),
+                    fontSize = 11.sp,
+                )
+            }
+            else -> Text(
+                "Sends 128 tokens through this phone's own /v1 endpoint.",
+                color = PhononColors.TextDim,
+                fontSize = 12.sp,
+            )
+        }
+        state?.error?.let {
+            Spacer(Modifier.height(4.dp))
+            Text(it, color = PhononColors.Danger, fontSize = 11.sp, maxLines = 2,
+                overflow = TextOverflow.Ellipsis)
+        }
     }
 }
 
@@ -1109,10 +1242,14 @@ private fun SettingsScreen(
     onShowLog: () -> Unit,
 ) {
     val draft = remember { SettingsDraft(context) }
+    val device = remember { HardwareProfile.detect(context) }
+    val scope = rememberCoroutineScope()
     var advanced by rememberSaveable { mutableStateOf(false) }
     var keySet by remember { mutableStateOf(settings.apiKey.isNotBlank()) }
     var showKey by remember { mutableStateOf<String?>(null) }
     var saveMessage by remember { mutableStateOf<String?>(null) }
+    var report by remember { mutableStateOf<DeviceReportResult?>(null) }
+    var reportPreparing by remember { mutableStateOf(false) }
     val activeModel = models.firstOrNull { it.active }
 
     fun save(): String? {
@@ -1152,6 +1289,9 @@ private fun SettingsScreen(
             }
         }
         keySet = settings.apiKey.isNotBlank()
+        // This is the Settings save path: from now on auto-config must not
+        // replace the operator's model, context or thread count.
+        settings.tunedByUser = true
         return null
     }
 
@@ -1165,11 +1305,75 @@ private fun SettingsScreen(
         Text("Settings", style = MaterialTheme.typography.headlineLarge)
         Spacer(Modifier.height(6.dp))
         Text(
-            "Defaults are tuned for an 8 GB phone on a charger.",
+            "Defaults follow the detected RAM tier. Tune them here only when you mean to.",
             color = PhononColors.TextDim,
             fontSize = 14.sp,
         )
         Spacer(Modifier.height(22.dp))
+
+        PhononCard {
+            Text("Device", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+            Spacer(Modifier.height(6.dp))
+            Text(
+                device.summary,
+                color = PhononColors.Text,
+                fontSize = 13.sp,
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "${device.soc} · Android ${device.androidRelease} · ${device.abis.joinToString(", ")}",
+                color = PhononColors.TextDim,
+                fontSize = 12.sp,
+                lineHeight = 17.sp,
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "Auto-config: ${device.tier.modelLabel}, ${device.tier.contextSize / 1024}K, ${device.tier.threads} threads",
+                color = PhononColors.TextDim,
+                fontSize = 12.sp,
+                lineHeight = 17.sp,
+            )
+            Spacer(Modifier.height(8.dp))
+            TextButton(
+                enabled = !reportPreparing,
+                onClick = {
+                    if (reportPreparing) return@TextButton
+                    reportPreparing = true
+                    scope.launch {
+                        val result = withContext(Dispatchers.IO) {
+                            try {
+                                DeviceReport.build(
+                                    context,
+                                    settings,
+                                    AppState.service?.uiHealthJson(),
+                                )
+                            } catch (t: Throwable) {
+                                null
+                            }
+                        }
+                        reportPreparing = false
+                        if (result == null) {
+                            toast(context, "Could not build the report")
+                        } else {
+                            report = result
+                        }
+                    }
+                },
+            ) {
+                Text(
+                    if (reportPreparing) "Preparing report…" else "Export device report",
+                    color = if (reportPreparing) PhononColors.TextDim else PhononColors.Cyan,
+                    fontSize = 13.sp,
+                )
+            }
+            Text(
+                "Previewed before sharing. The API key is never included.",
+                color = PhononColors.TextDim.copy(alpha = 0.8f),
+                fontSize = 11.sp,
+                lineHeight = 16.sp,
+            )
+        }
+        Spacer(Modifier.height(12.dp))
 
         PhononCard {
             Text("Model", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
@@ -1443,6 +1647,77 @@ private fun SettingsScreen(
             lineHeight = 16.sp,
         )
         Spacer(Modifier.height(24.dp))
+    }
+
+    report?.let { result ->
+        AlertDialog(
+            onDismissRequest = { report = null },
+            containerColor = PhononColors.Surface,
+            title = { Text("Device report", color = PhononColors.Text) },
+            text = {
+                Column {
+                    Text(
+                        "This is exactly what leaves the phone. The API key is not in it.",
+                        color = PhononColors.TextDim,
+                        fontSize = 12.sp,
+                        lineHeight = 17.sp,
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    Column(
+                        Modifier
+                            .heightIn(max = 380.dp)
+                            .verticalScroll(rememberScrollState()),
+                    ) {
+                        Text(
+                            result.text,
+                            color = PhononColors.Text,
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 10.sp,
+                            lineHeight = 14.sp,
+                        )
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "Saved to ${result.textPath}",
+                        color = PhononColors.TextDim.copy(alpha = 0.8f),
+                        fontSize = 10.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val send = Intent(Intent.ACTION_SEND).apply {
+                        type = "text/plain"
+                        putExtra(Intent.EXTRA_SUBJECT, "Phonon device report")
+                        putExtra(Intent.EXTRA_TEXT, result.text)
+                    }
+                    try {
+                        context.startActivity(Intent.createChooser(send, "Share device report"))
+                    } catch (_: Throwable) {
+                        // The report was already written next to the app's
+                        // external files; a phone with no share target still
+                        // has a file to pull.
+                        toast(context, "No share target. Report saved to ${result.textPath}")
+                    }
+                    report = null
+                }) { Text("Share", color = PhononColors.Cyan) }
+            },
+            dismissButton = {
+                Row {
+                    TextButton(onClick = {
+                        val clipboard = context.getSystemService(ClipboardManager::class.java)
+                        clipboard.setPrimaryClip(ClipData.newPlainText("Phonon device report", result.text))
+                        toast(context, "Report copied")
+                        report = null
+                    }) { Text("Copy", color = PhononColors.Cyan) }
+                    TextButton(onClick = { report = null }) {
+                        Text("Close", color = PhononColors.TextDim)
+                    }
+                }
+            },
+        )
     }
 
     showKey?.let { key ->

@@ -1,0 +1,63 @@
+Phonon device report
+generated_at: 2026-10-17T23:19:10.938896Z
+
+device:
+  model: Pixel 7
+  soc: GS201
+  hardware: panther
+  android: 17 (API 37)
+  abis: arm64-v8a
+  ram_total_bytes: 7831076864
+  ram_gb: 8
+  tier: S (Qwen3.5-2B Q4_K_M, 32768 context, 4 threads)
+
+app:
+  package: org.phononai.app
+  version: 0.3.0 (3)
+
+model:
+  file: Qwen3.5-2B-Q4_K_M.gguf
+  sha256: aaf42c8b7c3cab2bf3d69c355048d4a0ee9973d48f16c731c0520ee914699223
+  size_bytes: 1280835840
+  context: 32768
+  threads: 4
+  load_mode: mmap
+
+server:
+  state: ready
+  bind_address: 0.0.0.0
+  port: 8080
+  backend_port: 8081
+  alias: qwen3.5-2b
+  api_key: set
+  keep_warm: true
+  keep_warm_interval_s: 45
+  thermal_stop_c: 45.0
+  thermal_resume_c: 40.0
+  endpoint: http://10.0.10.125:8080/v1
+
+benchmarks:
+  - timestamp: 2026-10-17T23:14:02.397Z
+    load: warm
+    model: Qwen3.5-2B-Q4_K_M.gguf
+    prompt_tokens: 54
+    completion_tokens: 128
+    prefill_tps: 6.46
+    decode_tps: 7.01
+    ttft_ms: 662
+    total_ms: 18945
+    peak_rss_mb: 1801
+    battery_temp_c: 28.3
+    context: 32768 · threads: 4
+  - timestamp: 2026-10-17T23:13:26.464Z
+    load: cold
+    model: Qwen3.5-2B-Q4_K_M.gguf
+    prompt_tokens: 54
+    completion_tokens: 128
+    prefill_tps: 16.23
+    decode_tps: 5.92
+    ttft_ms: 3349
+    total_ms: 24968
+    peak_rss_mb: 1760
+    battery_temp_c: 28.0
+    context: 32768 · threads: 4

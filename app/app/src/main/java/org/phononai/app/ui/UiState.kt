@@ -81,6 +81,63 @@ fun parseDownload(raw: String): DownloadProgress {
     )
 }
 
+data class BenchmarkRun(
+    val timestamp: String,
+    val load: String,
+    val model: String,
+    val promptTokens: Int,
+    val completionTokens: Int,
+    val prefillTps: Double,
+    val decodeTps: Double,
+    val ttftMs: Long,
+    val totalMs: Long,
+    val peakRssMb: Long,
+    val batteryTempC: Float?,
+    val context: Int,
+    val threads: Int,
+)
+
+data class BenchmarkState(
+    val running: Boolean,
+    val error: String?,
+    val last: BenchmarkRun?,
+    val history: List<BenchmarkRun>,
+)
+
+fun parseBenchmark(raw: String): BenchmarkState {
+    val j = JSONObject(raw)
+    fun run(o: JSONObject?) = o?.let {
+        BenchmarkRun(
+            timestamp = it.optString("timestamp", ""),
+            load = it.optString("load", ""),
+            model = it.optString("model", ""),
+            promptTokens = it.optInt("prompt_tokens"),
+            completionTokens = it.optInt("completion_tokens"),
+            prefillTps = it.optDouble("prefill_tps"),
+            decodeTps = it.optDouble("decode_tps"),
+            ttftMs = it.optLong("ttft_ms"),
+            totalMs = it.optLong("total_ms"),
+            peakRssMb = it.optLong("peak_rss_mb"),
+            batteryTempC = it.optFloatOrNull("battery_temp_c"),
+            context = it.optInt("context"),
+            threads = it.optInt("threads"),
+        )
+    }
+    val history = mutableListOf<BenchmarkRun>()
+    val array = j.optJSONArray("history")
+    if (array != null) {
+        for (i in 0 until array.length()) {
+            run(array.optJSONObject(i))?.let { history.add(it) }
+        }
+    }
+    return BenchmarkState(
+        running = j.optBoolean("running"),
+        error = if (j.isNull("error")) null else j.optString("error").ifBlank { null },
+        last = run(j.optJSONObject("last")),
+        history = history,
+    )
+}
+
 data class InstalledModel(
     val file: File,
     val active: Boolean,

@@ -62,6 +62,10 @@ class ServerManager(
     @Volatile var mlockRefused: Boolean = false
         private set
 
+    /** Wall clock when the current child was spawned; changes on every load. */
+    @Volatile var loadedAtMs: Long = 0L
+        private set
+
     val ringLog = RingLog(600)
 
     private val lock = Any()
@@ -299,6 +303,7 @@ class ServerManager(
         process = p
         pid = processPid(p)
         spawnAtMs = System.currentTimeMillis()
+        loadedAtMs = spawnAtMs
         ringLog.append("spawned pid=$pid")
 
         thread(name = "phonon-out-$gen", isDaemon = true) { pump(p.inputStream, "out") }
