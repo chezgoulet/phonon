@@ -33,6 +33,12 @@ data class Health(
     val error: String?,
     val keepWarm: Boolean,
     val keepWarmIntervalS: Int,
+    /** TTFT of the last keep-warm beat, ms; null until the first beat lands. */
+    val keepWarmLastTtftMs: Long?,
+    /** Successful beats used as adaptation samples. */
+    val keepWarmSamples: Int,
+    /** True once the interval has adapted off its starting value. */
+    val keepWarmAdapted: Boolean,
     val requestsInFlight: Int,
     val lastCompletionAt: Long?,
     val requestsCompleted: Int,
@@ -65,6 +71,13 @@ data class Health(
     val memFits: Boolean,
     val thermalSource: String,
     val thermalDetail: String,
+    /** fits / tight / does-not-fit / unknown, computed against current memory. */
+    val contextFitLabel: String,
+    /** True when the app picked the context rather than the operator. */
+    val contextAutoSized: Boolean,
+    /** True when this APK carries the optional OpenCL prefill backend. */
+    val gpuPrefillPresent: Boolean,
+    val gpuPrefillStatus: String,
     val thermalUserOverride: Boolean,
     val thermalHeadroom: Double?,
     val thermalStatus: Int?,
@@ -121,6 +134,13 @@ fun parseHealth(raw: String): Health {
         error = if (j.isNull("error")) null else j.optString("error").ifBlank { null },
         keepWarm = j.optBoolean("keep_warm"),
         keepWarmIntervalS = j.optInt("keep_warm_interval_s", 45),
+        keepWarmLastTtftMs = if (j.isNull("keep_warm_last_ttft_ms") || !j.has("keep_warm_last_ttft_ms")) {
+            null
+        } else {
+            j.optLong("keep_warm_last_ttft_ms")
+        },
+        keepWarmSamples = j.optInt("keep_warm_samples", 0),
+        keepWarmAdapted = j.optBoolean("keep_warm_adapted", false),
         requestsInFlight = j.optInt("requests_in_flight", 0),
         lastCompletionAt = j.optLongOrNull("last_completion_at"),
         requestsCompleted = j.optInt("requests_completed", 0),
@@ -152,6 +172,10 @@ fun parseHealth(raw: String): Health {
         memFits = j.optBoolean("mem_fits", true),
         thermalSource = j.optString("thermal_source", ""),
         thermalDetail = j.optString("thermal_detail", ""),
+        contextFitLabel = j.optString("context_fit_label", ""),
+        contextAutoSized = j.optBoolean("context_auto_sized", false),
+        gpuPrefillPresent = j.optBoolean("gpu_prefill_present", false),
+        gpuPrefillStatus = j.optString("gpu_prefill_status", ""),
         thermalUserOverride = j.optBoolean("thermal_user_override", false),
         thermalHeadroom = j.optDoubleOrNull("thermal_headroom"),
         thermalStatus = j.optIntOrNull("thermal_status"),

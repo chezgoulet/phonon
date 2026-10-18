@@ -38,6 +38,18 @@ fi
 
 echo "llama.cpp at $(git -C "$SRC" rev-parse --short HEAD) ($(git -C "$SRC" log -1 --format='%s'))"
 
+# Optional OpenCL prefill backend. OFF by default: the shipped APK must not
+# change behaviour, and the backend is only *expected* to help prefill on
+# Adreno GPUs — it has not been tested on one. Set PHONON_OPENCL=1 to build and
+# sync libggml-opencl.so alongside the CPU backends; see docs/native-backends.md.
+OPENCL="${PHONON_OPENCL:-0}"
+OPENCL_FLAG="-DGGML_OPENCL=OFF"
+if [[ "$OPENCL" == "1" ]]; then
+  OPENCL_FLAG="-DGGML_OPENCL=ON"
+  echo "PHONON_OPENCL=1: building the OpenCL backend (libggml-opencl.so)."
+  echo "  Expected to help prefill only on Adreno; untested on any GPU."
+fi
+
 # -DGGML_CPU_ARM_ARCH and -march are deliberately absent: they are mutually
 # exclusive with ALL_VARIANTS, and the whole point is that no single ISA is
 # baked in. The per-variant -march picks its own target.
@@ -53,6 +65,7 @@ cmake -S "$SRC" -B "$BUILD" \
   -DGGML_CPU_ALL_VARIANTS=ON \
   -DGGML_BACKEND_DL=ON \
   -DGGML_CPU_KLEIDIAI="${PHONON_NATIVE_KLEIDIAI:-ON}" \
+  "$OPENCL_FLAG" \
   -DLLAMA_BUILD_TESTS=OFF \
   -DLLAMA_BUILD_EXAMPLES=OFF \
   -DLLAMA_BUILD_SERVER=ON

@@ -582,7 +582,10 @@ Settings (also in the activity and `POST /settings`):
 | Field | Meaning |
 |---|---|
 | `keep_warm` | setting in force |
-| `keep_warm_interval_s` | setting in force |
+| `keep_warm_interval_s` | interval in force (profile value, else adapted value, else 45 s) |
+| `keep_warm_last_ttft_ms` | wall time of the last beat = its time-to-first-token, `null` before the first |
+| `keep_warm_samples` | successful beats used as adaptation samples |
+| `keep_warm_adapted` | true once the interval has moved off its starting value |
 | `last_keepalive_at` | epoch ms of the last beat attempt, `null` before the first |
 | `keepalive_count` | beat attempts (successes + failures) |
 | `keepalive_failures` | failed beats |
@@ -592,6 +595,28 @@ Settings (also in the activity and `POST /settings`):
 | `bind_address` | configured bind address (the LAN fallback is not substituted) |
 | `api_key_set` | whether a key is configured; the key is never returned |
 | `exposed_off_host` | true when `bind_address` is not loopback |
+| `context_fit_label` | `fits` / `tight` / `does not fit` / `unknown` for the current context |
+| `context_auto_sized` | true when the app picked the context, not the operator |
+| `gpu_prefill_present` | true when this APK carries `libggml-opencl.so` |
+| `gpu_prefill_status` | the Settings line for the OpenCL backend |
+
+### Measured keep-warm interval
+
+The interval is not a fixed 45 s. Every beat is post-idle by construction, and a
+one-token beat's wall time *is* its time-to-first-token, so each successful beat
+is a sample:
+
+- a beat at or below 2 s means the pages survived; the interval grows by 15 s;
+- a beat at or above 8 s means the kernel evicted them; the interval drops by 15 s;
+- anything between leaves the interval alone.
+
+The value starts from the stored profile's `keep_warm_interval_s` when one
+exists, else the last adapted value, else 45 s, and is clamped to 15–300 s
+(`KeepWarmAdaptation`). A new value is persisted to the profile (and to a pref,
+so it survives a restart before a profile exists) and reflected in
+`/health.keep_warm_interval_s`. Before the first successful beat there is no
+data: the interval stays 45 s and the Settings card says so.
+
 
 `load_mode` is part of the server argument hash, so changing it restarts
 `llama-server`. `mlock_refused` is not inferred from the request: `ServerManager`
