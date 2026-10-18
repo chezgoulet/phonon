@@ -113,20 +113,21 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         startForegroundCompat()
         when (intent?.action) {
-            ACTION_START_SERVER -> thread(name = "phonon-start", isDaemon = true) {
+            // Control actions share the single-threaded reload executor with
+            // the settings reload, so a launch and a stop cannot interleave
+            // now that the teardown no longer runs under settings.configLock.
+            ACTION_START_SERVER -> reloadExecutor.execute {
                 synchronized(settings.configLock) {
                     wantServer = true
                     configHashAtLaunch = currentConfigHash()
-                    server.start()
                 }
+                server.start()
                 updateNotification()
             }
 
-            ACTION_STOP_SERVER -> thread(name = "phonon-stop", isDaemon = true) {
-                synchronized(settings.configLock) {
-                    wantServer = false
-                    server.stop()
-                }
+            ACTION_STOP_SERVER -> reloadExecutor.execute {
+                synchronized(settings.configLock) { wantServer = false }
+                server.stop()
                 updateNotification()
             }
 
@@ -293,25 +294,37 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
             if (!model.isFile || !model.canRead()) {
                 return error("model not found or unreadable: ${model.absolutePath}")
             }
+            if (!settings.isInsideModelsDir(settings.modelPath)) {
+                return error("model_path must be inside the models directory")
+            }
             wantServer = true
             settings.servingRequested = true
             configHashAtLaunch = currentConfigHash()
         }
-        thread(name = "phonon-start", isDaemon = true) {
-            synchronized(settings.configLock) { server.start() }
-            updateNotification()
+        // The launch shares the reload executor, so it no longer needs the
+        // settings lock held across a multi-second teardown.
+        try {
+            reloadExecutor.execute {
+                server.start()
+                updateNotification()
+            }
+        } catch (_: Throwable) {
+            return error("service shutting down")
         }
         return JSONObject().put("accepted", true).toString()
     }
 
     override fun stopServer() {
-        thread(name = "phonon-stop", isDaemon = true) {
-            synchronized(settings.configLock) {
-                wantServer = false
-                settings.servingRequested = false
+        synchronized(settings.configLock) {
+            wantServer = false
+            settings.servingRequested = false
+        }
+        try {
+            reloadExecutor.execute {
                 server.stop()
+                updateNotification()
             }
-            updateNotification()
+        } catch (_: Throwable) {
         }
     }
 
@@ -696,10 +709,19 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
 
     // --- internals --------------------------------------------------------
 
+    /**
+     * Apply a committed settings change. The kill/launch runs on this
+     * single-threaded executor but *outside* settings.configLock: a teardown
+     * can take seconds (destroy + waitFor), and holding the lock across it
+     * would block every concurrent settings read and write. Only the settings
+     * mutation itself needs the lock; the executor already serialises
+     * restarts, and the control actions run on it too.
+     */
     private fun reloadSettings(markReload: Boolean = false) {
         try {
             if (destroyed) return
-            var restarted = false
+            var refusal: String? = null
+            var action = ReloadAction.None
             synchronized(settings.configLock) {
                 if (destroyed) return
                 val exposure = settings.exposureError
@@ -707,7 +729,7 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
                     // Unsafe configuration: no off-host listener and no
                     // backend. A loopback-only operator listener stays up so
                     // /health can explain the refusal.
-                    server.refuseUnsafeExposure(exposure)
+                    refusal = exposure
                     if (api == null || apiPort != settings.port ||
                         apiBind != Settings.DEFAULT_BIND_ADDRESS
                     ) {
@@ -715,28 +737,48 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
                         api = null
                         startApi()
                     }
-                    thermal.pollNow()
-                    updateNotification()
-                    return
+                } else {
+                    val hash = currentConfigHash()
+                    val changed = hash != configHashAtLaunch
+                    val desired = wantServer || server.isDesired
+                    if (changed) configHashAtLaunch = hash
+
+                    // The operator listener is not touched here. It is either
+                    // already serving the committed configuration (a key-only
+                    // change) or was replaced atomically by updateSettings. A
+                    // request that arrives from now on gets 503 + Retry-After
+                    // while control endpoints observe isRestarting().
+                    action = when {
+                        server.thermalPaused || !desired -> ReloadAction.None
+                        changed -> ReloadAction.Restart
+                        server.state == ServerState.STOPPED ||
+                            server.state == ServerState.ERROR -> ReloadAction.Start
+                        else -> ReloadAction.None
+                    }
+
+                    if (api == null) startApi()
                 }
+            }
 
-                val hash = currentConfigHash()
-                val changed = hash != configHashAtLaunch
-                val desired = wantServer || server.isDesired
-                if (changed) configHashAtLaunch = hash
+            // Everything below can block for seconds; none of it needs
+            // settings.configLock, and the reload executor serialises it.
+            val refuse = refusal
+            if (refuse != null) {
+                server.refuseUnsafeExposure(refuse)
+                thermal.pollNow()
+                updateNotification()
+                return
+            }
 
-                // The operator listener is not touched here. It is either
-                // already serving the committed configuration (a key-only
-                // change) or was replaced atomically by updateSettings. A
-                // request that arrives from now on gets 503 + Retry-After
-                // while control endpoints observe isRestarting().
-                if (!server.thermalPaused && desired && changed) {
+            var restarted = false
+            when (action) {
+                ReloadAction.Restart -> {
                     Log.i(TAG, "server settings changed; restarting llama-server")
                     server.restart()
                     restarted = true
-                } else if (!server.thermalPaused && desired &&
-                    (server.state == ServerState.STOPPED || server.state == ServerState.ERROR)
-                ) {
+                }
+
+                ReloadAction.Start -> {
                     // Recover from a refusal or a previous failure without
                     // needing an explicit POST /server/start.
                     Log.i(TAG, "configuration is safe again; starting llama-server")
@@ -744,13 +786,13 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
                     restarted = true
                 }
 
-                if (api == null) startApi()
-
-                // Thresholds take effect now, which is what makes the thermal
-                // test possible without a heat gun.
-                thermal.pollNow()
-                updateNotification()
+                ReloadAction.None -> {}
             }
+
+            // Thresholds take effect now, which is what makes the thermal test
+            // possible without a heat gun.
+            thermal.pollNow()
+            updateNotification()
 
             // Do not clear the 503 window until the replacement backend is
             // ready, so an immediate retry sees a settled server.
@@ -759,6 +801,9 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
             if (markReload) endReload()
         }
     }
+
+    /** What a committed settings change needs from the child lifecycle. */
+    private enum class ReloadAction { None, Start, Restart }
 
     /**
      * Wait for the restarted backend to reach a terminal state. Readiness is
