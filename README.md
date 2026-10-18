@@ -11,21 +11,25 @@ This is a ground-up rebuild. The previous Phonon (2026) was a broad project with
 a Go coordinator, an NPU story and an e-waste framing. It is retired. What
 survives is the measurement discipline and a small amount of code.
 
-## Status: pre-alpha
+## Status: v0.1.0 release candidate
 
-**2026-10-17 — app v0.** The app in `app/` now packages `llama-server`,
-downloads a GGUF into app storage, supervises the server from a foreground
-service and serves an OpenAI-compatible API on the phone's loopback interface.
-The first on-device completions and a tool call are recorded in
-[`docs/app.md`](docs/app.md). The measured decode rate in that run was
-5.1–5.3 tok/s, below the spike baseline; the cause is not yet established and
-is documented rather than averaged away. Kill/restart and thermal-pause
-acceptance were blocked by the phone locking before they ran; see the same
-document.
+The app packages `llama-server` (built from the pinned llama.cpp submodule at
+compile time), downloads a GGUF into app storage, supervises the server from a
+foreground service and serves an OpenAI-compatible API. On the reference Pixel 7
+with Qwen3.5-2B Q4_K_M at 32K context it measures **8.37 tok/s** for a burst and
+**6.31 tok/s** sustained over fifteen minutes, with no throttle event; the method
+and the numbers are in [`docs/performance.md`](docs/performance.md) and
+[`docs/sustained-load.md`](docs/sustained-load.md).
 
-This is the first inference run under the repository's name, on one of the two
-Pixel 7s. The remaining milestone is a repeatable measurement on both units,
-with the supervisor and thermal paths exercised.
+Five model families ship with measured rates: Qwen3.5, Gemma 4, MiniCPM5,
+Granite and Nemotron. Every one returns structured `tool_calls` on device.
+Kiosk, thermal pause and resume, an on-device benchmark and device-report export
+are implemented; the Device Owner path needs a device with no accounts
+configured and says so when it cannot be used.
+
+Not yet done: no release tag has been cut, a second phone has not been measured,
+and reproducible builds are unproven. Those are tracked in
+[`docs/FDROID-GAPS.md`](docs/FDROID-GAPS.md).
 
 Nothing in this repository claims a speed that has not been measured on the
 device it applies to. Device files carry `null` until someone runs the script.
