@@ -14,6 +14,9 @@
 #   body-cap       an authorized body over the cap gets 413.
 #   slow-head      a client dripping its headers is closed by the 10 s head
 #                  deadline (measured at 5 s granularity, so pass is <= 20 s).
+#   client-abandon a client that gives up during a long prefill must make the
+#                  proxy close the backend, so the phone stops working on a
+#                  request nobody will read.
 #
 # Usage: tools/proxy-harness/run.sh            (about 3 minutes)
 #        PREFILL_S=130 tools/proxy-harness/run.sh
@@ -111,6 +114,24 @@ head -c 9000000 /dev/zero >"$BUILD/nine.bin"
 code=$(curl -s -m 30 "${AUTH[@]}" -o /dev/null -w '%{http_code}' \
   --data-binary @"$BUILD/nine.bin" "$URL/v1/chat/completions")
 [ "$code" = 413 ] && pass "body-cap: 9 MB authorized -> 413" || fail "body-cap: got $code, want 413"
+
+python3 -I - "$PORT" "$KEY" <<'EOF'
+import socket, sys, time
+s = socket.socket()
+s.connect(("127.0.0.1", int(sys.argv[1])))
+s.sendall(("POST /v1/slow?s=30 HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer %s\r\n"
+           "Content-Length: 2\r\n\r\n{}" % sys.argv[2]).encode())
+time.sleep(2)
+s.close()
+EOF
+abandoned=0
+for _ in $(seq 30); do
+  abandoned=$(curl -s -m 2 "http://127.0.0.1:$BACKEND_PORT/abandoned" || echo 0)
+  [ "$abandoned" != "0" ] && break
+  sleep 0.5
+done
+[ "$abandoned" != "0" ] && pass "client-abandon: backend closed when the client left" \
+  || fail "client-abandon: backend kept working after the client left"
 
 held=$(python3 -I - "$PORT" <<'EOF'
 import socket, sys, time

@@ -11,15 +11,32 @@ backend reproduces that silence and one other shape:
 Usage: python3 -I fake_llama.py PORT
 """
 import http.server
+import select
 import sys
 import time
 import urllib.parse
+
+ABANDONED = 0
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
+    def do_GET(self):
+        if self.path == "/abandoned":
+            body = str(ABANDONED).encode()
+            self.send_response(200)
+            self.send_header("content-type", "text/plain")
+            self.send_header("content-length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        self.send_response(404)
+        self.send_header("content-length", "0")
+        self.end_headers()
+
     def do_POST(self):
+        global ABANDONED
         self.rfile.read(int(self.headers.get("content-length", 0)))
         url = urllib.parse.urlparse(self.path)
         if url.path == "/v1/flood":
@@ -36,7 +53,19 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 pass
             return
         delay = float(urllib.parse.parse_qs(url.query).get("s", ["0"])[0])
-        time.sleep(delay)
+        # Sleep in slices and watch for the caller disappearing: the proxy is
+        # expected to close this connection when its client goes away.
+        deadline = time.time() + delay
+        while time.time() < deadline:
+            ready, _, _ = select.select([self.connection], [], [], 0.2)
+            if ready:
+                try:
+                    if self.connection.recv(1) == b"":
+                        ABANDONED += 1
+                        return
+                except OSError:
+                    ABANDONED += 1
+                    return
         body = b'{"choices":[{"message":{"content":"done"}}]}'
         self.send_response(200)
         self.send_header("content-type", "application/json")
