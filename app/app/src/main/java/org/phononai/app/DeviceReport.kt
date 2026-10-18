@@ -1,6 +1,7 @@
 package org.phononai.app
 
 import android.content.Context
+import android.os.Build
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -27,12 +28,18 @@ object DeviceReport {
 
     fun build(context: Context, settings: Settings, healthJson: String?): DeviceReportResult {
         val device = HardwareProfile.detect(context)
+        val features = CpuFeatures.read()
         val health = try {
             healthJson?.let { JSONObject(it) }
         } catch (_: Throwable) {
             null
         }
         val model = File(settings.modelPath)
+        val mmproj = settings.catalogEntryForCurrentModel()
+            ?.let { entry -> File(model.parentFile, entry.mmprojFileName) }
+            ?.takeIf { it.isFile }
+        val fit = MemoryFit.check(context, model.length(), mmproj?.length() ?: 0L, settings.contextSize)
+        val oem = OemGuidance.forDevice()
         val benchmarks = settings.benchmarkHistory
 
         val json = JSONObject().apply {
@@ -50,6 +57,37 @@ object DeviceReport {
                 put("tier_model", device.tier.modelLabel)
                 put("tier_context", device.tier.contextSize)
                 put("tier_threads", device.tier.threads)
+                put("cpu_features", features.summary)
+                put("cpu_dotprod", features.dotprod)
+                put("cpu_i8mm", features.i8mm)
+                put("cpu_expected_backend", features.expectedBackend)
+                put("manufacturer", Build.MANUFACTURER ?: "")
+            })
+            put("capabilities", JSONObject().apply {
+                put("native_required_features", NativeRequirements.requiredLabel)
+                put("missing_features", JSONArray(NativeRequirements.missing(features)))
+                put("startup_refusal", NativeRequirements.refusal(features) ?: JSONObject.NULL)
+            })
+            put("memory_fit", JSONObject().apply {
+                put("fits", fit.fits)
+                put("required_bytes", fit.requiredBytes)
+                put("available_bytes", fit.availBytes)
+                put("kv_estimate_bytes", fit.kvBytes)
+                put("model_bytes", fit.modelBytes)
+            })
+            put("thermal_policy", JSONObject().apply {
+                put("source", health?.optString("thermal_source") ?: "unknown")
+                put("detail", health?.optString("thermal_detail") ?: "unknown")
+                put("user_override", settings.thermalUserOverride)
+                put("headroom", health?.optDouble("thermal_headroom") ?: JSONObject.NULL)
+                put("status", health?.optInt("thermal_status") ?: JSONObject.NULL)
+                put("stop_c", settings.thermalStopC.toDouble())
+                put("resume_c", settings.thermalResumeC.toDouble())
+            })
+            put("oem", JSONObject().apply {
+                put("vendor", oem.vendor)
+                put("steps", oem.steps)
+                put("dont_kill_url", oem.dontKillUrl)
             })
             put("app", JSONObject().apply {
                 put("package", context.packageName)
@@ -96,6 +134,32 @@ object DeviceReport {
             appendLine("  ram_gb: ${device.ramGb}")
             appendLine("  tier: ${device.tier.id} (${device.tier.modelLabel}, " +
                 "${device.tier.contextSize} context, ${device.tier.threads} threads)")
+            appendLine("  manufacturer: ${Build.MANUFACTURER ?: ""}")
+            appendLine("  cpu_features: ${features.summary}")
+            appendLine("  cpu_expected_backend: ${features.expectedBackend}")
+            appendLine()
+            appendLine("capabilities:")
+            appendLine("  native_required_features: ${NativeRequirements.requiredLabel.ifBlank { "(none)" }}")
+            appendLine("  missing_features: ${NativeRequirements.missing(features).joinToString(", ").ifBlank { "(none)" }}")
+            appendLine("  startup_refusal: ${NativeRequirements.refusal(features) ?: "none"}")
+            appendLine()
+            appendLine("memory_fit:")
+            appendLine("  fits: ${fit.fits}")
+            appendLine("  required_bytes: ${fit.requiredBytes} (${MemoryFit.gb(fit.requiredBytes)} GB)")
+            appendLine("  available_bytes: ${fit.availBytes} (${MemoryFit.gb(fit.availBytes)} GB)")
+            appendLine("  kv_estimate_bytes: ${fit.kvBytes}")
+            appendLine("  model_bytes: ${fit.modelBytes}")
+            appendLine()
+            appendLine("thermal_policy:")
+            appendLine("  source: ${health?.optString("thermal_source") ?: "unknown"}")
+            appendLine("  detail: ${health?.optString("thermal_detail") ?: "unknown"}")
+            appendLine("  user_override: ${settings.thermalUserOverride}")
+            appendLine("  stop_c: ${settings.thermalStopC} · resume_c: ${settings.thermalResumeC}")
+            appendLine()
+            appendLine("oem:")
+            appendLine("  vendor: ${oem.vendor}")
+            appendLine("  steps: ${oem.steps}")
+            appendLine("  dont_kill_url: ${oem.dontKillUrl}")
             appendLine()
             appendLine("app:")
             appendLine("  package: ${context.packageName}")

@@ -14,6 +14,10 @@ data class CpuCluster(val cpus: List<Int>, val maxFreqKhz: Long) {
     val range: String get() = if (cpus.isEmpty()) "" else "$first-$last"
     val isBig: Boolean get() = maxFreqKhz >= BIG_FREQ_KHZ
 
+    /** `6-7 @ 2.85 GHz`, derived from this device's cpufreq node. */
+    val label: String
+        get() = if (cpus.isEmpty()) "" else "$range @ %.2f GHz".format(maxFreqKhz / 1_000_000.0)
+
     companion object {
         /** Cores at or above this are the "big" cluster on current Tensor SoCs. */
         const val BIG_FREQ_KHZ = 2_400_000L
@@ -30,6 +34,13 @@ data class CpuDetection(
 ) {
     val allowedRange: String
         get() = if (allowed.isEmpty()) "" else "${allowed.first()}-${allowed.last()}"
+
+    /**
+     * This device's clusters as ranges and frequencies, e.g.
+     * `0-3 @ 1.80 GHz, 4-5 @ 2.35 GHz, 6-7 @ 2.85 GHz`. Everything the
+     * Performance card says about cores comes from here — never a device name.
+     */
+    val clusterLabel: String get() = clusters.joinToString(", ") { it.label }
 }
 
 /**
@@ -50,18 +61,35 @@ data class PerfPlan(
     val threadsSet: Boolean,
     val cpuRangeSet: Boolean,
     val prioSet: Boolean,
+    /** llama.cpp -tb; 0 means "derive from threads" (the historical rule). */
+    val prefillThreads: Int = 0,
+    /** How many cores the process may run on; from detection, not a constant. */
+    val allowedCount: Int = 0,
+    /** How many CPU clusters detection found in the allowed set. */
+    val clusterCount: Int = 0,
+    /** This device's clusters as ranges and frequencies; see CpuDetection. */
+    val clusterLabel: String = "",
 ) {
+    /** The effective prefill thread count, applying the derive rule when unset. */
+    val effectivePrefillThreads: Int
+        get() = if (prefillThreads in 1..16) prefillThreads else (threads * 2).coerceIn(2, 6)
     val auto: Boolean get() = !threadsSet && !cpuRangeSet && !prioSet
     val visible: Boolean get() = mode == MODE_VISIBLE
     val cpuRangeLabel: String get() = cpuRange.ifBlank { "all allowed" }
     val modeLabel: String get() = if (visible) "Visible / kiosk" else "Background"
 
-    /** The one line the Serve screen and the Settings card both use. */
+    private val clusterWord: String
+        get() = "$clusterCount cluster" + if (clusterCount == 1) "" else "s"
+
+    /**
+     * The one line the Serve screen and the Settings card both use. Every count
+     * is this device's own; a Pixel 7 is never named here.
+     */
     val summary: String
         get() = if (visible) {
-            "Visible mode · all 8 cores · $threads threads on $cpuRangeLabel"
+            "Visible mode · ${allowedCount} cores, $clusterWord · $threads threads on $cpuRangeLabel"
         } else {
-            "Background mode · ${allowed.size} cores, no X1 · $threads threads on $cpuRangeLabel"
+            "Background mode · ${allowedCount} of the SoC's cores allowed · $threads threads on $cpuRangeLabel"
         }
 
     companion object {

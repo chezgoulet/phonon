@@ -90,9 +90,11 @@ import org.phononai.app.DeviceReport
 import org.phononai.app.DeviceReportResult
 import org.phononai.app.HardwareProfile
 import org.phononai.app.Kiosk
+import org.phononai.app.MemoryFit
 import org.phononai.app.ModelCatalog
 import org.phononai.app.ModelEntry
 import org.phononai.app.ModelFamily
+import org.phononai.app.OemGuidance
 import org.phononai.app.PerfProfile
 import org.phononai.app.PhononService
 import org.phononai.app.Settings
@@ -535,6 +537,7 @@ private fun ServeScreen(
             fraction = temperatureFraction,
             paused = paused,
             settings = settings,
+            health = health,
         )
         Spacer(Modifier.height(14.dp))
         BenchmarkCard(
@@ -696,6 +699,7 @@ private fun ThermalCard(
     fraction: Float,
     paused: Boolean,
     settings: Settings,
+    health: Health?,
 ) {
     Column(
         Modifier
@@ -746,12 +750,45 @@ private fun ThermalCard(
             if (paused) {
                 "Model unloaded while hot · reconnects on resume"
             } else {
-                "Pauses at ${restartThreshold(settings.thermalStopC)} °C · resumes at ${restartThreshold(settings.thermalResumeC)} °C"
+                // Say which signal is driving the decision, from the device, not
+                // a fixed threshold pair. Overridden thresholds are named as such.
+                thermalPolicyLine(health, settings)
             },
             color = if (paused) PhononColors.Warn.copy(alpha = 0.9f) else PhononColors.TextDim,
             fontSize = 13.sp,
             lineHeight = 18.sp,
         )
+    }
+}
+
+/** One line describing a stored per-SoC profile from its JSON. */
+private fun tuningSummary(json: String): String = try {
+    val o = JSONObject(json)
+    "${o.optInt("decode_threads")}t decode / ${o.optInt("prefill_threads")}t prefill · " +
+        "%.1f tok/s decode".format(o.optDouble("decode_tps"))
+} catch (_: Throwable) {
+    json
+}
+
+/** One line describing the thermal signal actually in use. */
+private fun thermalPolicyLine(health: Health?, settings: Settings): String {
+    val source = health?.thermalSource.orEmpty()
+    val detail = health?.thermalDetail.orEmpty()
+    return when {
+        health?.thermalUserOverride == true ->
+            "Your thresholds: pauses at ${restartThreshold(settings.thermalStopC)} °C, " +
+                "resumes at ${restartThreshold(settings.thermalResumeC)} °C"
+        source == "headroom" ->
+            "Using the SoC thermal headroom${if (detail.isBlank()) "" else " ($detail)"} · " +
+                "pauses at the thermal limit"
+        source == "status" ->
+            "Using Android's thermal status${if (detail.isBlank()) "" else " ($detail)"} · " +
+                "pauses at MODERATE"
+        source == "battery" ->
+            "Battery temperature${if (detail.isBlank()) "" else " ($detail)"} · " +
+                "pauses at ${restartThreshold(settings.thermalStopC)} °C"
+        else -> "Pauses at ${restartThreshold(settings.thermalStopC)} °C · " +
+            "resumes at ${restartThreshold(settings.thermalResumeC)} °C"
     }
 }
 
@@ -1646,10 +1683,18 @@ private fun PerformanceCard(
     // app has since moved to another cpuset, say so instead of hiding it.
     val runningVisible = health?.perfVisible ?: plan.visible
     val modeLabel = if (runningVisible) "Visible / kiosk" else "Background"
+    // Every core count and frequency below comes from this device's own cpuset
+    // and cpufreq nodes. No phone model is named and no figure is hardcoded.
+    val detection = remember { PerfProfile.detect() }
+    val clusterText = detection.clusterLabel.ifBlank { "no cpufreq nodes" }
+    val clusterWord = "${detection.clusters.size} cluster" +
+        if (detection.clusters.size == 1) "" else "s"
     val modeDetail = if (runningVisible) {
-        "Full SoC, all 8 cores. 2 threads on 6-7 measured 6.4–7.7 tok/s; 4 unpinned threads 7.6 (128 tokens). The old 14.4 was a short-completion figure."
+        "This process may run on all ${detection.allowed.size} cores across $clusterWord: " +
+            "$clusterText."
     } else {
-        "6 cores, no X1. 2 threads on 4-5 measured 5.6 tok/s; 4 unpinned threads 5.4 (128 tokens)."
+        "Background cpuset: ${detection.allowed.size} cores, and the fastest cluster is not in " +
+            "the allowed set. Detected: $clusterText."
     }
     val kioskOn = Kiosk.isDeviceOwner(context) || Kiosk.isLockTaskActive(context)
     val running = health?.state == "ready" || health?.state == "loading" ||
@@ -1678,11 +1723,11 @@ private fun PerformanceCard(
         Spacer(Modifier.height(4.dp))
         Text(
             if (kioskOn) {
-                "Kiosk is on: pinning this app is what unlocks the X1 cores."
+                "Kiosk is on: pinning this app is what unlocks the fastest cores."
             } else if (!runningVisible) {
-                "Kiosk — or simply keeping this screen visible — is what unlocks the X1 cores."
+                "Kiosk — or simply keeping this screen visible — is what unlocks the fastest cores."
             } else {
-                "This screen being visible is what unlocks the X1 cores; kiosk keeps it that way."
+                "This screen being visible is what unlocks the fastest cores; kiosk keeps it that way."
             },
             color = PhononColors.TextDim,
             fontSize = 11.5.sp,
@@ -1959,6 +2004,46 @@ private fun SettingsScreen(
                 fontSize = 12.sp,
                 lineHeight = 17.sp,
             )
+            Spacer(Modifier.height(4.dp))
+            // CPU capabilities and the memory-fit verdict, both device-derived.
+            Text(
+                "CPU: ${health?.cpuFeatures?.takeIf { it.isNotBlank() } ?: "detecting…"}" +
+                    " · dotprod ${if (health?.cpuDotprod == true) "yes" else "no"}" +
+                    " · i8mm ${if (health?.cpuI8mm == true) "yes" else "no"}" +
+                    " · build requires: " +
+                    (health?.nativeRequiredFeatures?.ifBlank { "nothing (all-variant build)" }
+                        ?: "…"),
+                color = PhononColors.TextDim,
+                fontSize = 12.sp,
+                lineHeight = 17.sp,
+            )
+            health?.let { h ->
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    if (h.memFits) {
+                        "Memory: fits — needs ~${MemoryFit.gb(h.memRequiredBytes)} GB, " +
+                            "${h.memAvailGb} GB available now"
+                    } else {
+                        "Memory: will not fit — needs ~${MemoryFit.gb(h.memRequiredBytes)} GB, " +
+                            "only ${h.memAvailGb} GB available now. Use a smaller model or context."
+                    },
+                    color = if (h.memFits) PhononColors.TextDim else PhononColors.Danger,
+                    fontSize = 12.sp,
+                    lineHeight = 17.sp,
+                )
+            }
+            health?.let { h ->
+                if (h.lastExitLowMemory) {
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "Last server exit looked like a low-memory kill: this model is too big " +
+                            "for this phone.",
+                        color = PhononColors.Danger,
+                        fontSize = 12.sp,
+                        lineHeight = 17.sp,
+                    )
+                }
+            }
             Spacer(Modifier.height(8.dp))
             TextButton(
                 enabled = !reportPreparing,
@@ -2019,6 +2104,106 @@ private fun SettingsScreen(
                 },
                 fontSize = 12.sp,
             )
+        }
+        Spacer(Modifier.height(12.dp))
+
+        // Per-SoC tuning. Manual by design: the sweep restarts the server and
+        // takes a couple of minutes, so it never runs on its own.
+        PhononCard {
+            Text("Tune this phone", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+            Spacer(Modifier.height(6.dp))
+            val profile = health?.socTuningProfile.orEmpty()
+            Text(
+                if (profile.isBlank() || profile == "none") {
+                    "No measured profile for ${health?.oemVendor?.takeIf { it.isNotBlank() } ?: device.soc}. " +
+                        "The app is using the generic per-cpuset default."
+                } else {
+                    "Measured profile applied: ${tuningSummary(profile)}"
+                },
+                color = PhononColors.Text,
+                fontSize = 12.sp,
+                lineHeight = 17.sp,
+            )
+            if (health?.socTuningRunning == true) {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "Sweep running: ${health.socTuningState}",
+                    color = PhononColors.Cyan,
+                    fontSize = 12.sp,
+                )
+            }
+            Spacer(Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(
+                    enabled = health?.socTuningRunning != true &&
+                        health?.state == "ready",
+                    onClick = {
+                        val service = AppState.service
+                        if (service == null) {
+                            toast(context, "Service is starting")
+                        } else if (!service.uiTuneThisPhone()) {
+                            toast(context, "Server must be ready and idle to tune")
+                        } else {
+                            toast(context, "Tuning started — about two minutes")
+                        }
+                    },
+                ) {
+                    Text("Run sweep (~2 min)", color = PhononColors.Cyan, fontSize = 13.sp)
+                }
+                TextButton(
+                    onClick = {
+                        AppState.service?.uiClearSocTuning()
+                        toast(context, "Profile cleared; back to auto-tuning")
+                    },
+                ) {
+                    Text("Clear profile", color = PhononColors.TextDim, fontSize = 13.sp)
+                }
+            }
+            Text(
+                "Tries 3 decode and 2 prefill thread counts on a short agent-shaped prompt, keeps " +
+                    "the fastest of each, and stores it per SoC.",
+                color = PhononColors.TextDim.copy(alpha = 0.8f),
+                fontSize = 11.sp,
+                lineHeight = 16.sp,
+            )
+        }
+        Spacer(Modifier.height(12.dp))
+
+        // OEM background-restriction guidance. The app cannot change these
+        // settings itself; it can only point at the vendor's own screen.
+        val oem = remember { OemGuidance.forDevice() }
+        PhononCard {
+            Text("Background restrictions", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "${oem.vendor}: ${oem.steps}",
+                color = PhononColors.Text,
+                fontSize = 12.sp,
+                lineHeight = 17.sp,
+            )
+            Spacer(Modifier.height(8.dp))
+            TextButton(onClick = {
+                try {
+                    context.startActivity(
+                        Intent(Intent.ACTION_VIEW, android.net.Uri.parse(oem.dontKillUrl)),
+                    )
+                } catch (_: Throwable) {
+                    toast(context, oem.dontKillUrl)
+                }
+            }) {
+                Text("Open ${oem.dontKillUrl}", color = PhononColors.Cyan, fontSize = 13.sp)
+            }
+            if (health?.batteryFullWarning == true) {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "This phone has been at 100% on the charger for over four hours. Android " +
+                        "usually holds charge around 80% for longevity; if it is not doing so, " +
+                        "unplug when full.",
+                    color = PhononColors.Warn,
+                    fontSize = 12.sp,
+                    lineHeight = 17.sp,
+                )
+            }
         }
         Spacer(Modifier.height(12.dp))
 
@@ -2703,9 +2888,10 @@ private fun SetupScreen(
                 Text("Choose a model", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    "Qwen3.5 decodes at about 9.2 tok/s on the Pixel 7 reference; Gemma 4 at " +
-                        "about 7.0. Both ship with a vision projector, so the server accepts " +
-                        "images once the model has downloaded.",
+                    "Model families differ in speed and capability by device. The Models screen " +
+                        "shows a measured figure only for the device it was measured on, and " +
+                        "says \"unmeasured\" otherwise. Both Qwen and Gemma ship with a vision " +
+                        "projector, so the server accepts images once the model has downloaded.",
                     color = PhononColors.TextDim,
                     fontSize = 13.sp,
                     lineHeight = 18.sp,

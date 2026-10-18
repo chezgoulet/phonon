@@ -40,6 +40,7 @@ data class Health(
     val perfAllowedCpus: String,
     val perfCpuRange: String,
     val perfThreads: Int,
+    val perfPrefillThreads: Int,
     val perfPrio: Int,
     val perfPrioBatch: Int,
     val perfAuto: Boolean,
@@ -47,20 +48,48 @@ data class Health(
     val perfDetectedMode: String,
     val perfDetectedCpuRange: String,
     val perfDetectedThreads: Int,
+    val perfAllowedCount: Int,
+    val perfClusterCount: Int,
+    val perfClusterLabel: String,
     val perfHintActive: Boolean,
     val perfHintTargetMs: Double?,
     val perfHintDetail: String,
+    // Device-agnostic fields: CPU capabilities, memory fit, thermal source.
+    val cpuDotprod: Boolean,
+    val cpuI8mm: Boolean,
+    val cpuFeatures: String,
+    val nativeRequiredFeatures: String,
+    val memAvailGb: String,
+    val memRequiredBytes: Long,
+    val memKvBytes: Long,
+    val memFits: Boolean,
+    val thermalSource: String,
+    val thermalDetail: String,
+    val thermalUserOverride: Boolean,
+    val thermalHeadroom: Double?,
+    val thermalStatus: Int?,
+    val lastExitLowMemory: Boolean,
+    val socTuningProfile: String,
+    val socTuningRunning: Boolean,
+    val socTuningState: String,
+    val oemVendor: String,
+    val oemDontKillUrl: String,
+    val batteryFullWarning: Boolean,
 ) {
     /** Mode the running child was launched in; falls back to detection. */
     val perfVisible: Boolean get() = perfMode == PerfPlan.MODE_VISIBLE
     val perfDetectedVisible: Boolean get() = perfDetectedMode == PerfPlan.MODE_VISIBLE
 
-    /** One compact line for the Serve screen. */
+    /** One compact line for the Serve screen. Counts are this device's own. */
     val perfLine: String
-        get() = if (perfVisible) {
-            "Visible / kiosk · all 8 cores · $perfThreads threads on $perfCpuRange"
-        } else {
-            "Background · no X1 · $perfThreads threads on $perfCpuRange"
+        get() {
+            val clusters = "$perfClusterCount cluster" + if (perfClusterCount == 1) "" else "s"
+            return if (perfVisible) {
+                "Visible / kiosk · $perfAllowedCount cores in $clusters · " +
+                    "$perfThreads threads on $perfCpuRange"
+            } else {
+                "Background · $perfAllowedCount cores allowed · $perfThreads threads on $perfCpuRange"
+            }
         }
 }
 
@@ -94,6 +123,7 @@ fun parseHealth(raw: String): Health {
         perfAllowedCpus = j.optString("perf_allowed_cpus", ""),
         perfCpuRange = j.optString("perf_cpu_range", ""),
         perfThreads = j.optInt("perf_threads", 4),
+        perfPrefillThreads = j.optInt("perf_prefill_threads", 0),
         perfPrio = j.optInt("perf_prio", PerfPlan.DEFAULT_PRIO),
         perfPrioBatch = j.optInt("perf_prio_batch", PerfPlan.DEFAULT_PRIO_BATCH),
         perfAuto = j.optBoolean("perf_auto", true),
@@ -101,9 +131,32 @@ fun parseHealth(raw: String): Health {
         perfDetectedMode = j.optString("perf_detected_mode", PerfPlan.MODE_BACKGROUND),
         perfDetectedCpuRange = j.optString("perf_detected_cpu_range", ""),
         perfDetectedThreads = j.optInt("perf_detected_threads", 4),
+        perfAllowedCount = j.optInt("perf_allowed_count", 0),
+        perfClusterCount = j.optInt("perf_cluster_count", 0),
+        perfClusterLabel = j.optString("perf_cluster_label", ""),
         perfHintActive = j.optBoolean("perf_hint_active", false),
         perfHintTargetMs = j.optDoubleOrNull("perf_hint_target_ms"),
         perfHintDetail = j.optString("perf_hint_detail", ""),
+        cpuDotprod = j.optBoolean("cpu_dotprod", false),
+        cpuI8mm = j.optBoolean("cpu_i8mm", false),
+        cpuFeatures = j.optString("cpu_features", ""),
+        nativeRequiredFeatures = j.optString("native_required_features", ""),
+        memAvailGb = j.optString("mem_avail_gb", ""),
+        memRequiredBytes = j.optLong("mem_required_bytes", 0),
+        memKvBytes = j.optLong("mem_kv_estimate_bytes", 0),
+        memFits = j.optBoolean("mem_fits", true),
+        thermalSource = j.optString("thermal_source", ""),
+        thermalDetail = j.optString("thermal_detail", ""),
+        thermalUserOverride = j.optBoolean("thermal_user_override", false),
+        thermalHeadroom = j.optDoubleOrNull("thermal_headroom"),
+        thermalStatus = j.optIntOrNull("thermal_status"),
+        lastExitLowMemory = j.optBoolean("last_exit_low_memory", false),
+        socTuningProfile = j.optString("soc_tuning_profile", "none"),
+        socTuningRunning = j.optBoolean("soc_tuning_running", false),
+        socTuningState = j.optString("soc_tuning_state", "idle"),
+        oemVendor = j.optString("oem_vendor", ""),
+        oemDontKillUrl = j.optString("oem_dont_kill_url", ""),
+        batteryFullWarning = j.optBoolean("battery_full_warning", false),
     )
 }
 
