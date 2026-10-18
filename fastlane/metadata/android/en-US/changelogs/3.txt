@@ -1,0 +1,11 @@
+Gate A of the audit: the places where the app could lose a setting or claim a
+success it had not earned.
+
+Settings now posts only the fields changed on that screen, so a model selected
+while the screen was open is no longer reverted and auto-tuning is not pinned
+off by an unrelated save. Starting the server refuses up front when the model
+file is missing, instead of accepting a start that cannot happen. A file already
+on disk is only treated as a finished download when a signed record vouches for
+it, or its hash matches the catalog; otherwise it is re-verified or replaced.
+Model file names can no longer resolve to the models directory itself or its
+parent.
