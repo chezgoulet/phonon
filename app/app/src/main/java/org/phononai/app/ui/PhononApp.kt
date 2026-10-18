@@ -1021,7 +1021,7 @@ private fun ModelsScreen(
         Text("Models", style = MaterialTheme.typography.headlineLarge)
         Spacer(Modifier.height(6.dp))
         Text(
-            "Two families, one server. All decode numbers were measured on this phone; unmeasured entries say so.",
+            "Every family, one server. All decode numbers were measured on this phone; unmeasured entries say so.",
             color = PhononColors.TextDim,
             fontSize = 14.sp,
             lineHeight = 20.sp,
