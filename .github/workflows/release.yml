@@ -11,6 +11,12 @@
 #   * the secrets below exist: PHONON_KEYSTORE_BASE64,
 #     PHONON_KEYSTORE_PASSWORD, PHONON_KEY_ALIAS, PHONON_KEY_PASSWORD
 #   * llama.cpp is a pinned submodule (third_party/llama.cpp) built by app/build-native.sh
+#
+# The release carries the APK and a SHA256SUMS file covering it, and then tells
+# the project site to regenerate. The dispatch is best-effort: an absent
+# SITE_DISPATCH_TOKEN, or a site repo that refuses the call, warns and leaves the
+# release published rather than failing a release that has already shipped.
+# See docs/RELEASE.md.
 
 name: release
 
@@ -162,6 +168,19 @@ jobs:
           cp "${{ steps.apk.outputs.path }}" "$OUT"
           echo "out=$OUT" >> "$GITHUB_OUTPUT"
 
+      # The site and any sideloading operator need a hash they can check the
+      # download against. One line per artifact, in the format sha256sum writes
+      # and `sha256sum -c` reads.
+      - name: Write SHA256SUMS
+        id: sums
+        run: |
+          set -euo pipefail
+          OUT="${{ steps.named.outputs.out }}"
+          sha256sum "$OUT" > SHA256SUMS
+          test -s SHA256SUMS || { echo "::error::SHA256SUMS is empty"; exit 1; }
+          cat SHA256SUMS
+          echo "file=SHA256SUMS" >> "$GITHUB_OUTPUT"
+
       - name: Write release notes from changelog
         run: |
           set -euo pipefail
@@ -175,7 +194,41 @@ jobs:
           tag_name: ${{ steps.ver.outputs.tag }}
           name: Phonon ${{ steps.ver.outputs.name }}
           body_path: ${{ runner.temp }}/notes.txt
-          files: ${{ steps.named.outputs.out }}
+          files: |
+            ${{ steps.named.outputs.out }}
+            ${{ steps.sums.outputs.file }}
           fail_on_unmatched_files: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # The last step, because the site reads the published release: its date,
+      # its APK asset and its SHA256SUMS. A dispatch sent before the release
+      # exists would make the site resolve a tag it cannot see.
+      #
+      # repository_dispatch needs a token that can write to the SITE repo, which
+      # GITHUB_TOKEN cannot be. SITE_DISPATCH_TOKEN is optional by design: the
+      # site also runs on a daily schedule, so a missing token costs the site a
+      # few hours, not a release. See docs/RELEASE.md.
+      - name: Notify the site repository (phononai.org)
+        env:
+          SITE_DISPATCH_TOKEN: ${{ secrets.SITE_DISPATCH_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          if [ -z "${SITE_DISPATCH_TOKEN}" ]; then
+            echo "::warning::SITE_DISPATCH_TOKEN is not set; skipping the phononai.org dispatch. The site will pick ${TAG} up on its daily schedule. See docs/RELEASE.md."
+            exit 0
+          fi
+          # A failed dispatch is a warning, not a failure: the release is
+          # already published and the site has a scheduled rebuild behind it.
+          # Failing here would mark a shipped release as broken.
+          if curl -sS --fail-with-body -X POST \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer ${SITE_DISPATCH_TOKEN}" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              https://api.github.com/repos/chezgoulet/phononai.org/dispatches \
+              -d "{\"event_type\":\"app-release\",\"client_payload\":{\"tag\":\"${TAG}\"}}"; then
+            echo "dispatched app-release for ${TAG} to chezgoulet/phononai.org"
+          else
+            echo "::warning::could not dispatch app-release for ${TAG} to chezgoulet/phononai.org; the site will catch up on its daily schedule."
+          fi

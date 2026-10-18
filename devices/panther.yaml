@@ -6,30 +6,69 @@ android: 17
 rooted: false
 runtime: llama.cpp
 runtime_build: null
-model: gemma-4-E2B-it-Q4_K_M
-context: 8192
-threads: 4
-mtp: true
+model: Qwen3.5-2B-Q4_K_M
+context: 32768
+threads: 2
+mtp: false
 status: candidate
 units: 2
 measured:
-  prefill_tps: 17.86        # 34-token prompt, model resident
-  decode_tps: 10.04         # 119 generated tokens, model resident
+  prefill_tps: 53.0         # short prompt, through the app
+  decode_tps: 12.85         # median of 13.19 / 12.50, 128 greedy tokens, through the app
   ttft_s: null
-  after_5min_tps: null      # not claimed: page eviction breaks sustained runs
-  after_15min_tps: null
+  agent_turn_s: null        # not run: needs the app driving a ~2.8K-token agent turn
+  after_5min_tps: null      # not measured on this build
+  after_15min_tps: null     # not measured on this build
   peak_mem_mb: null
-  battery_temp_c: 26.2
+  battery_temp_c: null      # no temperature recorded for these rows
+  watts: null               # not run: needs a USB power meter in the path
+  app_version: "0.1.7"
+  measured_date: "2026-10-17"
 notes: >-
-  Owner's hardware; two units. No measurements taken yet. Known constraints:
-  8 GB RAM shared with Android, so a 3 GB model plus KV cache is at the edge;
-  USB-C hub must provide PD passthrough and gigabit Ethernet; no case, airflow
-  required for sustained load. One unit inspected 2026-10-17: stock Android 17
-  (SDK 37), user/release-keys, unrooted, 7.65 GB visible RAM, battery at 80%
-  and 24.2 C. Exec probe ran on this unit (see docs/app-spike.md).
+  Owner's hardware; two units. Reference phone for the project. Known
+  constraints: 8 GB RAM shared with Android, so a 3 GB model plus KV cache is at
+  the edge; USB-C hub must provide PD passthrough and gigabit Ethernet; no case,
+  airflow required for sustained load. One unit inspected 2026-10-17: stock
+  Android 17 (SDK 37), user/release-keys, unrooted, 7.65 GB visible RAM, battery
+  at 80% and 24.2 C (idle reading, not a serving temperature). Exec probe ran on
+  this unit (see docs/app-spike.md).
 
-  App measured 2026-10-17 (docs/app.md): 10.04 tok/s decode / 17.86 prefill with
-  the model resident; 5.3 under memory contention. After ~5 min idle the kernel
-  evicted the model pages and an 8-token request took 41 s of wall time; mlock
-  is refused (RLIMIT_MEMLOCK). 2.84 GB of weights on this 7.65 GB device is
-  unstable under Android reclaim. Sustained numbers are not claimed.
+  The block above is the app's own numbers after the dot-product build, from
+  docs/performance.md ("Current numbers (0.1.7)"): Qwen3.5-2B Q4_K_M, 32K
+  context, `-np 1 -fa on`, mmap, two threads pinned to cores 6-7, screen on, USB
+  power, non-streaming 128-token greedy runs through the app's
+  /v1/chat/completions. Decode was recorded as two runs, 13.19 and 12.50 tok/s;
+  the median is carried here. Prefill is the short-prompt figure, 53 tok/s.
+
+  On the same build and configuration, a 2,415-token prompt decoded at 10.52
+  tok/s with prefill at 69 tok/s (35 s instead of 157 s) — the agent-shaped
+  case, and the reason prefill, not decode, is the number that limits an agent
+  turn. It is recorded here as prose rather than in the fields above because the
+  fields are single-valued and mixing rows would make one sentence out of two
+  different measurements.
+
+  Deliberately null:
+
+  * after_5min_tps and after_15min_tps — the sustained runs in
+    docs/sustained-load.md (burst 8.37, sustained 6.31 tok/s) predate the
+    dot-product build and were measured with GGML_CPU_REPACK=ON, which this
+    project has since established never repacked: the build had no -march, so
+    the dot-product kernels the repack selector requires were absent. Those
+    numbers are real measurements of a build this release does not ship, so no
+    sustained figure is claimed for the current build.
+  * agent_turn_s and watts — not run. Filling them needs one command and one
+    piece of hardware: `tools/bench/bench.sh` driving an agent-shaped turn
+    through the app, and a USB power meter between the charger and the phone
+    while a generation is in flight.
+  * runtime_build — the 0.1.7 rows in docs/performance.md do not name the
+    llama.cpp revision they were built against.
+
+  Provenance note: docs/performance.md describes its row-by-row model and
+  server line as "app 0.4.0 (debug)", while the section carrying these numbers
+  is titled "Current numbers (0.1.7)". docs/RELEASE.md records that 0.4.x was a
+  pre-reset build that was never published and that public versioning restarted
+  at 0.1.0, so the version strings in docs/performance.md were written before
+  the reset and only the section title was carried forward. The section title is
+  used above because it is the one attached to the numbers. The page should be
+  reconciled with the post-reset scheme before a generator quotes an app version
+  out of it.

@@ -5,10 +5,14 @@ because it is faster on the reference phone. Gemma 4 is a first-class option
 for its multimodal path and its own tool format; the picker shows the measured
 cost next to it. The user chooses; the app recommends.
 
-The catalog lives in
-[`ModelCatalog.kt`](../app/app/src/main/java/org/phononai/app/ModelCatalog.kt).
-The Models screen, Setup and the RAM-tier defaults all read that one object;
-there are no model names or URLs elsewhere in the UI.
+The catalog is a JSON document —
+[`assets/catalog.json`](../app/app/src/main/assets/catalog.json) — and it is the
+single source of truth for model data. `ModelCatalog.kt` loads and parses it at
+startup (`PhononApplication`); the Models screen, Setup and the RAM-tier
+defaults all read that one object, and there are no model names or URLs
+elsewhere in the UI. **Edit the JSON to change the catalog, not the Kotlin.**
+The table below is a rendering of that file and is kept in step with it by
+review, not by a generator.
 
 ## Catalog
 
@@ -33,17 +37,17 @@ Trade-offs as shown in the picker:
 
 - **Qwen3.5-2B** — fastest here and the 8 GB default: 32K context with headroom
   to spare.
-- **Qwen3.5-4B** — better answers than the 2B; unmeasured here and tight on
-  8 GB RAM.
+- **Qwen3.5-4B** — better answers than the 2B at about 4 tok/s. Runs on 8 GB at
+  16K with ~600 MB free; at 32K it fits but leaves ~250 MB.
 - **Qwen3.5-9B** — highest-quality Qwen option; unmeasured and only sensible on
   16 GB.
 - **Gemma 4 E2B** — multimodal and Gemma's own tool format, at a measured
   ~2 tok/s less than Qwen 2B.
-- **Gemma 4 E4B** — the larger multimodal Gemma; unmeasured here and a 12 GB
-  choice.
-- **MiniCPM5-2B** — Apache-2.0, 131K context, and the strongest tool-use
-  numbers in its class (97.1 on tau2-Bench Telecom); ~25% slower than Qwen 2B
-  on this phone. Tool calls parse correctly through llama.cpp.
+- **Gemma 4 E4B** — the larger multimodal Gemma at about 4 tok/s. Runs on 8 GB
+  at 16K with ~560 MB free.
+- **MiniCPM5-2B** — Apache-2.0, 32K context in this catalog, and the strongest
+  tool-use numbers in its class (97.1 on tau2-Bench Telecom); ~25% slower than
+  Qwen 2B on this phone. Tool calls parse correctly through llama.cpp.
 - **Granite 4.2 3B** — Apache-2.0 and IBM's tool-calling design; ~4.4 tok/s
   here, about half Qwen's speed. Tool calls parse correctly.
 - **Nemotron 3 Nano 4B** — NVIDIA Open Model License (not OSI); 3.5 tok/s, the
