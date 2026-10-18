@@ -282,7 +282,7 @@ class ApiServer(
                 // larger than a header block.
                 val head = readHead(input, s, s.inetAddress.hostAddress ?: "") ?: return
                 s.soTimeout = CLIENT_READ_TIMEOUT_MS
-                route(head, input, output)
+                route(head, input, output, s)
                 output.flush()
             } catch (t: Throwable) {
                 Log.w(TAG, "request failed: ${t.javaClass.simpleName}: ${t.message}")
@@ -352,7 +352,7 @@ class ApiServer(
         override fun close() = out.close()
     }
 
-    private fun route(head: Head, input: BufferedInputStream, out: OutputStream) {
+    private fun route(head: Head, input: BufferedInputStream, out: OutputStream, client: Socket) {
         // Per source address, shared by the control routes and /v1. Checked
         // before auth and before the body is read, so a flood can reach
         // neither the key comparison nor the body buffer; a configured
@@ -403,10 +403,11 @@ class ApiServer(
         routeAuthorized(
             Request(head.method, head.path, head.query, head.headers, body, head.remoteAddress),
             out,
+            client,
         )
     }
 
-    private fun routeAuthorized(req: Request, out: OutputStream) {
+    private fun routeAuthorized(req: Request, out: OutputStream, client: Socket) {
         // A reload owns the listener for a moment while the backend is
         // replaced. Control requests must not race it: answer with a body and
         // a retry hint instead of disappearing with the old socket.
@@ -493,7 +494,7 @@ class ApiServer(
                 } else {
                     api.requestStarted(req.path)
                     try {
-                        proxy(req, out)
+                        proxy(req, out, client)
                     } finally {
                         api.requestFinished(req.path)
                     }
@@ -564,7 +565,7 @@ class ApiServer(
         true
     }
 
-    private fun proxy(req: Request, out: OutputStream) {
+    private fun proxy(req: Request, out: OutputStream, client: Socket) {
         val socket = Socket()
         var wroteHeaders = false
         val backendHost = settings.backendHost()
@@ -609,7 +610,40 @@ class ApiServer(
             if (req.body.isNotEmpty()) bout.write(req.body)
             bout.flush()
 
-            val statusLine = readLine(bin)
+            // If the caller gives up while the phone is still prefilling, the
+            // backend keeps working on a request nobody is waiting for and holds
+            // the only slot. Watch the client for EOF and close the backend when
+            // it goes away; llama-server then abandons the generation.
+            val watcher = thread(name = "phonon-client-watch", isDaemon = true) {
+                try {
+                    client.soTimeout = CLIENT_WATCH_POLL_MS
+                    val cin = client.getInputStream()
+                    while (!Thread.currentThread().isInterrupted) {
+                        val b = try {
+                            cin.read()
+                        } catch (_: java.net.SocketTimeoutException) {
+                            continue
+                        }
+                        if (b < 0) {
+                            Log.i(TAG, "client went away mid-prefill; closing the backend")
+                            try {
+                                socket.close()
+                            } catch (_: Throwable) {
+                            }
+                            return@thread
+                        }
+                    }
+                } catch (_: Throwable) {
+                }
+            }
+
+            val statusLine = try {
+                readLine(bin)
+            } finally {
+                // The backend has answered (or the socket is gone); the client
+                // is either reading the response or already known to be absent.
+                watcher.interrupt()
+            }
             if (statusLine == null) {
                 respond(out, 502, "application/json", """{"error":"empty response"}""".toByteArray())
                 return
@@ -934,6 +968,9 @@ class ApiServer(
          * 1800 s request timeout so the proxy never gives up first.
          */
         const val BACKEND_READ_TIMEOUT_MS = 1_800_000
+
+        /** How often the proxy checks whether the client is still there. */
+        const val CLIENT_WATCH_POLL_MS = 500
         const val MAX_CAPTURE = 4 * 1024 * 1024
         const val BIND_ATTEMPTS = 20
         const val MAX_HEADER_LINES = 100

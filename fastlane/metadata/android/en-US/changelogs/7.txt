@@ -1,0 +1,11 @@
+When a client gives up during a long prefill, the phone now stops working on the
+request. The proxy watches the client connection while the backend is thinking,
+and if it closes, closes the backend too, so llama-server abandons the
+generation instead of holding the phone's only slot for a result nobody will
+read.
+
+Documentation corrections: the Device Owner component name, the release status
+and the Pixel 7 measurements in the README, the gateway template's model and
+routing strategy, the architecture's context window, and two stale sections.
+tools/smoke-long-prompt.sh is now part of the release gate: it sends about 2,500
+tokens through the endpoint users call and requires a completion.
