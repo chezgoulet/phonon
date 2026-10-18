@@ -59,3 +59,29 @@ is pending reproducible builds.
 
 AGPL-3.0. The bundled inference engine is llama.cpp (MIT); model weights are
 downloaded by the user and carry their own licences.
+
+## Cutting the release (when approved)
+
+Everything below is ready; the tag is the only step that publishes.
+
+1. Confirm `versionCode` in `app/app/build.gradle.kts` is greater than the
+   highest tagged one. CI refuses the build otherwise.
+2. Confirm the repository secrets exist: `KEYSTORE_BASE64`,
+   `KEYSTORE_PASSWORD`, `KEY_ALIAS`, `KEY_PASSWORD`. CI fails loudly if the
+   keystore is missing, and verifies the signature before attaching the APK.
+3. Tag the commit on `main`:
+
+       git tag -a v0.1.0 -m "Phonon 0.1.0"
+       git push origin v0.1.0
+
+4. The workflow builds llama.cpp from the pinned submodule, runs Gradle, checks
+   the tag against `versionName`, signs and attaches the APK to a draft release.
+5. Verify before publishing: `apksigner verify --print-certs` on the attached
+   APK, then install it on a clean device and confirm `/health` reports `ready`
+   and a completion returns content.
+6. Paste these notes into the release and publish.
+
+**Testers carrying a 0.4.0 build must uninstall it first.** The public scheme
+restarts at `versionCode = 1`, so the old build is a "downgrade" to Android and
+`adb install -r` will refuse it.
+
