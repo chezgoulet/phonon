@@ -1,0 +1,7 @@
+Fixes from the first round of review.
+
+A battery pause is no longer undone by the thermal resume on the next check, so
+a discharging phone stops serving instead of restarting the model every thirty
+seconds. Two simultaneous download requests can no longer both start writing the
+same file. The in-app benchmark now dials the address the app is actually bound
+to, so it works when serving on a specific LAN address rather than a wildcard.
