@@ -29,17 +29,30 @@ class ModelDownloader(private val context: Context) {
         url: String,
         dest: File,
         expectedSha256: String? = null,
+        catalogId: String? = null,
         onProgress: (Long, Long) -> Unit,
     ): File {
         dest.parentFile?.mkdirs()
         if (dest.isFile && dest.length() > 0 && !File(dest.path + PART_SUFFIX).exists()) {
-            val problem = checksumProblem(dest, expectedSha256)
-            if (problem == null) {
-                Log.i(TAG, "destination already exists, ${dest.length()} bytes: $dest")
+            // An existing file is only believed when a signed record vouches for
+            // it, or when the catalog hash matches a fresh hash of the file.
+            val recorded = ModelRecord.recordedSha(dest)
+            if (recorded != null &&
+                (expectedSha256.isNullOrBlank() || recorded.equals(expectedSha256, ignoreCase = true))
+            ) {
+                Log.i(TAG, "existing file accepted on its signed record: $dest")
                 onProgress(dest.length(), dest.length())
                 return dest
             }
-            Log.w(TAG, "existing file rejected ($problem); downloading again: $dest")
+            if (!expectedSha256.isNullOrBlank() &&
+                ModelRecord.sha256(dest).equals(expectedSha256, ignoreCase = true)
+            ) {
+                ModelRecord.write(context, dest, expectedSha256, url, catalogId)
+                Log.i(TAG, "existing file re-hashed and accepted: $dest")
+                onProgress(dest.length(), dest.length())
+                return dest
+            }
+            Log.w(TAG, "existing file rejected (no usable record or hash); downloading again: $dest")
             dest.delete()
         }
 
@@ -143,6 +156,9 @@ class ModelDownloader(private val context: Context) {
                 part.copyTo(dest, overwrite = true)
                 part.delete()
             }
+            if (!expectedSha256.isNullOrBlank()) {
+                ModelRecord.write(context, dest, expectedSha256, url, catalogId)
+            }
             val verified = if (expectedSha256.isNullOrBlank()) "" else ", sha256 verified"
             Log.i(TAG, "downloaded $url -> $dest ($actual bytes, size verified$verified)")
             return dest
@@ -162,18 +178,7 @@ class ModelDownloader(private val context: Context) {
         }
     }
 
-    private fun sha256(file: File): String {
-        val digest = MessageDigest.getInstance("SHA-256")
-        file.inputStream().use { input ->
-            val buffer = ByteArray(256 * 1024)
-            while (true) {
-                val n = input.read(buffer)
-                if (n < 0) break
-                digest.update(buffer, 0, n)
-            }
-        }
-        return digest.digest().joinToString("") { "%02x".format(it) }
-    }
+    private fun sha256(file: File): String = ModelRecord.sha256(file)
 
     private fun mb(bytes: Long): Long = bytes / (1024 * 1024)
 

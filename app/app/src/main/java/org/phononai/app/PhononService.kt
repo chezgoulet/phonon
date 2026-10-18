@@ -221,14 +221,22 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
         if (!chosen.startsWith("http://") && !chosen.startsWith("https://")) {
             return JSONObject().put("error", "invalid url: $chosen").toString()
         }
-        val dest = File(File(filesDir, "models"), fileName ?: modelFileName(chosen))
+        val modelsDir = File(filesDir, "models").canonicalFile
+        val name = fileName ?: modelFileName(chosen)
+        if (name == "." || name == ".." || name.isBlank()) {
+            return JSONObject().put("error", "invalid model file name").toString()
+        }
+        val dest = File(modelsDir, name).canonicalFile
+        if (dest.parentFile != modelsDir) {
+            return JSONObject().put("error", "model path escapes the models directory").toString()
+        }
         if (!DownloadState.beginIfIdle(chosen, dest.absolutePath)) {
             return JSONObject().put("error", "download already running").toString()
         }
         thread(name = "phonon-download", isDaemon = true) {
             try {
                 val expectedSha = entryId?.let { ModelCatalog.byId(it) }?.sha256
-                ModelDownloader(this).download(chosen, dest, expectedSha) { done, total ->
+                ModelDownloader(this).download(chosen, dest, expectedSha, entryId) { done, total ->
                     DownloadState.progress(done, total)
                 }
                 val entry = entryId?.let { ModelCatalog.byId(it) }
@@ -267,6 +275,11 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
                 server.refuseUnsafeExposure(message)
                 updateNotification()
                 return error(message)
+            }
+            // Accepting a start we already know will fail misleads the caller.
+            val model = File(settings.modelPath)
+            if (!model.isFile || !model.canRead()) {
+                return error("model not found or unreadable: ${model.absolutePath}")
             }
             wantServer = true
             configHashAtLaunch = currentConfigHash()
@@ -917,6 +930,7 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
             raw
         }
         val safe = decoded.replace(Regex("[^A-Za-z0-9._-]"), "_")
+        if (safe == "." || safe == ".." || safe.isBlank()) return "model.gguf"
         return if (safe.isBlank()) "model.gguf" else safe
     }
 

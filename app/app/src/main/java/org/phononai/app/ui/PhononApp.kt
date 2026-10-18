@@ -1551,6 +1551,18 @@ private class SettingsDraft(context: Context) {
     var perfPrioBatch by mutableStateOf(plan.prioBatch.toString())
     var animateGenerating by mutableStateOf(s.animateAvatarWhileGenerating)
 
+    /**
+     * What the fields read when this screen opened. A field still equal to its
+     * initial value has not been edited here, so Save must not post it: the
+     * service may have changed it in the meantime (a download selecting a
+     * model, kiosk changing the auto thread count) and posting the stale copy
+     * would silently undo that.
+     */
+    val bornModelPath = s.modelPath
+    val bornContext = s.contextSize.toString()
+    val bornAlias = s.alias
+    val bornThreads = s.threads.toString()
+
     /** Re-read the auto values after an override is cleared or applied. */
     fun syncPerf() {
         val next = s.perfPlan()
@@ -1791,21 +1803,38 @@ private fun SettingsScreen(
 
     fun save(): String? {
         val service = AppState.service ?: return "Service is starting"
-        val ctxSize = draft.contextSize.toIntOrNull() ?: return "Context must be a number"
-        val threadCount = draft.threads.toIntOrNull() ?: return "Threads must be a number"
+        // Untouched fields come from live settings, not from the snapshot.
+        val contextText = if (draft.contextSize == draft.bornContext) {
+            settings.contextSize.toString()
+        } else {
+            draft.contextSize
+        }
+        val threadsText = if (draft.threads == draft.bornThreads) {
+            settings.threads.toString()
+        } else {
+            draft.threads
+        }
+        val ctxSize = contextText.toIntOrNull() ?: return "Context must be a number"
+        val threadCount = threadsText.toIntOrNull() ?: return "Threads must be a number"
         val publicPort = draft.port.toIntOrNull() ?: return "API port must be a number"
         val internalPort = draft.backendPort.toIntOrNull() ?: return "Backend port must be a number"
         val stop = draft.thermalStop.toFloatOrNull() ?: return "Pause threshold must be a number"
         val resume = draft.thermalResume.toFloatOrNull() ?: return "Resume threshold must be a number"
         val warmInterval = draft.keepWarmInterval.toIntOrNull() ?: return "Keep-warm interval must be a number"
         val body = JSONObject().apply {
-            put("model_path", draft.modelPath.trim())
+            put(
+                "model_path",
+                if (draft.modelPath == draft.bornModelPath) settings.modelPath else draft.modelPath.trim(),
+            )
             put("context", ctxSize)
             put("threads", threadCount)
             put("bind_address", draft.bindAddress.trim())
             put("port", publicPort)
             put("backend_port", internalPort)
-            put("alias", draft.alias.trim())
+            put(
+                "alias",
+                if (draft.alias == draft.bornAlias) settings.alias else draft.alias.trim(),
+            )
             // Empty means "no default": omit it so the API's http(s) validation
             // only applies to a URL the operator actually entered.
             draft.downloadUrl.trim().takeIf { it.isNotEmpty() }?.let { put("download_url", it) }
