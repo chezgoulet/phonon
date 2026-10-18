@@ -1,162 +1,89 @@
 #!/usr/bin/env python3
-"""Generate Phonon's launcher icon: a portrait frame around a pixel recycler.
+"""Generate Phonon's launcher icon: a portrait frame around a particle brain.
 
-The mark is a 32x32-cell recycling symbol inside a tall rectangle, drawn on the
-adaptive-icon canvas. Run from the repository root:
+The brain artwork lives in tools/icon/brain-source.png — a particle swarm shaped
+into a side profile, cyan on black. This script only composes it: crop to the
+particles, normalise the brightness so downscaling keeps the dots crisp, place it
+inside the frame, and write every asset Android and the stores need.
 
     python3 tools/icon/generate.py
-
-Writes the adaptive foreground vector, the legacy mipmaps and the store icon.
-The grid below is the source of truth; edit it and re-run.
 """
 from pathlib import Path
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageEnhance
 
 ROOT = Path(__file__).resolve().parents[2]
 RES = ROOT / "app/app/src/main/res"
+SRC = Path(__file__).resolve().parent / "brain-source.png"
 
-GRID = [
-    "................................",
-    ".........##############.........",
-    "........######.#########........",
-    "........#######.#########.......",
-    ".......##################.##....",
-    ".......########..##########.....",
-    "......#########...#########.....",
-    "......########....########......",
-    "......########.....######.......",
-    "........#####.....#######.......",
-    ".........####..............##...",
-    "...........#..............###...",
-    ".#######................######..",
-    "..#######.............########..",
-    ".########.............#########.",
-    ".#########.............#########",
-    "##########.............#########",
-    "########..#.............########",
-    "########................########",
-    ".######.............#....######.",
-    "..#####.............#.....####..",
-    "..####.########....###########..",
-    "...############....###########..",
-    "...##.#########...###########...",
-    "....###########..############...",
-    ".....##########..###########....",
-    ".....##########...##########....",
-    "......#########...#########.....",
-    ".......########....########.....",
-    "...................##...........",
-    "....................#...........",
-    "................................",
-]
-
-CYAN = (0, 229, 255, 255)
 INK = (215, 227, 223, 255)
 BLACK = (0, 0, 0, 255)
 
-# Fractions of the canvas. Portrait frame, inside the 72-unit visible area of
-# the 108-unit adaptive canvas.
+# Fractions of the canvas: a portrait frame inside the 72-unit visible area of
+# the 108-unit adaptive canvas, with the brain filling it.
 FX, FY, FW, FH = 0.30, 0.24, 0.40, 0.52
-GLYPH_FRACTION = 0.335
+GLYPH_FRACTION = 0.30
 STROKE_FRACTION = 0.011
 
 
-def cells():
-    return {(x, y) for y, row in enumerate(GRID) for x, ch in enumerate(row) if ch == "#"}
+def master():
+    im = Image.open(SRC).convert("RGB")
+    grey = im.convert("L")
+    box = grey.point(lambda v: 255 if v > 60 else 0).getbbox()
+    im = im.crop(box)
+    im = ImageEnhance.Brightness(im).enhance(1.45)
+    im = ImageEnhance.Contrast(im).enhance(1.5)
+    return im
 
 
-def bbox(pts):
-    xs = [p[0] for p in pts]; ys = [p[1] for p in pts]
-    return min(xs), max(xs), min(ys), max(ys)
+def glyph_at(size, src):
+    g = src.copy()
+    g.thumbnail((size, size), Image.Resampling.LANCZOS)
+    px = g.load()
+    for y in range(g.height):
+        for x in range(g.width):
+            r, gg, b = px[x, y]
+            if max(r, gg, b) < 26:
+                px[x, y] = (0, 0, 0)
+    canvas = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    canvas.paste(g, ((size - g.width) // 2, (size - g.height) // 2))
+    return canvas
 
 
-def runs(pts):
-    rows = {}
-    for x, y in pts:
-        rows.setdefault(y, []).append(x)
-    out = []
-    for y, xs in rows.items():
-        xs.sort(); start = prev = xs[0]
-        for x in xs[1:]:
-            if x == prev + 1:
-                prev = x
-            else:
-                out.append((start, y, prev + 1, y + 1)); start = prev = x
-        out.append((start, y, prev + 1, y + 1))
-    return out
-
-
-def render(size, supersample=8):
-    pts = cells()
-    bx0, bx1, by0, by1 = bbox(pts)
-    gw, gh = bx1 - bx0 + 1, by1 - by0 + 1
-    S = size * supersample
-    img = Image.new("RGBA", (S, S), BLACK)
+def compose(size, src):
+    img = Image.new("RGBA", (size, size), BLACK)
     d = ImageDraw.Draw(img)
-    d.rectangle([FX * S, FY * S, (FX + FW) * S, (FY + FH) * S],
-                outline=INK, width=max(1, round(STROKE_FRACTION * S)))
-    cell = GLYPH_FRACTION * S / max(gw, gh)
-    ox = (S - gw * cell) / 2 - bx0 * cell
-    oy = (S - gh * cell) / 2 - by0 * cell
-    for (x, y) in pts:
-        d.rectangle([ox + x * cell, oy + y * cell,
-                     ox + (x + 1) * cell - 1, oy + (y + 1) * cell - 1], fill=CYAN)
-    return img.resize((size, size), Image.Resampling.NEAREST)
-
-
-def vector(viewport=108.0):
-    pts = cells()
-    bx0, bx1, by0, by1 = bbox(pts)
-    gw, gh = bx1 - bx0 + 1, by1 - by0 + 1
-    cell = GLYPH_FRACTION * viewport / max(gw, gh)
-    ox = (viewport - gw * cell) / 2 - bx0 * cell
-    oy = (viewport - gh * cell) / 2 - by0 * cell
-    glyph = " ".join(
-        f"M{ox + x0 * cell:.2f},{oy + y0 * cell:.2f}h{(x1 - x0) * cell:.2f}v{(y1 - y0) * cell:.2f}h-{(x1 - x0) * cell:.2f}z"
-        for (x0, y0, x1, y1) in runs(pts)
-    )
-    a, b = FX * viewport, (FX + FW) * viewport
-    c, e = FY * viewport, (FY + FH) * viewport
-    s = STROKE_FRACTION * viewport
-    frame = (f"M{a:.2f},{c:.2f}h{b - a:.2f}v{e - c:.2f}h-{b - a:.2f}z "
-             f"M{a + s:.2f},{c + s:.2f}h{b - a - 2 * s:.2f}v{e - c - 2 * s:.2f}"
-             f"h-{b - a - 2 * s:.2f}z")
-    return f'''<?xml version="1.0" encoding="utf-8"?>
-<!-- Generated by tools/icon/generate.py. The pixel grid in that script is the source. -->
-<vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="108dp"
-    android:height="108dp"
-    android:viewportWidth="108"
-    android:viewportHeight="108">
-    <path android:fillColor="#D7E3DF" android:fillType="evenOdd" android:pathData="{frame}" />
-    <path android:fillColor="#00E5FF" android:pathData="{glyph}" />
-</vector>
-'''
+    d.rectangle([FX * size, FY * size, (FX + FW) * size, (FY + FH) * size],
+                outline=INK, width=max(1, round(STROKE_FRACTION * size)))
+    g = glyph_at(int(GLYPH_FRACTION * size), src)
+    img.paste(g, ((size - g.width) // 2, (size - g.height) // 2), g)
+    return img
 
 
 def main():
-    drawable = RES / "drawable"
+    src = master()
+    drawable = RES / "drawable-nodpi"
     drawable.mkdir(parents=True, exist_ok=True)
-    (drawable / "ic_launcher_foreground.xml").write_text(vector())
+    # Adaptive foreground: a square PNG, part of the 108-unit canvas equivalent.
+    compose(432, src).save(drawable / "ic_launcher_foreground.png")
 
     for bucket, px in {"mdpi": 48, "hdpi": 72, "xhdpi": 96, "xxhdpi": 144, "xxxhdpi": 192}.items():
         d = RES / f"mipmap-{bucket}"
         d.mkdir(parents=True, exist_ok=True)
-        art = render(px)
+        art = compose(px, src)
         art.save(d / "ic_launcher.png")
         mask = Image.new("L", art.size, 0)
         ImageDraw.Draw(mask).ellipse([0, 0, px - 1, px - 1], fill=255)
-        round_art = art.copy(); round_art.putalpha(mask)
-        round_art.save(d / "ic_launcher_round.png")
+        rounded = art.copy(); rounded.putalpha(mask)
+        rounded.save(d / "ic_launcher_round.png")
 
-    stale = RES / "mipmap-xxxhdpi/ic_launcher_foreground.png"
-    if stale.exists():
-        stale.unlink()
+    old = RES / "drawable/ic_launcher_foreground.xml"
+    if old.exists():
+        old.unlink()
 
     store = ROOT / "fastlane/metadata/android/en-US/images"
     store.mkdir(parents=True, exist_ok=True)
-    render(512).save(store / "icon.png")
-    print("wrote vector, mipmaps and store icon")
+    compose(512, src).save(store / "icon.png")
+    print("wrote adaptive foreground, mipmaps and store icon")
 
 
 if __name__ == "__main__":
