@@ -142,15 +142,17 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
         thermal.stop()
         keepWarm.stop()
         server.shutdown()
-        wakeLock?.let { if (it.isHeld) it.release() }
-        wakeLock = null
+        releaseWakeLock()
         super.onDestroy()
     }
 
     // --- ServerManager.Listener -------------------------------------------
 
     override fun onServerChanged() {
-        mainHandler.post { updateNotification() }
+        mainHandler.post {
+            syncWakeLock()
+            updateNotification()
+        }
     }
 
     // --- ApiHandler -------------------------------------------------------
@@ -854,6 +856,7 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
     }
 
     private fun acquireWakeLock() {
+        if (wakeLock?.isHeld == true) return
         val powerManager = getSystemService(PowerManager::class.java)
         wakeLock = powerManager
             .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, WAKE_LOCK_TAG)
@@ -862,6 +865,25 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
                 acquire()
             }
         Log.i(TAG, "wake lock acquired: $WAKE_LOCK_TAG")
+    }
+
+    private fun releaseWakeLock() {
+        wakeLock?.let { if (it.isHeld) it.release() }
+        wakeLock = null
+        Log.i(TAG, "wake lock released: $WAKE_LOCK_TAG")
+    }
+
+    /**
+     * The partial wake lock exists to keep inference running with the screen
+     * off. When the operator stops serving there is nothing to keep awake, so
+     * holding it would keep the phone out of deep sleep for no benefit.
+     */
+    private fun syncWakeLock() {
+        val wanted = when (server.state) {
+            ServerState.READY, ServerState.LOADING, ServerState.RESTARTING -> true
+            else -> false
+        }
+        if (wanted) acquireWakeLock() else releaseWakeLock()
     }
 
     private fun createNotificationChannel() {
