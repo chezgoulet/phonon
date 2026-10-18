@@ -1,0 +1,14 @@
+Works on phones other than the one it was built on.
+
+The native build now ships one CPU backend per ARMv8 level and lets llama.cpp
+pick the best the running phone supports, instead of baking in dot-product
+instructions that older phones do not have. The app checks the CPU before launch
+and refuses with a message rather than letting the engine die on an illegal
+instruction.
+
+Also: Android 10 is supported again (minSdk 29); the server is refused when the
+model and its cache will not fit in currently available memory, and an unexpected
+exit that looks like a low-memory kill is reported as such; thermal decisions use
+the platform's thermal headroom where it exists, with battery temperature as the
+fallback; and the Performance card no longer prints Pixel 7 cluster names on
+other phones.
