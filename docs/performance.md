@@ -217,3 +217,40 @@ now within noise — so keep Q4_K_M and its better quality.
 Requirement for any future build: `GGML_CPU_REPACK=ON` **and** a llama.cpp
 revision that carries the Q4_K repack kernels. The engineering sample that
 preceded this measured 5.5 tok/s precisely because it lacked them.
+
+## Speculative decoding: a negative result (2026-10-18)
+
+Tried a 0.8B Qwen3.5 draft against the 2B target, same engine (`797de63`), same
+prompt, `--spec-type draft-simple --spec-draft-n-max 4`:
+
+- draft acceptance **0.361** (56 accepted / 155 generated), mean accepted run 2.44
+- decode **2.51 / 2.43 tok/s** against a 9.0 tok/s baseline
+
+The draft models own forward passes cost more than the verification passes they
+
+## Speculative decoding: a negative result (2026-10-18)
+
+Tried a 0.8B Qwen3.5 draft against the 2B target, same engine (`797de63`), same
+prompt, `--spec-type draft-simple --spec-draft-n-max 4`:
+
+- draft acceptance **0.361** (56 accepted / 155 generated), mean accepted run 2.44
+- decode **2.51 / 2.43 tok/s** against a 9.0 tok/s baseline
+
+The draft model's own forward passes cost more than the verification passes they
+save, because every pass reads weights from the same memory bus. On this class
+of device a standalone draft is a loss. Not shipped. A tiny model-native MTP
+head (tens of megabytes, not hundreds) is the only version of this worth
+retrying, and llama.cpp has no Qwen3.5 MTP path at this revision.
+
+## Gemma 4 as a second family (measured)
+
+Same engine, 2 threads on cores 6-7, 128 greedy tokens:
+
+| Model | Context | Decode |
+|---|---|---|
+| Qwen3.5-2B Q4_K_M | 32K | **9.20 / 8.84 tok/s** |
+| Gemma 4 E2B Q4_0 | 16K | **7.05 / 6.74 tok/s** |
+
+Qwen is the faster default at equal tool-calling support; Gemma 4 is worth
+offering for its multimodal path and its own tool format, with the measured cost
+stated in the picker.
