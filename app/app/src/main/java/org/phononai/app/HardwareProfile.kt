@@ -89,10 +89,15 @@ object HardwareProfile {
         (totalRamBytes / GB.toDouble()).roundToInt().coerceAtLeast(1)
 
     fun soc(): String {
-        // SOC_MODEL is API 31+; HARDWARE is the vendor codename fallback.
-        val soc = try {
-            Build.SOC_MODEL
-        } catch (_: Throwable) {
+        // SOC_MODEL is API 31+; HARDWARE is the vendor codename fallback for
+        // Android 10/11, which this app also supports (minSdk 29).
+        val soc = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            try {
+                Build.SOC_MODEL
+            } catch (_: Throwable) {
+                ""
+            }
+        } else {
             ""
         }
         return soc.ifBlank { Build.HARDWARE ?: "" }

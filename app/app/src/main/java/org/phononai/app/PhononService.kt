@@ -33,6 +33,7 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
     private lateinit var keepWarm: KeepWarm
     private lateinit var hints: PerfHints
     private lateinit var benchmark: BenchmarkRunner
+    private lateinit var socTuning: SocTuning
     private val requests = RequestTracker()
     private val mainHandler = Handler(Looper.getMainLooper())
 
@@ -62,6 +63,17 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
      */
     @Volatile private var batterySnapshot: BatterySnapshot? = null
 
+    /** Latest thermal policy result, exposed through /health. */
+    @Volatile private var thermalSource: ThermalPolicy.Source = ThermalPolicy.Source.BATTERY
+    @Volatile private var thermalDetail: String = "unknown"
+
+    /** Wall clock when the battery first read 100% while charging; 0 otherwise. */
+    @Volatile private var fullSinceMs: Long = 0L
+
+    /** True while the manual per-SoC tuning sweep is running. */
+    @Volatile private var tuningRunning: Boolean = false
+    @Volatile private var tuningState: String = "idle"
+
     /** Serialises reloads so two settings changes cannot rebind each other's config. */
     private val reloadExecutor = Executors.newSingleThreadExecutor { r ->
         Thread(r, "phonon-reload").apply { isDaemon = true }
@@ -74,6 +86,10 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
         // Before the supervisor reads model_path/context/threads: first start
         // after install or data clear gets the RAM-tier defaults.
         settings.applyAutoConfigIfNeeded()
+        // A measured per-SoC profile, when one exists, replaces the generic
+        // per-cpuset default. Absent on a fresh install (the sweep is manual).
+        socTuning = SocTuning(settings)
+        socTuning.applyIfPresent()
         createNotificationChannel()
         acquireWakeLock()
 
@@ -82,7 +98,7 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
         // Thermal pause drains in-flight completions instead of cutting them.
         server.drainProbe = { requests.inFlightCount }
 
-        thermal = ThermalMonitor(this) { temp -> onBatteryTemp(temp) }
+        thermal = ThermalMonitor(this) { sample -> onThermalSample(sample) }
         thermal.start()
 
         keepWarm = KeepWarm(settings, server, requests)
@@ -186,6 +202,45 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
             json.put("battery_charging", battery.charging)
         }
         if (::hints.isInitialized) hints.healthFields(json)
+        // Device-agnostic reporting: what the CPU supports, what this build
+        // requires, whether the current model fits in memory, and which signal
+        // the thermal policy is actually using.
+        val features = CpuFeatures.cached()
+        json.put("cpu_dotprod", features.dotprod)
+        json.put("cpu_i8mm", features.i8mm)
+        json.put("cpu_features", features.summary)
+        json.put("native_required_features", NativeRequirements.requiredLabel)
+        val modelFile = File(settings.modelPath)
+        val mmprojBytes = settings.catalogEntryForCurrentModel()
+            ?.let { entry -> File(modelFile.parentFile, entry.mmprojFileName) }
+            ?.takeIf { it.isFile }?.length() ?: 0L
+        val fit = MemoryFit.check(this, modelFile.length(), mmprojBytes, settings.contextSize)
+        json.put("mem_avail_bytes", fit.availBytes)
+        json.put("mem_avail_gb", MemoryFit.gb(fit.availBytes))
+        json.put("mem_required_bytes", fit.requiredBytes)
+        json.put("mem_kv_estimate_bytes", fit.kvBytes)
+        json.put("mem_fits", fit.fits)
+        json.put("thermal_source", thermalSource.name.lowercase())
+        json.put("thermal_detail", thermalDetail)
+        json.put("thermal_user_override", settings.thermalUserOverride)
+        json.put("thermal_status", thermal.thermalStatus ?: JSONObject.NULL)
+        json.put("thermal_headroom", thermal.headroom?.toDouble() ?: JSONObject.NULL)
+        if (::socTuning.isInitialized) {
+            json.put("soc_tuning_profile", socTuning.activeProfileJson())
+        }
+        json.put("soc_tuning_running", tuningRunning)
+        json.put("soc_tuning_state", tuningState)
+        // Charging hygiene: the platform owns charge limiting, so all the app can
+        // do is notice and say so. Four hours at 100% is the brief's threshold.
+        val fullBattery = batterySnapshot ?: BatteryHealth.snapshot(this)
+        val oem = OemGuidance.forDevice()
+        json.put("oem_vendor", oem.vendor)
+        json.put("oem_dont_kill_url", oem.dontKillUrl)
+        json.put(
+            "battery_full_warning",
+            OemGuidance.sittingFull(fullBattery, fullSinceMs, System.currentTimeMillis()),
+        )
+        if (fullSinceMs > 0) json.put("battery_full_since_ms", fullSinceMs)
         // A reload between commit and backend restart must not look `ready`
         // just because the previous process is still up.
         if (isRestarting() && json.optString("state") == ServerState.READY.wire) {
@@ -240,6 +295,19 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
         val dest = File(modelsDir, name).canonicalFile
         if (dest.parentFile != modelsDir) {
             return JSONObject().put("error", "model path escapes the models directory").toString()
+        }
+        // Refuse a download that could not be served even after it lands. Only a
+        // catalog entry has a known size; a bare URL is downloaded and the fit is
+        // decided at load time instead.
+        entryId?.let { id ->
+            ModelCatalog.byId(id)?.let { entry ->
+                val mmproj = if (entry.mmprojSizeBytes > 0) entry.mmprojSizeBytes else 0L
+                val fit = MemoryFit.check(this, entry.sizeBytes, mmproj, entry.contextSize)
+                if (!fit.fits) {
+                    Log.w(TAG, "download refused: ${fit.message}")
+                    return JSONObject().put("error", fit.message).toString()
+                }
+            }
         }
         if (!DownloadState.beginIfIdle(chosen, dest.absolutePath)) {
             return JSONObject().put("error", "download already running").toString()
@@ -734,6 +802,122 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
         settings.animateAvatarWhileGenerating = on
     }
 
+    // --- per-SoC tuning (manual sweep) ------------------------------------
+
+    /** JSON for the Settings card: the stored profile, or "none". */
+    fun uiSocTuningJson(): String =
+        if (::socTuning.isInitialized) socTuning.profile()?.toJson()?.toString() ?: "none" else "none"
+
+    fun uiSocTuningSoc(): String = if (::socTuning.isInitialized) socTuning.soc else ""
+
+    fun uiClearSocTuning() {
+        if (::socTuning.isInitialized) {
+            socTuning.clear()
+            settings.clearPerfOverrides()
+        }
+    }
+
+    /**
+     * Run the per-SoC sweep. Not automatic: it restarts the server once per
+     * configuration and takes a couple of minutes, so it only runs when the
+     * operator asks. Returns false when a sweep is already running or the server
+     * is not ready.
+     *
+     * NOTE: implemented but not yet exercised on a device; see the branch report.
+     */
+    fun uiTuneThisPhone(): Boolean {
+        if (!::socTuning.isInitialized) return false
+        if (server.state != ServerState.READY) return false
+        synchronized(tuningGuard) {
+            if (tuningRunning) return false
+            tuningRunning = true
+        }
+        thread(name = "phonon-tune", isDaemon = true) {
+            try {
+                runTuningSweep()
+            } catch (t: Throwable) {
+                tuningState = "failed: ${t.javaClass.simpleName}: ${t.message}"
+                Log.w(TAG, "tuning failed", t)
+            } finally {
+                tuningRunning = false
+            }
+        }
+        return true
+    }
+
+    private val tuningGuard = Any()
+
+    private fun runTuningSweep() {
+        val decode = mutableListOf<Pair<Int, Double>>()
+        for (threads in SocTuning.DECODE_THREADS) {
+            tuningState = "decode: $threads threads (${decode.size + 1}/${SocTuning.DECODE_THREADS.size})"
+            settings.setThreadsOverride(threads)
+            server.restart()
+            if (!awaitReady()) continue
+            val run = measureOnce() ?: continue
+            decode.add(threads to run.optDouble("decode_tps", 0.0))
+        }
+        val prefill = mutableListOf<Pair<Int, Double>>()
+        for (tb in SocTuning.PREFILL_THREADS) {
+            tuningState = "prefill: $tb threads (${prefill.size + 1}/${SocTuning.PREFILL_THREADS.size})"
+            settings.setPrefillThreadsOverride(tb)
+            server.restart()
+            if (!awaitReady()) continue
+            val run = measureOnce() ?: continue
+            prefill.add(tb to run.optDouble("prefill_tps", 0.0))
+        }
+        // Only the winning decode config is a decode measurement; the prefill
+        // sweep ran under the last decode settings, so keep the decode whose
+        // number came from the same run shape.
+        val plan = settings.perfPlan()
+        val profile = SocTuning.best(
+            soc = socTuning.soc,
+            cpuRange = plan.cpuRange,
+            context = settings.contextSize,
+            keepWarmIntervalS = settings.keepWarmIntervalS,
+            decode = decode,
+            prefill = prefill,
+        )
+        if (profile == null) {
+            tuningState = "failed: no usable measurement"
+            return
+        }
+        socTuning.save(profile)
+        socTuning.applyIfPresent()
+        tuningState = "done: ${profile.decodeThreads}t decode / ${profile.prefillThreads}t prefill"
+        Log.i(TAG, "tuning profile saved: $tuningState")
+    }
+
+    private fun awaitReady(timeoutMs: Long = TUNING_READY_TIMEOUT_MS): Boolean {
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (System.currentTimeMillis() < deadline && !destroyed) {
+            when (server.state) {
+                ServerState.READY -> return true
+                ServerState.ERROR, ServerState.THERMAL_PAUSE -> return false
+                else -> try {
+                    Thread.sleep(250)
+                } catch (_: InterruptedException) {
+                    return false
+                }
+            }
+        }
+        return false
+    }
+
+    /** One 128-token benchmarking run through the app's own /v1. */
+    private fun measureOnce(): JSONObject? {
+        benchmark.start()
+        val deadline = System.currentTimeMillis() + TUNING_MEASURE_TIMEOUT_MS
+        while (benchmark.running && System.currentTimeMillis() < deadline && !destroyed) {
+            try {
+                Thread.sleep(250)
+            } catch (_: InterruptedException) {
+                return null
+            }
+        }
+        return settings.benchmarkHistory.firstOrNull()
+    }
+
     // --- internals --------------------------------------------------------
 
     /**
@@ -875,7 +1059,7 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
         ).joinToString("|")
     }
 
-    private fun onBatteryTemp(temp: Float) {
+    private fun onThermalSample(sample: ThermalSample) {
         if (destroyed) return
         val stop = settings.thermalStopC
         val resume = settings.thermalResumeC
@@ -885,6 +1069,13 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
         // documented as a ROM/root capability, not something this code claims.
         val battery = BatteryHealth.snapshot(this)
         batterySnapshot = battery
+        // Track how long the phone has sat at 100% on the charger, for the
+        // charge-hygiene warning. Reset as soon as it drops off full.
+        if (battery.charging && battery.levelPct == 100) {
+            if (fullSinceMs == 0L) fullSinceMs = System.currentTimeMillis()
+        } else {
+            fullSinceMs = 0L
+        }
         val pauseBelow = settings.batteryPauseBelow
         if (battery.known && !battery.charging && pauseBelow > 0 &&
             battery.levelPct in 1 until pauseBelow &&
@@ -905,12 +1096,25 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
             return
         }
 
-        if (!server.thermalPaused && server.isDesired && temp >= stop) {
-            Log.i(TAG, "thermal: ${temp}C >= ${stop}C, pausing server")
+        // Thermal policy. The platform's headroom/status signal drives the
+        // decision unless the operator set their own battery thresholds; battery
+        // temperature is the fallback when neither platform signal exists.
+        val decision = ThermalPolicy.evaluate(
+            sample = sample,
+            stopC = stop,
+            resumeC = resume,
+            override = settings.thermalUserOverride,
+            paused = server.thermalPaused,
+            pauseReason = server.pauseReason,
+        )
+        thermalSource = decision.source
+        thermalDetail = decision.detail
+        if (decision.pause) {
+            Log.i(TAG, "thermal: ${decision.detail} (${decision.source}), pausing server")
             server.pauseForThermal()
             updateNotification()
-        } else if (server.thermalPaused && server.pauseReason == "thermal" && temp <= resume) {
-            Log.i(TAG, "thermal: ${temp}C <= ${resume}C, resuming server")
+        } else if (decision.resume) {
+            Log.i(TAG, "thermal: ${decision.detail} (${decision.source}), resuming server")
             configHashAtLaunch = currentConfigHash()
             server.resumeFromThermal()
             updateNotification()
@@ -935,15 +1139,16 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
 
     private fun startForegroundCompat() {
         val notification = buildNotification()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            startForeground(
-                NOTIFICATION_ID,
-                notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE,
-            )
+        // The manifest declares both dataSync (API 29+) and specialUse (API 34+).
+        // Start with the type the running platform understands: passing the
+        // specialUse bit below API 34 would name a type the framework does not
+        // know, so an Android 10-13 phone gets dataSync instead.
+        val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
         } else {
-            startForeground(NOTIFICATION_ID, notification)
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
         }
+        startForeground(NOTIFICATION_ID, notification, type)
         foregroundStarted = true
     }
 
@@ -1056,5 +1261,9 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
 
         /** Upper bound on how long control endpoints report 503 after a reload. */
         private const val RELOAD_SETTLE_TIMEOUT_MS = 120_000L
+
+        /** Bounds for the per-SoC tuning sweep's restart-and-measure steps. */
+        private const val TUNING_READY_TIMEOUT_MS = 120_000L
+        private const val TUNING_MEASURE_TIMEOUT_MS = 120_000L
     }
 }

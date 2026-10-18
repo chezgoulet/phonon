@@ -11,6 +11,13 @@
 # master. GGML_CPU_REPACK=ON is what makes Q4_K models run at the measured rate
 # (see docs/performance.md); without it decode is 50-60% slower on the same
 # weights.
+#
+# Device-agnostic kernels: a fixed -march=armv8.2-a+dotprod+fp16 build SIGILLs
+# on the Cortex-A73/A53 era (no dotprod) and gives an i8mm phone nothing extra.
+# GGML_CPU_ALL_VARIANTS compiles one CPU backend per ISA level and GGML_BACKEND_DL
+# makes llama.cpp pick the best one the running CPU actually supports at load
+# time. Each of these still runs the repack path when its dotprod kernels are
+# present, so REPACK stays on.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -31,22 +38,21 @@ fi
 
 echo "llama.cpp at $(git -C "$SRC" rev-parse --short HEAD) ($(git -C "$SRC" log -1 --format='%s'))"
 
-# -march is not optional: a cross-compile otherwise targets baseline ARMv8, so
-# the dot-product kernels are absent and the repack selector (which requires
-# them) never engages. Every phone this project targets has dotprod. Measured on
-# the Pixel 7: decode 9.2 -> 13.7 tok/s, 2,415-token prefill 15 -> 58 tok/s from
-# this flag, 82 with -tb 4 passed to llama-server.
+# -DGGML_CPU_ARM_ARCH and -march are deliberately absent: they are mutually
+# exclusive with ALL_VARIANTS, and the whole point is that no single ISA is
+# baked in. The per-variant -march picks its own target.
 cmake -S "$SRC" -B "$BUILD" \
   -DCMAKE_TOOLCHAIN_FILE="$NDK/build/cmake/android.toolchain.cmake" \
   -DANDROID_ABI=arm64-v8a \
-  -DANDROID_PLATFORM=android-31 \
+  -DANDROID_PLATFORM=android-29 \
   -DCMAKE_BUILD_TYPE=Release \
   -DBUILD_SHARED_LIBS=ON \
   -DLLAMA_CURL=OFF \
   -DGGML_OPENMP=OFF \
   -DGGML_CPU_REPACK=ON \
-  -DCMAKE_C_FLAGS="-march=armv8.2-a+dotprod+fp16" \
-  -DCMAKE_CXX_FLAGS="-march=armv8.2-a+dotprod+fp16" \
+  -DGGML_CPU_ALL_VARIANTS=ON \
+  -DGGML_BACKEND_DL=ON \
+  -DGGML_CPU_KLEIDIAI="${PHONON_NATIVE_KLEIDIAI:-ON}" \
   -DLLAMA_BUILD_TESTS=OFF \
   -DLLAMA_BUILD_EXAMPLES=OFF \
   -DLLAMA_BUILD_SERVER=ON

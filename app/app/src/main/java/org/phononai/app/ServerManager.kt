@@ -62,6 +62,10 @@ class ServerManager(
     @Volatile var mlockRefused: Boolean = false
         private set
 
+    /** True when the last unexpected exit looked like a memory kill. */
+    @Volatile var lastExitLowMemory: Boolean = false
+        private set
+
     /** The profile the running child was launched with; null when stopped. */
     @Volatile var planAtLaunch: PerfPlan? = null
         private set
@@ -316,6 +320,7 @@ class ServerManager(
             put("perf_allowed_cpus", plan.allowed.joinToString(","))
             put("perf_cpu_range", plan.cpuRange)
             put("perf_threads", plan.threads)
+            put("perf_prefill_threads", plan.effectivePrefillThreads)
             put("perf_prio", plan.prio)
             put("perf_prio_batch", plan.prioBatch)
             put("perf_auto", plan.auto)
@@ -330,6 +335,11 @@ class ServerManager(
             put("perf_detected_mode", detected.mode)
             put("perf_detected_cpu_range", detected.cpuRange)
             put("perf_detected_threads", detected.threads)
+            // Device-derived counts, so /health never implies a fixed 8-core SoC.
+            put("perf_allowed_count", plan.allowedCount)
+            put("perf_cluster_count", plan.clusterCount)
+            put("perf_cluster_label", detected.clusterLabel)
+            put("last_exit_low_memory", lastExitLowMemory)
         }.toString()
     }
 
@@ -374,12 +384,42 @@ class ServerManager(
             return
         }
 
+        // Capability guard: this build may have been compiled for an ISA level
+        // this CPU does not implement. Refuse before exec so the caller sees a
+        // message instead of the child dying with SIGILL.
+        NativeRequirements.refusal(CpuFeatures.cached())?.let { message ->
+            lastError = message
+            isDesired = false
+            setState(ServerState.ERROR)
+            ringLog.append("start refused: $message")
+            Log.w(TAG, "start refused: $message")
+            return
+        }
+
+        // Memory fit: compare weights + estimated KV cache + margin against the
+        // memory actually available now. Refuse rather than let lmkd kill it.
+        val projector = currentProjector(model)
+        val verdict = MemoryFit.check(
+            context,
+            model.length(),
+            projector?.length() ?: 0L,
+            settings.contextSize,
+        )
+        if (!verdict.fits) {
+            lastError = verdict.message
+            isDesired = false
+            setState(ServerState.ERROR)
+            ringLog.append("start refused: ${verdict.message}")
+            Log.w(TAG, "start refused: ${verdict.message}")
+            return
+        }
+
         val logDir = File(context.filesDir, "logs").apply { mkdirs() }
         val logFile = File(logDir, "llama-server.log")
         if (logFile.exists()) logFile.delete()
         val plan = settings.perfPlan()
         planAtLaunch = plan
-        val args = buildArgs(model, logFile, plan)
+        val args = buildArgs(model, projector, logFile, plan)
         val printable = args.mapIndexed { i, arg ->
             if (i > 0 && args[i - 1] == "--api-key") "***" else arg
         }.joinToString(" ")
@@ -388,6 +428,7 @@ class ServerManager(
 
         setState(ServerState.LOADING)
         mlockRefused = false
+        lastExitLowMemory = false
 
         val pb = ProcessBuilder(listOf(bin.absolutePath) + args)
             .directory(context.filesDir)
@@ -397,6 +438,18 @@ class ServerManager(
                     put("HOME", context.filesDir.absolutePath)
                     put("TMPDIR", context.cacheDir.absolutePath)
                     put("PATH", "/system/bin:/system/xbin")
+                    // llama.cpp finds its CPU backend libraries itself:
+                    // ggml_backend_load_all() enumerates libggml-cpu-*.so in the
+                    // executable's own directory (readlink /proc/self/exe) and
+                    // dlopens the best one for this CPU. The executable is
+                    // nativeLibraryDir/libllama-server.so and the variants sit
+                    // beside it, so that path resolves without help.
+                    //
+                    // GGML_BACKEND_PATH is NOT set: ggml treats it as one
+                    // out-of-tree backend *file*, not a directory, so pointing it
+                    // at nativeLibraryDir would break loading rather than fix it.
+                    // If a future build ever fails to find its backends, the fix
+                    // is the discovery path above, not this variable.
                 }
             }
 
@@ -424,26 +477,33 @@ class ServerManager(
         thread(name = "phonon-ready-$gen", isDaemon = true) { pollReady(gen, p) }
     }
 
-    private fun buildArgs(model: File, logFile: File, plan: PerfPlan): List<String> = buildList {
+    /** The vision projector beside [model], when the catalog declares one. */
+    private fun currentProjector(model: File): File? {
+        val entry = settings.catalogEntryForCurrentModel() ?: return null
+        val name = entry.mmprojFileName
+        if (name.isBlank()) return null
+        val projector = File(model.parentFile, name)
+        return if (projector.isFile) projector else null
+    }
+
+    private fun buildArgs(
+        model: File,
+        projector: File?,
+        logFile: File,
+        plan: PerfPlan,
+    ): List<String> = buildList {
         add("-m"); add(model.absolutePath)
         // A projector beside the weights turns the server multimodal. Its
         // absence is why the app used to be text-only with vision models.
-        run {
-            val entry = settings.catalogEntryForCurrentModel()
-            val name = entry?.mmprojFileName.orEmpty()
-            if (name.isNotBlank()) {
-                val projector = File(model.parentFile, name)
-                if (projector.isFile) {
-                    add("--mmproj"); add(projector.absolutePath)
-                }
-            }
+        if (projector != null) {
+            add("--mmproj"); add(projector.absolutePath)
         }
         add("-c"); add(settings.contextSize.toString())
         add("-t"); add(plan.threads.toString())
         // Decode is bandwidth-bound and gains nothing from more threads; prefill
         // is compute-bound and wants the mid and big cores too. Measured on a
         // Pixel 7: -tb 4 lifted a 2,415-token prefill from 58 to 82 tok/s.
-        add("-tb"); add((plan.threads * 2).coerceIn(2, 6).toString())
+        add("-tb"); add(plan.effectivePrefillThreads.toString())
         if (plan.cpuRange.isNotBlank()) {
             add("--cpu-range"); add(plan.cpuRange)
         }
@@ -474,6 +534,7 @@ class ServerManager(
         }
         synchronized(lock) {
             if (process !== p) return
+            val startedAt = spawnAtMs
             process = null
             pid = -1
             spawnAtMs = 0
@@ -486,7 +547,17 @@ class ServerManager(
                 setState(ServerState.THERMAL_PAUSE)
                 return
             }
-            lastError = "llama-server exited with code $code"
+            // A SIGKILL (exit 137) is how lmkd ends an oversized model; ask the
+            // platform for a reason too. Report the memory verdict instead of an
+            // opaque crash so the operator knows what to change.
+            val lowMemory = MemoryFit.isKilled(code) ||
+                MemoryFit.lowMemoryExit(context, startedAt)
+            lastExitLowMemory = lowMemory
+            lastError = if (lowMemory) {
+                "llama-server was killed for memory: ${MemoryFit.TOO_BIG_MESSAGE}"
+            } else {
+                "llama-server exited with code $code"
+            }
             restartCount++
             ringLog.append(lastError!!)
             setState(ServerState.RESTARTING)

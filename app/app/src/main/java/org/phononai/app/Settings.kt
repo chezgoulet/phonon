@@ -138,6 +138,36 @@ class Settings(context: Context) {
             prefs.edit().putBoolean(KEY_PERF_PRIO_SET, value).apply()
         }
 
+    /** Operator prefill thread count (`-tb`); -1 keeps auto. */
+    var perfPrefillThreads: Int
+        get() = prefs.getInt(KEY_PERF_PREFILL, -1)
+        set(value) = prefs.edit().putInt(KEY_PERF_PREFILL, value).apply()
+
+    var perfPrefillThreadsSet: Boolean
+        get() = prefs.getBoolean(KEY_PERF_PREFILL_SET, false)
+        private set(value) {
+            prefs.edit().putBoolean(KEY_PERF_PREFILL_SET, value).apply()
+        }
+
+    fun setPrefillThreadsOverride(value: Int) {
+        prefs.edit()
+            .putInt(KEY_PERF_PREFILL, value)
+            .putBoolean(KEY_PERF_PREFILL_SET, true)
+            .apply()
+    }
+
+    fun clearPrefillThreadsOverride() {
+        prefs.edit()
+            .putBoolean(KEY_PERF_PREFILL_SET, false)
+            .remove(KEY_PERF_PREFILL)
+            .apply()
+    }
+
+    /** Per-SoC tuning profiles as raw JSON keyed by SOC_MODEL; see SocTuning. */
+    var socTuningJson: String
+        get() = prefs.getString(KEY_SOC_TUNING, "") ?: ""
+        set(value) = prefs.edit().putString(KEY_SOC_TUNING, value).apply()
+
     /**
      * Off by default: while a request is in flight the avatar drops to a
      * cheaper animation (half the motes, 20 fps) so it does not compete with
@@ -207,9 +237,11 @@ class Settings(context: Context) {
             .putBoolean(KEY_PERF_THREADS_SET, false)
             .putBoolean(KEY_PERF_CPU_RANGE_SET, false)
             .putBoolean(KEY_PERF_PRIO_SET, false)
+            .putBoolean(KEY_PERF_PREFILL_SET, false)
             .remove(KEY_PERF_CPU_RANGE)
             .remove(KEY_PERF_PRIO)
             .remove(KEY_PERF_PRIO_BATCH)
+            .remove(KEY_PERF_PREFILL)
             .apply()
     }
 
@@ -233,6 +265,7 @@ class Settings(context: Context) {
         val prio = if (perfPrio >= 0) perfPrio else PerfPlan.DEFAULT_PRIO
         val prioBatch =
             if (perfPrioBatch >= 0) perfPrioBatch else PerfPlan.DEFAULT_PRIO_BATCH
+        val prefillThreads = if (perfPrefillThreadsSet) perfPrefillThreads else 0
         val cluster = PerfProfile.parseCpuList(range)
             .filter { it in detection.allowed }
         return PerfPlan(
@@ -246,6 +279,10 @@ class Settings(context: Context) {
             threadsSet = perfThreadsSet,
             cpuRangeSet = perfCpuRangeSet,
             prioSet = perfPrioSet,
+            prefillThreads = prefillThreads,
+            allowedCount = detection.allowed.size,
+            clusterCount = detection.clusters.size,
+            clusterLabel = detection.clusterLabel,
         )
     }
 
@@ -309,6 +346,16 @@ class Settings(context: Context) {
     var thermalResumeC: Float
         get() = prefs.getFloat(KEY_THERMAL_RESUME, 40f)
         set(value) = prefs.edit().putFloat(KEY_THERMAL_RESUME, value).apply()
+
+    /**
+     * True once the operator has set their own battery-temperature thresholds.
+     * Only then are those thresholds the operative signal: with no override the
+     * app uses PowerManager's thermal headroom/status, and the stored numbers are
+     * just the fallback for phones that expose neither. See ThermalPolicy.
+     */
+    var thermalUserOverride: Boolean
+        get() = prefs.getBoolean(KEY_THERMAL_OVERRIDE, false)
+        set(value) = prefs.edit().putBoolean(KEY_THERMAL_OVERRIDE, value).apply()
 
     /** Pause serving when discharging below this level. 0 disables the policy. */
     var batteryPauseBelow: Int
@@ -419,6 +466,7 @@ class Settings(context: Context) {
         put("reasoning", reasoning)
         put("thermal_stop_c", thermalStopC.toDouble())
         put("thermal_resume_c", thermalResumeC.toDouble())
+        put("thermal_user_override", thermalUserOverride)
         put("battery_pause_below", batteryPauseBelow)
         put("battery_resume_above", batteryResumeAbove)
         put("api_key_set", apiKey.isNotBlank())
@@ -511,6 +559,7 @@ class Settings(context: Context) {
         private const val KEY_REASONING = "reasoning"
         private const val KEY_THERMAL_STOP = "thermal_stop_c"
         private const val KEY_THERMAL_RESUME = "thermal_resume_c"
+        private const val KEY_THERMAL_OVERRIDE = "thermal_user_override"
         private const val KEY_BATTERY_PAUSE_BELOW = "battery_pause_below"
         private const val KEY_BATTERY_RESUME_ABOVE = "battery_resume_above"
         private const val KEY_API_KEY = "api_key"
@@ -530,6 +579,9 @@ class Settings(context: Context) {
         private const val KEY_PERF_PRIO = "perf_prio"
         private const val KEY_PERF_PRIO_BATCH = "perf_prio_batch"
         private const val KEY_PERF_PRIO_SET = "perf_prio_set"
+        private const val KEY_PERF_PREFILL = "perf_prefill_threads"
+        private const val KEY_PERF_PREFILL_SET = "perf_prefill_threads_set"
+        private const val KEY_SOC_TUNING = "soc_tuning_profiles"
         private const val KEY_ANIMATE_GENERATING = "animate_avatar_while_generating"
         private const val KEY_PRESENCE_SHAPE = "visual_shape_presence"
         private const val KEY_SERVING_REQUESTED = "serving_requested"
