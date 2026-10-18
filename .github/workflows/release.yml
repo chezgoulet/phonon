@@ -103,7 +103,10 @@ jobs:
           set -euo pipefail
           NEW="${{ steps.ver.outputs.code }}"
           HIGH=0
-          for t in $(git tag -l 'v*'); do
+          # The tag being built is in this list too; comparing against itself
+          # can only ever fail. Previous releases are everything else.
+          PREV="$(git tag -l 'v*' | grep -vx "${GITHUB_REF_NAME}" || true)"
+          for t in $PREV; do
             c="$(git show "$t:app/app/build.gradle.kts" 2>/dev/null | sed -nE 's/.*versionCode[[:space:]]*=[[:space:]]*([0-9]+).*/\1/p' | head -n1)"
             [ -n "$c" ] && [ "$c" -gt "$HIGH" ] && HIGH="$c" || true
           done
