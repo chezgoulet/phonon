@@ -34,6 +34,28 @@ for a SoC benefit that has to be measured, not assumed.
 - **Refuse to run on a battery reported as overheated or failing**, and surface
   that state loudly.
 
+## What the app does today
+
+Implemented in the app (v0.1.0):
+
+- **Charge-state policy.** The battery is sampled on the thermal monitor's
+  30-second tick. When the phone is unplugged and the level falls below
+  `battery_pause_below` (default 15%), serving pauses with the reason `battery`;
+  it resumes when the charger is connected or the level reaches
+  `battery_resume_above` (default 25%). A phone left on a shelf is not run flat
+  by an idle agent.
+- **Health reporting.** `/health` carries `battery_level`, `battery_charging`
+  and `pause_reason`, so a gateway or an operator can see why a node stopped
+  before asking it.
+- **Thermal pause drains first.** A pause no longer kills a completion mid
+  stream. New requests are refused as soon as the state leaves `ready`, and the
+  child is stopped once the in-flight requests finish, with a 120-second ceiling.
+
+Not implemented, and not claimed: charge limiting, charge scheduling and
+deliberate cycling. Those need the charger, which an unprivileged app does not
+own; the ROM work is where they belong. The single largest intervention remains
+the platform's **Charging optimization → Limit to 80%**.
+
 ## What active cycling requires
 
 Discharge to a floor and recharge to a ceiling, repeatedly, is not available to

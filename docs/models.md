@@ -99,3 +99,20 @@ on this phone. It runs once and never overrides a model the operator picked.
 See `docs/models-test.md` for the acceptance run: both families served through
 the app proxy, decode twice each, and one `get_weather` tool call per family
 with the observed `finish_reason` and arguments.
+
+## Download integrity
+
+Every catalog entry carries the byte count and the SHA-256 that Hugging Face
+declares for the pinned file. The downloader:
+
+- resumes a `.part` with an HTTP Range request and refuses a server that resumes
+  at the wrong offset;
+- checks the declared size before renaming into place;
+- computes SHA-256 and deletes the file rather than installing a model whose
+  hash does not match (a previously downloaded file is re-hashed too);
+- refuses to start when the destination volume cannot hold the remaining bytes
+  plus a 64 MB margin.
+
+A model whose RAM tier outranks the device is not silently downloaded: the
+picker asks first, states the device's RAM and the model's tier, and allows an
+explicit override.

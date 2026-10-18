@@ -9,3 +9,8 @@ Granite, Nemotron), each with a measured decode rate and its licence shown.
 Includes thermal pause and resume, a bounded log ring, an on-device benchmark,
 device report export, a six-shape particle avatar, and optional Device-Owner
 appliance mode for unattended operation.
+
+Downloads verify the SHA-256 in the catalog and refuse to start without the free
+space. Models above the device's RAM tier require confirmation. A thermal pause
+now drains in-flight requests instead of cutting them, and a battery policy
+pauses serving when an unplugged phone falls below 15%.
