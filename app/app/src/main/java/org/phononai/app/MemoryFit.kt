@@ -43,19 +43,22 @@ object MemoryFit {
 
     data class Verdict(
         val fits: Boolean,
+        /** Memory the kernel cannot reclaim quickly: KV, margin, dirty weights. */
         val requiredBytes: Long,
         val availBytes: Long,
         val kvBytes: Long,
         val modelBytes: Long,
+        /** Everything the model would touch if every page stayed resident. */
+        val totalBytes: Long,
     ) {
         val message: String
             get() {
                 val need = gb(requiredBytes)
                 val have = gb(availBytes)
-                return "this model needs about $need GB in memory " +
-                    "(${gb(modelBytes)} GB weights + ${gb(kvBytes)} GB KV cache + " +
-                    "${gb(WORKING_MARGIN_BYTES)} GB working margin) but only $have GB is available " +
-                    "right now; choose a smaller model or a shorter context"
+                return "this model needs about $need GB of memory that cannot be reclaimed " +
+                    "(${gb(kvBytes)} GB KV cache + ${gb(WORKING_MARGIN_BYTES)} GB working margin + " +
+                    "a resident share of ${gb(modelBytes)} GB of mapped weights), but only $have GB " +
+                    "is available right now; choose a smaller model or a shorter context"
             }
     }
 
@@ -66,11 +69,19 @@ object MemoryFit {
      */
     fun check(context: Context, modelBytes: Long, mmprojBytes: Long, contextSize: Int): Verdict {
         val kv = estimateKvCacheBytes(modelBytes, contextSize)
-        val required = modelBytes + mmprojBytes + kv + WORKING_MARGIN_BYTES
+        val weights = modelBytes + mmprojBytes
+        // The weights are mmap'd file pages. Counting the whole file as demand
+        // refused a 2B model at 32K on the reference phone with 3.2 GB free —
+        // a configuration that demonstrably runs, because the kernel drops clean
+        // pages under pressure. What it cannot reclaim is the KV cache, the
+        // compute buffers and the margin, plus the dirty share of the weights;
+        // that is the number to compare against available memory.
+        val anonymous = kv + WORKING_MARGIN_BYTES + weights / 8
+        val total = weights + kv + WORKING_MARGIN_BYTES
         val avail = availBytes(context)
         // An unknown availability (0) must not refuse a load it cannot judge.
-        val fits = avail <= 0 || required <= avail
-        return Verdict(fits, required, avail, kv, modelBytes)
+        val fits = avail <= 0 || anonymous <= avail
+        return Verdict(fits, anonymous, avail, kv, modelBytes, total)
     }
 
     fun availBytes(context: Context): Long = try {
