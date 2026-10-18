@@ -149,6 +149,24 @@ the avatar's cost while generating. Idle stays at ~66% by design: the setting
 only applies to the generating state, and the avatar is restored to full
 animation when the request ends.
 
+### Decode cost (paired)
+
+Throughput, not CPU: same model (Qwen3.5-2B), same prompt, 128 greedy tokens,
+with the app on the **Serve** tab (avatar composed) against the **Settings** tab
+(avatar not composed), alternating within one app session so drift affects both
+arms equally.
+
+| Session | Serve tab | Settings tab | Paired difference |
+|---|---:|---:|---:|
+| reduced (default: half motes, 20 fps while generating) | 6.44 tok/s | 6.63 tok/s | **-0.19 tok/s (-2.9%)** |
+| full animation (setting on) | 5.97 tok/s | 6.72 tok/s | **-0.62 tok/s (-9.2%)** |
+
+Six pairs per session. The absolute rates are lower than the standalone
+benchmark because the device had been serving for about forty minutes and
+settled at 34-35 C; the pairing is what makes the comparison usable. The default
+therefore costs about 3% of decode and full animation about 9%, which is why the
+setting ships off.
+
 ## Regression checks on the final build
 
 | Check | Result |
@@ -217,16 +235,6 @@ now within noise — so keep Q4_K_M and its better quality.
 Requirement for any future build: `GGML_CPU_REPACK=ON` **and** a llama.cpp
 revision that carries the Q4_K repack kernels. The engineering sample that
 preceded this measured 5.5 tok/s precisely because it lacked them.
-
-## Speculative decoding: a negative result (2026-10-18)
-
-Tried a 0.8B Qwen3.5 draft against the 2B target, same engine (`797de63`), same
-prompt, `--spec-type draft-simple --spec-draft-n-max 4`:
-
-- draft acceptance **0.361** (56 accepted / 155 generated), mean accepted run 2.44
-- decode **2.51 / 2.43 tok/s** against a 9.0 tok/s baseline
-
-The draft models own forward passes cost more than the verification passes they
 
 ## Speculative decoding: a negative result (2026-10-18)
 
