@@ -1671,7 +1671,8 @@ private fun PerformanceCard(
             AppState.service?.uiSetAnimateAvatar(on)
         }
         Text(
-            "Off by default. Generating drops the avatar to half the motes at 20 fps; idle stays full.",
+            "Off by default. Full animation costs about 2.4% of decode while a request runs; " +
+                "the reduced mode costs about 1.5%. Idle stays full either way.",
             color = PhononColors.TextDim,
             fontSize = 11.sp,
             lineHeight = 16.sp,
