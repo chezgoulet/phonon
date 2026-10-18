@@ -40,7 +40,7 @@ import kotlin.math.sin
  *            one and Static a nervous electric one — in EVERY state, including the
  *            still ones.
  *
- * 0.5.2 (A1) expands the table from 7 families to 20. The bar is the product's: toggling
+ * Six families ship: one substance per element plus the default. The bar is the product's: toggling
  * between two categories mid-call must feel like a DIFFERENT BEING, not a recolour. So no
  * two entries differ on hue alone — each owns a distinct combination of all four axes
  * (fire vs radiance, deep water vs surface tide vs set ice, bioluminescent growth vs dull
@@ -143,7 +143,7 @@ object VisualStyle {
     }
 
     /**
-     * The palette — 20 families, deliberately not variations of one house style. Each
+     * The palette — six families, deliberately not variations of one house style. Each
      * entry is a different SUBSTANCE the being can be made of, distinguished on all four
      * axes at once (colour logic, light model, mass, motion) so that switching between
      * any two reads as a different creature rather than a hue shift. Grouped by element.
@@ -161,70 +161,16 @@ object VisualStyle {
         // hard flicker (1.55), a fast body (1.18) that never quite settles.
         Style("ember", "Ember — forge-warm", 0xFFFF6A2E.toInt(), 0.34f, 1.12f, 0f,
             1.06f, 0.88f, 1.12f, 0.96f, 1.55f, 1.18f),
-        // The sun: gold, the white-hot-est bake here (coreHeat 1.30), a radiant bloom
-        // (1.38). Where Ember is a red flickering forge, Solar is a steady golden
-        // radiator — same warmth family, opposite temperament.
-        Style("solar", "Solar — radiant", 0xFFFFC247.toInt(), 0.38f, 1.15f, 25f,
-            1.30f, 0.94f, 1.38f, 1.04f, 1.35f, 1.12f),
-
-        // ── water & ice ──────────────────────────────────────────────────────
-        // Deep water: indigo, the widest bloom of the watery set (1.35), big dim slow
-        // particles, the stillest family (energy 0.72). Its listening barely moves.
-        Style("abyss", "Abyss — deep water", 0xFF1B3A8C.toInt(), 0.40f, 0.88f, 0f,
-            0.88f, 1.18f, 1.35f, 1.12f, 0.60f, 0.72f),
         // The ocean SURFACE, not its depths: teal-green, a lapping flicker (1.25), the
         // accent thrown 65° toward foam. Brighter, greener and busier than Abyss.
         Style("tide", "Tide — living sea", 0xFF2AB8A8.toInt(), 0.36f, 1.00f, 65f,
             0.96f, 1.12f, 1.15f, 1.00f, 1.25f, 0.98f),
-        // Ice: pale cyan, a crystalline tight falloff (edge 0.80), frozen almost still
-        // (energy 0.58, flicker 0.62). Colder, whiter, shallower than Abyss — a body set
-        // in frost rather than sunk in water.
-        Style("frost", "Frost — set in ice", 0xFFBFEFFF.toInt(), 0.34f, 0.80f, -20f,
-            1.10f, 0.80f, 1.05f, 0.94f, 0.62f, 0.58f),
-        // Concentric calm: cyan, and the flicker IS the character (1.45) — a rhythmic
-        // pulse radiating outward like rings on a pond, over a slow body (0.88).
-        Style("ripple", "Ripple — rings on water", 0xFF3FE0E0.toInt(), 0.36f, 1.04f, -30f,
-            0.95f, 1.05f, 1.10f, 0.95f, 1.45f, 0.88f),
 
         // ── growth & the sky ─────────────────────────────────────────────────
         // Bioluminescent: green/gold, crisp, the accent turned just far enough (24°) to
         // read as a second organism inside the first.
         Style("verdant", "Verdant — bioluminescent", 0xFF2FE08A.toInt(), 0.34f, 1.06f, 24f,
             1f, 0.96f, 1f, 1f, 1.10f, 0.95f),
-        // The forest floor: olive, earthy and desaturated (0.78), soft and slow (0.70).
-        // Where Verdant glows, Moss just grows — dull, grounded, calm.
-        Style("moss", "Moss — forest floor", 0xFF7A9A3A.toInt(), 0.38f, 0.78f, 35f,
-            0.86f, 1.08f, 1.00f, 1.02f, 0.72f, 0.70f),
-        // The northern lights: a green curtain whose accent is thrown 110° toward magenta
-        // at 1.30 saturation — two colours flowing past each other, high, bright, always
-        // moving (1.10). The signature is the TURN, not the tint.
-        Style("aurora", "Aurora — northern curtain", 0xFF4CFFB0.toInt(), 0.30f, 1.30f, 110f,
-            0.92f, 1.10f, 1.20f, 1.02f, 1.15f, 1.10f),
-
-        // ── spectrum & the split of light ────────────────────────────────────
-        // Split spectrum: no tint at all — the accent hue is thrown 150° to the far side
-        // of the wheel at 1.25 saturation, so the swarm is always two opposed colours
-        // summing to white where it is dense.
-        Style("prism", "Prism — split spectrum", 0x00000000, 0f, 1.25f, 150f,
-            1.02f, 0.92f, 0.95f, 1f, 1.20f, 1.05f),
-        // Twilight: a low sun. Orange pulled toward purple by a 135° accent turn — the
-        // warm/cool split of a sunset, a soft horizon bloom (1.22), the day slowing (0.84).
-        Style("dusk", "Dusk — twilight", 0xFFFF8A4C.toInt(), 0.32f, 1.08f, 135f,
-            0.94f, 1.14f, 1.22f, 1.03f, 0.90f, 0.84f),
-
-        // ── dark & shadow ────────────────────────────────────────────────────
-        // Dark iridescent: blue-black, bloom almost off (halo 0.55), desaturated (0.70)
-        // but never flat — the accent turned -75° to a cold bright sheen, so it reads as
-        // a raven's feather: a shadow creature with a rim of light. The dark counterpart
-        // to Abyss's bloom.
-        Style("raven", "Raven — dark iridescent", 0xFF2A2350.toInt(), 0.46f, 0.70f, -75f,
-            1.05f, 0.85f, 0.55f, 0.92f, 0.85f, 0.80f),
-
-        // ── monochrome & texture ─────────────────────────────────────────────
-        // 1-bit: no hue at all (sat 0.06). Hard little points on black (edge 0.55), bloom
-        // almost off (0.34) — the being as a plotter drawing. Cold, crisp, cheapest here.
-        Style("ink", "Ink — 1-bit", 0xFFFFFFFF.toInt(), 0.28f, 0.06f, 0f,
-            1.15f, 0.55f, 0.34f, 0.82f, 0.90f, 0.90f),
         // Marble: near-monochrome like Ink but WARM, polished (coreHeat 1.22) and carved
         // (edge 0.72), heavy and still (energy 0.66, flicker 0.50). Ink is a cold pen
         // plot; Sculpt is a lit stone — the specular rolls off a solid form, not a dot.
@@ -235,29 +181,6 @@ object VisualStyle {
         // nervous body of TV snow — agitated where Ink is calm and Sculpt is still.
         Style("static", "Static — electric snow", 0xFFCFE4FF.toInt(), 0.24f, 0.40f, -50f,
             1.18f, 0.62f, 0.48f, 0.74f, 1.95f, 1.42f),
-
-        // ── atmosphere & air ─────────────────────────────────────────────────
-        // Interstellar gas: magenta-violet, the softest light model here (coreHeat 0.72 —
-        // no hard points, it is diffuse gas) and the widest falloff (edge 1.32), a huge
-        // bloom (1.45), slow and majestic (0.68). The lowest-contrast, most atmospheric.
-        Style("nebula", "Nebula — interstellar", 0xFFB44CFF.toInt(), 0.42f, 1.10f, 40f,
-            0.72f, 1.32f, 1.45f, 1.18f, 0.55f, 0.68f),
-        // A personal field: warm pale gold, halo-dominant (1.40), very soft (edge 1.22)
-        // and the gentlest motion here (energy 0.62). The being as a quiet warmth around
-        // itself rather than a bright core — almost static, all ambience.
-        Style("aura", "Aura — soft field", 0xFFFFE6B0.toInt(), 0.30f, 0.92f, 15f,
-            0.90f, 1.22f, 1.40f, 1.05f, 0.70f, 0.62f),
-        // Moving air: pale silver-blue, desaturated and airy (0.66), the FASTEST flow here
-        // (energy 1.48) but smooth, not jittery — wind, not static. A restless body that
-        // streams past itself.
-        Style("gale", "Gale — moving air", 0xFFA8C4DC.toInt(), 0.28f, 0.66f, -40f,
-            1.00f, 0.92f, 0.95f, 0.88f, 1.40f, 1.48f),
-
-        // ── the one heavy family (gated, opt-in, labelled) ───────────────────
-        // Trails: each particle drags its own recent past. DOUBLES the blit count, so it
-        // is opt-in, never the default, and the label says "heavier".
-        Style("comet", "Comet — trails (heavier)", 0xFF9BD8FF.toInt(), 0.16f, 1.05f, 0f,
-            1f, 0.90f, 1.05f, 0.92f, 1f, 1.10f, trails = true)
     )
 
     /** Stable pref tokens, in picker order. Settings lists EVERY one of these (A2): the

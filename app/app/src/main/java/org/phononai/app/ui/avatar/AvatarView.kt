@@ -136,8 +136,11 @@ class AvatarView @JvmOverloads constructor(
     }
 
     companion object {
-        const val COUNT = 320
+        const val COUNT = 160
         /** ~20 fps draw clock while reduced; one frame is 50 ms. */
+        /** ~30 fps draw clock normally. The swarm is diffuse; 30 fps reads
+         *  the same as 90 and costs a third of the frames. */
+        const val FRAME_MS = 33L
         const val REDUCED_FRAME_MS = 50L
         private const val REDUCED_FRAME_NS = REDUCED_FRAME_MS * 1_000_000L
         const val GLOW_PX = 64f
@@ -1863,7 +1866,7 @@ class AvatarView @JvmOverloads constructor(
 
         // always animate — at the display rate normally, at 20 fps while a
         // generation is running and the operator left the avatar in reduced mode.
-        if (reduced) postInvalidateDelayed(REDUCED_FRAME_MS) else postInvalidateOnAnimation()
+        if (reduced) postInvalidateDelayed(REDUCED_FRAME_MS) else postInvalidateDelayed(FRAME_MS)
     }
 
     // ---- small pure helpers (no allocation) ---------------------------------
