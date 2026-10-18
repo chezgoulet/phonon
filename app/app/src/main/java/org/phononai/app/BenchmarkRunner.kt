@@ -110,7 +110,7 @@ class BenchmarkRunner(
             }
         }
 
-        val url = URL("http://${settings.backendHost()}:${settings.port}/v1/chat/completions")
+        val url = URL("http://${settings.apiHost()}:${settings.port}/v1/chat/completions")
         val conn = url.openConnection() as HttpURLConnection
         connection = conn
         try {

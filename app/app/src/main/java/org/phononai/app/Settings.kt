@@ -253,6 +253,13 @@ class Settings(context: Context) {
      */
     fun backendHost(): String = "127.0.0.1"
 
+    /**
+     * Where an in-app client should reach the app's own API. A wildcard bind is
+     * reached on loopback; a specific bind only answers on that address.
+     */
+    fun apiHost(): String =
+        if (bindAddress == BIND_ANY || isLoopbackBind(bindAddress)) "127.0.0.1" else bindAddress
+
     /** Port the app's own API listens on (health, /v1 proxy, control routes). */
     var port: Int
         get() = prefs.getInt(KEY_PORT, 8080)

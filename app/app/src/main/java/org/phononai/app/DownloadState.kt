@@ -24,6 +24,21 @@ object DownloadState {
     @Volatile var startedAtMs: Long = 0
         private set
 
+    /** Atomically claims the download slot. False when one is already running. */
+    @Synchronized
+    fun beginIfIdle(url: String, dest: String): Boolean {
+        if (active) return false
+        this.url = url
+        this.dest = dest
+        active = true
+        done = false
+        bytes = 0
+        total = -1
+        error = null
+        startedAtMs = System.currentTimeMillis()
+        return true
+    }
+
     @Synchronized
     fun begin(url: String, dest: String) {
         this.url = url

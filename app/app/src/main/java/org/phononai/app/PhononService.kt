@@ -214,15 +214,17 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
     }
 
     private fun beginDownload(url: String?, fileName: String?, entryId: String?): String {
-        if (DownloadState.active) {
-            return JSONObject().put("error", "download already running").toString()
-        }
+        // Test-and-set in one synchronized call: two concurrent requests must
+        // not both decide the downloader is idle and start a writer each.
+
         val chosen = url?.trim().takeUnless { it.isNullOrEmpty() } ?: settings.downloadUrl
         if (!chosen.startsWith("http://") && !chosen.startsWith("https://")) {
             return JSONObject().put("error", "invalid url: $chosen").toString()
         }
         val dest = File(File(filesDir, "models"), fileName ?: modelFileName(chosen))
-        DownloadState.begin(chosen, dest.absolutePath)
+        if (!DownloadState.beginIfIdle(chosen, dest.absolutePath)) {
+            return JSONObject().put("error", "download already running").toString()
+        }
         thread(name = "phonon-download", isDaemon = true) {
             try {
                 val expectedSha = entryId?.let { ModelCatalog.byId(it) }?.sha256
@@ -789,7 +791,7 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
             Log.i(TAG, "thermal: ${temp}C >= ${stop}C, pausing server")
             server.pauseForThermal()
             updateNotification()
-        } else if (server.thermalPaused && temp <= resume) {
+        } else if (server.thermalPaused && server.pauseReason == "thermal" && temp <= resume) {
             Log.i(TAG, "thermal: ${temp}C <= ${resume}C, resuming server")
             configHashAtLaunch = currentConfigHash()
             server.resumeFromThermal()
