@@ -1,0 +1,15 @@
+Fixes a regression that broke the workload Phonon exists for: prompts long
+enough to take more than two minutes of prefill were disconnected before the
+first token. The stall watchdog now times a blocked write rather than a quiet
+socket, so a backend that is still thinking is left alone, and the upstream read
+timeout matches the gateway's.
+
+Also hardens the proxy: request bodies are read only after the rate limit and the
+API key are checked, oversized bodies are refused with 413 instead of buffered,
+and the request head has byte and time budgets so a slow client cannot pin a
+worker.
+
+Adds tools/proxy-harness, a desktop-JVM regression suite that compiles
+ApiServer.kt against stubs and runs it in front of a fake llama-server; it covers
+silent prefill, a stalled reader, unauthenticated large bodies, the body cap and
+a dripping head. CI runs it when the proxy changes.
