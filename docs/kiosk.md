@@ -30,7 +30,29 @@ org.phononai.app/.PhononDeviceAdmin
 ```
 
 It is declared in the manifest with `android.permission.BIND_DEVICE_ADMIN`, a
-`device_admin.xml` resource, and the `DEVICE_ADMIN_ENABLED` intent filter.
+`device_admin.xml` resource, and the `DEVICE_ADMIN_ENABLED` intent filter. The
+receiver component is what Device Owner provisioning binds to; the policies it
+may ask for are a separate question, answered below.
+
+`res/xml/device_admin.xml` declares an **empty** `<uses-policies />` set: the
+app requests none of the legacy device-admin powers.
+
+### Why the app requests no device-admin policies
+
+Lock Task Mode does not come from a device-admin policy.
+`DevicePolicyManager.setLockTaskPackages` throws `SecurityException` unless the
+caller is the device owner, the profile owner, or holds
+`MANAGE_DEVICE_POLICY_LOCK_TASK` (AOSP `DevicePolicyManager.java`, javadoc on
+`setLockTaskPackages`; the dedicated-device guide describes the same
+allowlisting step in `developer.android.com/work/dpc/dedicated-devices/lock-task-mode`).
+None of `force-lock`, `wipe-data`, `expire-password` or `reset-password` is on
+that path.
+
+Those four are destructive powers the app never implements. Requesting them
+grants a larger attack surface, and misleads a reader of the manifest, for
+nothing. Device Owner here buys Lock Task Mode, the battery-optimisation
+exemption and two user restrictions; that needs the **component**, not the
+policies.
 
 `Leave kiosk` unpins the activity. It does **not** silently remove the two user
 restrictions; they stay until the admin is removed or the phone is reset. That
@@ -51,9 +73,10 @@ de-provisioning the phone.
 - **Updates and bloatware in general.** AOSP restrictions such as
   `DISALLOW_SAFE_BOOT` and `DISALLOW_FACTORY_RESET` are applied. Broader update
   freeze policy is not implemented here.
-- **Wipe, password, and lock-screen policy.** The receiver declares admin
-  policies so the platform can bind it, but the app does not wipe the device,
-  reset passwords, or change the lock credential.
+- **Wipe, password, and lock-screen policy.** The app requests no device-admin
+  policies at all (see above): it does not wipe the device, reset passwords,
+  change the lock credential, or force a lock. The receiver exists only so the
+  platform can bind the Device Owner component.
 - **Screen-on while backgrounded.** `FLAG_KEEP_SCREEN_ON` belongs to a visible
   activity. Kiosk mode keeps that activity visible; if the activity is
   backgrounded, the flag is released. The service's `PARTIAL_WAKE_LOCK` keeps

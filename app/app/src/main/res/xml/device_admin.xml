@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  Empty on purpose. Lock Task Mode needs the Device Owner component, not a
+  device-admin policy (DevicePolicyManager#setLockTaskPackages); the app
+  implements none of the destructive policies it used to request, so it no
+  longer declares them. See docs/kiosk.md.
+-->
 <device-admin xmlns:android="http://schemas.android.com/apk/res/android">
-    <uses-policies>
-        <!-- Kiosk / appliance mode: stable boot path and no in-field reset. -->
-        <force-lock />
-        <wipe-data />
-        <expire-password />
-        <reset-password />
-    </uses-policies>
+    <uses-policies />
 </device-admin>
