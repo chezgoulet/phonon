@@ -89,6 +89,9 @@ import org.phononai.app.DeviceReport
 import org.phononai.app.DeviceReportResult
 import org.phononai.app.HardwareProfile
 import org.phononai.app.Kiosk
+import org.phononai.app.ModelCatalog
+import org.phononai.app.ModelEntry
+import org.phononai.app.ModelFamily
 import org.phononai.app.PerfProfile
 import org.phononai.app.PhononService
 import org.phononai.app.Settings
@@ -181,7 +184,6 @@ fun PhononApp() {
         if (showSetup) {
             SetupScreen(
                 settings = settings,
-                hasModel = models.isNotEmpty(),
                 onDownloadFirst = { bypassSetup = true; tabName = Tab.Models.name },
             )
         } else {
@@ -998,6 +1000,17 @@ private fun ModelsScreen(
 ) {
     var downloadUrl by rememberSaveable { mutableStateOf(settings.downloadUrl) }
     val storage = modelStorageBytes(models)
+    // Recomputed on the 1 s health poll, so a switch or a finished download
+    // is reflected without leaving the screen.
+    val activeEntry = remember(tick, settings.modelPath) {
+        settings.catalogEntryForCurrentModel()
+    }
+    val activeName = remember(tick, settings.modelPath) {
+        models.firstOrNull { it.active }?.name
+    }
+    val installed = remember(models) { models.map { it.file.name }.toSet() }
+    val tier = remember { HardwareProfile.detect(context).tier.id }
+
     Column(
         Modifier
             .fillMaxSize()
@@ -1008,7 +1021,7 @@ private fun ModelsScreen(
         Text("Models", style = MaterialTheme.typography.headlineLarge)
         Spacer(Modifier.height(6.dp))
         Text(
-            "GGUF files on this phone. The active model is what the endpoint serves.",
+            "Two families, one server. All decode numbers were measured on this phone; unmeasured entries say so.",
             color = PhononColors.TextDim,
             fontSize = 14.sp,
             lineHeight = 20.sp,
@@ -1039,35 +1052,91 @@ private fun ModelsScreen(
                     modifier = Modifier.padding(bottom = 4.dp),
                 )
             }
+            Spacer(Modifier.height(6.dp))
+            Text(
+                activeEntry?.let { "Serving ${it.displayName} ${it.quant} as ${it.id}" }
+                    ?: "No catalog model is active. The server serves whatever file is selected.",
+                color = PhononColors.TextDim,
+                fontSize = 12.sp,
+                lineHeight = 17.sp,
+            )
         }
-        Spacer(Modifier.height(14.dp))
-        if (models.isEmpty()) {
-            PhononCard {
-                Text("No models installed", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
-                Spacer(Modifier.height(6.dp))
+        Spacer(Modifier.height(22.dp))
+
+        ModelFamily.entries.forEach { family ->
+            val recommended = ModelCatalog.forTier(tier, family)
+            Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    "Download a GGUF below, or copy one into the app's models folder.",
-                    color = PhononColors.TextDim,
-                    fontSize = 13.sp,
+                    family.label,
+                    color = PhononColors.Text,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.SemiBold,
                 )
-            }
-        } else {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                models.forEach { model ->
-                    ModelCard(
-                        context = context,
-                        model = model,
-                        onChanged = { tick },
+                if (family == ModelFamily.QWEN) {
+                    Spacer(Modifier.width(8.dp))
+                    Chip("DEFAULT", PhononColors.Cyan)
+                }
+                Spacer(Modifier.weight(1f))
+                recommended?.let {
+                    Text(
+                        "tier $tier pick: ${it.displayName}",
+                        color = PhononColors.TextDim,
+                        fontSize = 11.sp,
                     )
                 }
             }
+            Spacer(Modifier.height(4.dp))
+            Text(
+                family.summary,
+                color = PhononColors.TextDim,
+                fontSize = 12.5.sp,
+                lineHeight = 18.sp,
+            )
+            Spacer(Modifier.height(10.dp))
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                ModelCatalog.ofFamily(family).forEach { entry ->
+                    CatalogEntryCard(
+                        context = context,
+                        entry = entry,
+                        installed = entry.fileName in installed,
+                        active = activeName == entry.fileName,
+                        download = download,
+                        recommended = recommended?.id == entry.id,
+                    )
+                }
+            }
+            Spacer(Modifier.height(22.dp))
         }
-        Spacer(Modifier.height(14.dp))
+
+        val extras = models.filter { ModelCatalog.byFileName(it.name) == null }
+        if (extras.isNotEmpty()) {
+            Text(
+                "Other GGUF files on this phone",
+                color = PhononColors.Text,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "Copied in manually; not part of the catalog, so no measured numbers are claimed.",
+                color = PhononColors.TextDim,
+                fontSize = 12.5.sp,
+                lineHeight = 18.sp,
+            )
+            Spacer(Modifier.height(10.dp))
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                extras.forEach { model ->
+                    InstalledModelCard(context = context, model = model, onChanged = {})
+                }
+            }
+            Spacer(Modifier.height(22.dp))
+        }
+
         PhononCard {
-            Text("Download a model", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+            Text("Download from a URL", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
             Spacer(Modifier.height(6.dp))
             Text(
-                "ModelDownloader resumes a partial file and verifies the declared size.",
+                "For a file that is not in the catalog. The download resumes a partial file and verifies the declared size.",
                 color = PhononColors.TextDim,
                 fontSize = 13.sp,
                 lineHeight = 18.sp,
@@ -1079,13 +1148,6 @@ private fun ModelsScreen(
                 label = "GGUF URL",
                 placeholder = "https://huggingface.co/…/model.gguf",
                 keyboardType = KeyboardType.Uri,
-            )
-            Spacer(Modifier.height(6.dp))
-            Text(
-                "Paste a direct GGUF link. Nothing downloads until you press Download.",
-                color = PhononColors.TextDim,
-                fontSize = 11.sp,
-                lineHeight = 16.sp,
             )
             Spacer(Modifier.height(12.dp))
             val active = download?.active == true
@@ -1118,35 +1180,15 @@ private fun ModelsScreen(
             ) {
                 Text(if (active) "Downloading…" else "Download", fontWeight = FontWeight.Bold)
             }
-            if (download != null && (download.active || download.error != null || download.done)) {
-                Spacer(Modifier.height(12.dp))
-                val fraction = if (download.total > 0) {
-                    (download.bytes.toFloat() / download.total.toFloat()).coerceIn(0f, 1f)
-                } else {
-                    0f
-                }
-                if (download.active) {
-                    Box(
-                        Modifier
-                            .fillMaxWidth()
-                            .height(6.dp)
-                            .clip(RoundedCornerShape(3.dp))
-                            .background(Color(0xFF1A2124)),
-                    ) {
-                        Box(
-                            Modifier
-                                .fillMaxHeight()
-                                .fillMaxWidth(fraction)
-                                .background(PhononColors.Cyan, RoundedCornerShape(3.dp)),
-                        )
-                    }
-                    Spacer(Modifier.height(8.dp))
-                }
+            if (download != null && (download.active || download.error != null) &&
+                download.dest.let { dest -> ModelCatalog.entries.none { it.fileName == File(dest).name } }
+            ) {
+                Spacer(Modifier.height(10.dp))
                 Text(
                     when {
                         download.error != null -> "Failed: ${download.error}"
-                        download.active -> "${formatBytes(download.bytes)} of ${if (download.total > 0) formatBytes(download.total) else "…"}"
-                        else -> "Downloaded ${formatBytes(download.bytes)}"
+                        download.total > 0 -> "${formatBytes(download.bytes)} of ${formatBytes(download.total)}"
+                        else -> "${formatBytes(download.bytes)} downloaded"
                     },
                     color = if (download.error != null) PhononColors.Danger else PhononColors.TextDim,
                     fontSize = 12.sp,
@@ -1157,8 +1199,190 @@ private fun ModelsScreen(
     }
 }
 
+/**
+ * One catalog row. Size, context, decode and trade-off all come from
+ * [ModelEntry]; the card only decides which action is possible right now.
+ */
 @Composable
-private fun ModelCard(context: Context, model: InstalledModel, onChanged: () -> Unit) {
+private fun CatalogEntryCard(
+    context: Context,
+    entry: ModelEntry,
+    installed: Boolean,
+    active: Boolean,
+    download: DownloadProgress?,
+    recommended: Boolean,
+) {
+    val downloading = download?.active == true &&
+        download.dest.let { File(it).name == entry.fileName }
+    val downloadError = download?.error?.takeIf {
+        download.dest.let { dest -> File(dest).name == entry.fileName }
+    }
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(if (active) PhononColors.Cyan.copy(alpha = 0.05f) else PhononColors.Surface)
+            .border(
+                1.dp,
+                if (active) PhononColors.Cyan.copy(alpha = 0.55f) else PhononColors.Border,
+                RoundedCornerShape(18.dp),
+            )
+            .padding(16.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        entry.displayName,
+                        color = PhononColors.Text,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(entry.quant, color = PhononColors.TextDim, fontSize = 11.sp)
+                }
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "alias ${entry.id}",
+                    color = PhononColors.TextDim,
+                    fontSize = 11.sp,
+                    fontFamily = FontFamily.Monospace,
+                )
+            }
+            when {
+                active -> Chip("ACTIVE", PhononColors.Cyan)
+                recommended -> Chip("TIER ${entry.ramTier}", PhononColors.TextDim)
+            }
+        }
+        Spacer(Modifier.height(10.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            Text(formatBytes(entry.sizeBytes), color = PhononColors.TextDim, fontSize = 12.sp)
+            Text("${entry.contextLabel} context", color = PhononColors.TextDim, fontSize = 12.sp)
+        }
+        Spacer(Modifier.height(8.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                if (entry.measured) entry.decodeLabel else "unmeasured",
+                color = if (entry.measured) PhononColors.Text else PhononColors.Warn,
+                fontSize = 12.5.sp,
+                fontWeight = if (entry.measured) FontWeight.SemiBold else FontWeight.Medium,
+            )
+            if (entry.measured) {
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    "on the Pixel 7, ${ModelCatalog.MEASURED_DATE}",
+                    color = PhononColors.TextDim,
+                    fontSize = 11.sp,
+                )
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        Text(
+            entry.tradeOff,
+            color = PhononColors.TextDim,
+            fontSize = 12.5.sp,
+            lineHeight = 18.sp,
+        )
+        Spacer(Modifier.height(10.dp))
+
+        if (downloading) {
+            val fraction = if (download != null && download.total > 0) {
+                (download.bytes.toFloat() / download.total.toFloat()).coerceIn(0f, 1f)
+            } else {
+                0f
+            }
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(5.dp)
+                    .clip(RoundedCornerShape(3.dp))
+                    .background(Color(0xFF1A2124)),
+            ) {
+                Box(
+                    Modifier
+                        .fillMaxHeight()
+                        .fillMaxWidth(fraction)
+                        .background(PhononColors.Cyan, RoundedCornerShape(3.dp)),
+                )
+            }
+            Spacer(Modifier.height(8.dp))
+            Text(
+                if (download != null && download.total > 0) {
+                    "Downloading ${formatBytes(download.bytes)} of ${formatBytes(download.total)}"
+                } else {
+                    "Downloading…"
+                },
+                color = PhononColors.TextDim,
+                fontSize = 12.sp,
+            )
+        } else if (downloadError != null) {
+            Text("Failed: $downloadError", color = PhononColors.Danger, fontSize = 12.sp)
+        }
+
+        if (!active) {
+            Spacer(Modifier.height(6.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (installed) {
+                    TextButton(
+                        onClick = {
+                            val service = AppState.service
+                            if (service == null) {
+                                toast(context, "Service is starting")
+                            } else {
+                                val error = service.uiSelectModel(entry.id)
+                                if (error == null) {
+                                    toast(context, "Serving ${entry.displayName} as ${entry.id}")
+                                } else {
+                                    toast(context, error)
+                                }
+                            }
+                        },
+                        enabled = !downloading,
+                    ) {
+                        Text("Use", color = PhononColors.Cyan, fontSize = 13.sp)
+                    }
+                } else {
+                    TextButton(
+                        onClick = {
+                            val service = AppState.service
+                            if (service == null) {
+                                toast(context, "Service is starting")
+                            } else {
+                                val result = service.uiDownloadModel(entry.id)
+                                if (result.contains("\"error\"")) {
+                                    toast(context, JSONObject(result).optString("error", "Download failed"))
+                                } else {
+                                    toast(context, "Downloading ${entry.fileName}")
+                                }
+                            }
+                        },
+                        enabled = !downloading && download?.active != true,
+                    ) {
+                        Text("Download", color = PhononColors.Cyan, fontSize = 13.sp)
+                    }
+                }
+                Spacer(Modifier.weight(1f))
+                Text(
+                    "recommended for ${entry.tierLabel}",
+                    color = PhononColors.TextDim,
+                    fontSize = 11.sp,
+                    modifier = Modifier.padding(top = 10.dp),
+                )
+            }
+        } else {
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "The active model. Switching family updates the alias and restarts the server.",
+                color = PhononColors.TextDim,
+                fontSize = 11.sp,
+                lineHeight = 16.sp,
+            )
+        }
+    }
+}
+
+@Composable
+private fun InstalledModelCard(context: Context, model: InstalledModel, onChanged: () -> Unit) {
     Column(
         Modifier
             .fillMaxWidth()
@@ -1208,8 +1432,6 @@ private fun ModelCard(context: Context, model: InstalledModel, onChanged: () -> 
                 ) {
                     Text("Use this model", color = PhononColors.Cyan, fontSize = 13.sp)
                 }
-            }
-            if (!model.active) {
                 TextButton(
                     onClick = {
                         if (model.file.delete()) {
@@ -2208,14 +2430,19 @@ private fun PhononSwitch(checked: Boolean, onChange: (Boolean) -> Unit) {
 @Composable
 private fun SetupScreen(
     settings: Settings,
-    hasModel: Boolean,
     onDownloadFirst: () -> Unit,
 ) {
     val context = LocalContext.current
     var lan by rememberSaveable { mutableStateOf(true) }
     var nodeName by rememberSaveable { mutableStateOf(settings.alias) }
+    var aliasEdited by rememberSaveable { mutableStateOf(false) }
     var revealKey by rememberSaveable { mutableStateOf(false) }
     val generatedKey = remember { generateApiKey() }
+    val tier = remember { HardwareProfile.detect(context).tier.id }
+    // Qwen is pre-selected because it is the faster default on this hardware.
+    var familyKey by rememberSaveable { mutableStateOf(ModelFamily.QWEN.key) }
+    val family = ModelFamily.entries.firstOrNull { it.key == familyKey } ?: ModelFamily.QWEN
+    val chosenModel = remember(familyKey, tier) { ModelCatalog.forTier(tier, family) }
 
     Column(
         Modifier
@@ -2268,7 +2495,7 @@ private fun SetupScreen(
                 Spacer(Modifier.height(10.dp))
                 PhononField(
                     value = nodeName,
-                    onValueChange = { nodeName = it },
+                    onValueChange = { nodeName = it; aliasEdited = true },
                     label = "Node name",
                 )
                 Spacer(Modifier.height(8.dp))
@@ -2277,6 +2504,69 @@ private fun SetupScreen(
                     color = PhononColors.TextDim,
                     fontSize = 12.sp,
                 )
+            }
+            Spacer(Modifier.height(12.dp))
+
+            PhononCard {
+                Text("Choose a model", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "Qwen3.5 decodes at about 9.2 tok/s on this phone; Gemma 4 at about 7.0 tok/s, " +
+                        "with a multimodal path and its own tool format in exchange.",
+                    color = PhononColors.TextDim,
+                    fontSize = 13.sp,
+                    lineHeight = 18.sp,
+                )
+                Spacer(Modifier.height(12.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    ModelFamily.entries.forEach { option ->
+                        ChoiceChip(
+                            option.label,
+                            option == family,
+                            { familyKey = option.key },
+                            Modifier.weight(1f),
+                        )
+                    }
+                }
+                Spacer(Modifier.height(10.dp))
+                chosenModel?.let { entry ->
+                    Text(
+                        "${entry.displayName} ${entry.quant} · ${entry.contextLabel} context · " +
+                            (if (entry.measured) entry.decodeLabel else "unmeasured"),
+                        color = PhononColors.Text,
+                        fontSize = 12.5.sp,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "Recommended for ${entry.tierLabel} RAM (tier $tier). " + entry.tradeOff,
+                        color = PhononColors.TextDim,
+                        fontSize = 11.5.sp,
+                        lineHeight = 17.sp,
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    val installed = ModelCatalog.path(context, entry).isFile
+                    if (!installed) {
+                        TextButton(
+                            onClick = {
+                                val service = AppState.service
+                                if (service == null) {
+                                    toast(context, "Service is starting")
+                                } else {
+                                    val result = service.uiDownloadModel(entry.id)
+                                    if (result.contains("\"error\"")) {
+                                        toast(context, JSONObject(result).optString("error", "Download failed"))
+                                    } else {
+                                        toast(context, "Downloading ${entry.fileName}")
+                                    }
+                                }
+                            },
+                        ) {
+                            Text("Download ${entry.displayName}", color = PhononColors.Cyan, fontSize = 13.sp)
+                        }
+                    } else {
+                        Text("Installed on this phone.", color = PhononColors.Cyan, fontSize = 12.sp)
+                    }
+                }
             }
             Spacer(Modifier.height(12.dp))
 
@@ -2341,17 +2631,21 @@ private fun SetupScreen(
             }
             Spacer(Modifier.height(12.dp))
             PhononCard {
+                val chosenInstalled = chosenModel?.let { ModelCatalog.path(context, it).isFile } == true
                 Text(
-                    if (hasModel) "Model ready" else "No model installed",
+                    if (chosenInstalled) "Model ready" else "No model installed",
                     fontWeight = FontWeight.SemiBold,
                     fontSize = 15.sp,
                 )
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    if (hasModel) {
-                        "The active GGUF is ready to serve."
+                    if (chosenInstalled) {
+                        "The selected GGUF is ready to serve."
                     } else {
-                        "Download a GGUF before starting the server. The download resumes if it is interrupted."
+                        chosenModel?.let {
+                            "Download ${it.displayName} (${it.fileName}) before starting the server. " +
+                                "The download resumes if it is interrupted."
+                        } ?: "This RAM tier has no recommended entry in the selected family."
                     },
                     color = PhononColors.TextDim,
                     fontSize = 13.sp,
@@ -2363,23 +2657,37 @@ private fun SetupScreen(
         Button(
             onClick = {
                 val service = AppState.service
-                if (service == null) {
-                    toast(context, "Service is starting")
-                } else if (!hasModel) {
-                    toast(context, "Download a model first")
-                } else {
-                    val body = JSONObject().apply {
-                        put("bind_address", if (lan) Settings.BIND_ANY else Settings.DEFAULT_BIND_ADDRESS)
-                        put("alias", nodeName.trim().ifBlank { Settings.DEFAULT_ALIAS })
-                        put("auto_start", true)
-                        if (lan) put("api_key", generatedKey)
-                    }
-                    val result = service.updateSettings(body.toString())
-                    if (result.contains("\"error\"")) {
-                        toast(context, JSONObject(result).optString("error", "Could not save setup"))
-                    } else {
-                        sendServiceAction(context, PhononService.ACTION_START_SERVER)
-                        toast(context, "Starting Phonon")
+                val entry = chosenModel
+                val installed = entry != null && ModelCatalog.path(context, entry).isFile
+                when {
+                    service == null -> toast(context, "Service is starting")
+                    !installed -> toast(
+                        context,
+                        entry?.let { "Download ${it.displayName} first" } ?: "No model for this tier",
+                    )
+                    else -> {
+                        val switchError = service.uiSelectModel(entry!!.id)
+                        if (switchError != null) {
+                            toast(context, switchError)
+                        } else {
+                            val body = JSONObject().apply {
+                                put("bind_address", if (lan) Settings.BIND_ANY else Settings.DEFAULT_BIND_ADDRESS)
+                                // The model picker already set the alias. Only
+                                // an operator-edited node name overrides it.
+                                if (aliasEdited) {
+                                    put("alias", nodeName.trim().ifBlank { Settings.DEFAULT_ALIAS })
+                                }
+                                put("auto_start", true)
+                                if (lan) put("api_key", generatedKey)
+                            }
+                            val result = service.updateSettings(body.toString())
+                            if (result.contains("\"error\"")) {
+                                toast(context, JSONObject(result).optString("error", "Could not save setup"))
+                            } else {
+                                sendServiceAction(context, PhononService.ACTION_START_SERVER)
+                                toast(context, "Starting Phonon")
+                            }
+                        }
                     }
                 }
             },

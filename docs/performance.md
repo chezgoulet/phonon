@@ -254,3 +254,7 @@ Same engine, 2 threads on cores 6-7, 128 greedy tokens:
 Qwen is the faster default at equal tool-calling support; Gemma 4 is worth
 offering for its multimodal path and its own tool format, with the measured cost
 stated in the picker.
+
+The catalog, download provenance and RAM-tier recommendations are in
+[`models.md`](models.md). The device acceptance run for both families, including
+the `get_weather` tool calls, is in [`models-test.md`](models-test.md).
