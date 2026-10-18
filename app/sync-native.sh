@@ -4,10 +4,11 @@
 #   app/sync-native.sh [BUILD_DIR]
 #
 # BUILD_DIR must contain llama-server and the libggml*/libllama*.so files.
-# Defaults to the measured Pixel 7 build on this host.
+# Defaults to the measured Pixel 7 build on this host: llama.cpp 797de63
+# built with GGML_CPU_REPACK=ON so Q4_K weights are repacked for ARM.
 set -euo pipefail
 
-BUILD_DIR="${1:-/home/c/llama.cpp/build-android-arm64/bin}"
+BUILD_DIR="${1:-/home/c/llama.cpp/build-android-arm64-repack/bin}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 DEST="$HERE/app/src/main/jniLibs/arm64-v8a"
 

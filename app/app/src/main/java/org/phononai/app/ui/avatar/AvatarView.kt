@@ -137,6 +137,9 @@ class AvatarView @JvmOverloads constructor(
 
     companion object {
         const val COUNT = 320
+        /** ~20 fps draw clock while reduced; one frame is 50 ms. */
+        const val REDUCED_FRAME_MS = 50L
+        private const val REDUCED_FRAME_NS = REDUCED_FRAME_MS * 1_000_000L
         const val GLOW_PX = 64f
 
         /** Kept for API parity (Settings lists these as the presence themes). */
@@ -234,6 +237,12 @@ class AvatarView @JvmOverloads constructor(
     private var state = "idle"; private var tool: String? = null
     private var workload = 0f; private var amp = 0f
     private var time = 0f; private var lastNanos = 0L
+    // Cost control while a request is generating. Reducing the mote count and
+    // the draw rate keeps the state hue and body shape; idle animation is
+    // always full. Frames skipped here are skipped before tick() and draw, so
+    // the saving is the whole frame, not just its paint.
+    private var reduced = false
+    private var lastDrawNanos = 0L
     private var seed = 1
 
     // ---- palette. Every state gets its OWN two-tone character; this is not a house
@@ -570,6 +579,22 @@ class AvatarView @JvmOverloads constructor(
         this.workload = workload.coerceIn(0f, 1f)
         this.amp = amp.coerceIn(0f, 1f)
     }
+
+    /**
+     * Cheap mode for the duration of a request: half the motes and a ~20 fps
+     * draw clock instead of the display's. The hue and archetype are untouched,
+     * so the being still reads as the same state. Off restores the full swarm
+     * and the display frame rate.
+     */
+    fun setReducedMotion(on: Boolean) {
+        if (reduced == on) return
+        reduced = on
+        lastNanos = 0L
+        lastDrawNanos = 0L
+        invalidate()
+    }
+
+    private val activeMotes: Int get() = if (reduced) COUNT / 2 else COUNT
 
     /** LIVE tool-call hook: the being gathers into the work-state + the tool's
      *  motif, and ramps its energy with the workload. Re-seeds the generative
@@ -1647,7 +1672,8 @@ class AvatarView @JvmOverloads constructor(
         val fk = 0.17f * rFlicker
         val szk = rSize
 
-        for (i in 0 until COUNT) {
+        val count = activeMotes
+        for (i in 0 until count) {
             val p = parts[i]
 
             // 1. where the body wants this particle
@@ -1746,6 +1772,14 @@ class AvatarView @JvmOverloads constructor(
     override fun onDraw(canvas: Canvas) {
         if (!centered && width > 0 && height > 0) seedField()
         val now = System.nanoTime()
+        if (reduced && lastDrawNanos != 0L) {
+            val since = now - lastDrawNanos
+            if (since < REDUCED_FRAME_NS) {
+                postInvalidateDelayed((REDUCED_FRAME_NS - since) / 1_000_000L + 1L)
+                return
+            }
+        }
+        lastDrawNanos = now
         val dt = if (lastNanos == 0L) 0.016f else ((now - lastNanos) / 1e9f).coerceIn(0.001f, 0.05f)
         lastNanos = now
         tick(dt)
@@ -1827,8 +1861,9 @@ class AvatarView @JvmOverloads constructor(
         }
         canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), vig)
 
-        // always animate
-        postInvalidateOnAnimation()
+        // always animate — at the display rate normally, at 20 fps while a
+        // generation is running and the operator left the avatar in reduced mode.
+        if (reduced) postInvalidateDelayed(REDUCED_FRAME_MS) else postInvalidateOnAnimation()
     }
 
     // ---- small pure helpers (no allocation) ---------------------------------

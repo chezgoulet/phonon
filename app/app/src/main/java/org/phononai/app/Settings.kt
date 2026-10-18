@@ -31,6 +31,22 @@ class Settings(context: Context) {
     fun defaultModelPath(): String =
         File(File(filesDir, "models"), hardware.tier.modelFile).absolutePath
 
+    /** The catalog entry for the currently selected file, if it is one we know. */
+    fun catalogEntryForCurrentModel(): ModelEntry? =
+        ModelCatalog.byFileName(File(modelPath).name)
+
+    /**
+     * Point settings at a catalog entry: file, default context and alias move
+     * together, so switching family cannot leave a Qwen alias on a Gemma
+     * server. Marks the choice as the operator's; auto-config must not undo it.
+     */
+    fun selectModel(entry: ModelEntry) {
+        modelPath = File(File(filesDir, "models"), entry.fileName).absolutePath
+        contextSize = entry.contextSize
+        alias = entry.id
+        modelChosenByUser = true
+    }
+
     var modelPath: String
         get() = prefs.getString(KEY_MODEL_PATH, null) ?: defaultModelPath()
         set(value) = prefs.edit().putString(KEY_MODEL_PATH, value).apply()
@@ -39,17 +55,166 @@ class Settings(context: Context) {
         get() = prefs.getInt(KEY_CONTEXT, hardware.tier.contextSize)
         set(value) = prefs.edit().putInt(KEY_CONTEXT, value).apply()
 
-    var threads: Int
-        get() = prefs.getInt(KEY_THREADS, hardware.tier.threads)
-        set(value) = prefs.edit().putInt(KEY_THREADS, value).apply()
-
     /**
-     * Set by the Settings screen's Save action. Auto-configuration never
-     * replaces a value the operator has chosen, including after a restart.
+     * Effective decode thread count. Until the operator overrides it this is
+     * computed from the process's allowed cpuset (see [perfPlan]); after an
+     * override it is the stored value.
      */
+    var threads: Int
+        get() = if (perfThreadsSet) {
+            prefs.getInt(KEY_THREADS, hardware.tier.threads)
+        } else {
+            perfPlan().threads
+        }
+        set(value) {
+            prefs.edit()
+                .putInt(KEY_THREADS, value)
+                .putBoolean(KEY_PERF_THREADS_SET, true)
+                .apply()
+        }
+
+    /** Set by the Settings screen's Save action. Auto-configuration never
+     * replaces a value the operator has chosen, including after a restart. */
     var tunedByUser: Boolean
         get() = prefs.getBoolean(KEY_TUNED_BY_USER, false)
         set(value) = prefs.edit().putBoolean(KEY_TUNED_BY_USER, value).apply()
+
+    /** Set by the Models picker or the Setup choice. Auto-configuration never
+     * replaces the model, context or alias after this is set. */
+    var modelChosenByUser: Boolean
+        get() = prefs.getBoolean(KEY_MODEL_CHOSEN, false)
+        set(value) = prefs.edit().putBoolean(KEY_MODEL_CHOSEN, value).apply()
+
+    // --- performance profile overrides -----------------------------------
+
+    /** True when the operator chose a thread count; auto-tuning is off. */
+    var perfThreadsSet: Boolean
+        get() = prefs.getBoolean(KEY_PERF_THREADS_SET, false)
+        private set(value) {
+            prefs.edit().putBoolean(KEY_PERF_THREADS_SET, value).apply()
+        }
+
+    /** Operator `--cpu-range`, e.g. `4-5`. Blank means auto. */
+    var perfCpuRange: String
+        get() = prefs.getString(KEY_PERF_CPU_RANGE, "").orEmpty()
+        set(value) = prefs.edit().putString(KEY_PERF_CPU_RANGE, value.trim()).apply()
+
+    var perfCpuRangeSet: Boolean
+        get() = prefs.getBoolean(KEY_PERF_CPU_RANGE_SET, false)
+        private set(value) {
+            prefs.edit().putBoolean(KEY_PERF_CPU_RANGE_SET, value).apply()
+        }
+
+    /** Operator thread priority (0 normal .. 3 realtime); -1 keeps auto. */
+    var perfPrio: Int
+        get() = prefs.getInt(KEY_PERF_PRIO, -1)
+        set(value) = prefs.edit().putInt(KEY_PERF_PRIO, value).apply()
+
+    var perfPrioBatch: Int
+        get() = prefs.getInt(KEY_PERF_PRIO_BATCH, -1)
+        set(value) = prefs.edit().putInt(KEY_PERF_PRIO_BATCH, value).apply()
+
+    var perfPrioSet: Boolean
+        get() = prefs.getBoolean(KEY_PERF_PRIO_SET, false)
+        private set(value) {
+            prefs.edit().putBoolean(KEY_PERF_PRIO_SET, value).apply()
+        }
+
+    /**
+     * Off by default: while a request is in flight the avatar drops to a
+     * cheaper animation (half the motes, 20 fps) so it does not compete with
+     * inference. Idle animation is always full.
+     */
+    var animateAvatarWhileGenerating: Boolean
+        get() = prefs.getBoolean(KEY_ANIMATE_GENERATING, false)
+        set(value) = prefs.edit().putBoolean(KEY_ANIMATE_GENERATING, value).apply()
+
+    fun setThreadsOverride(value: Int) {
+        prefs.edit()
+            .putInt(KEY_THREADS, value)
+            .putBoolean(KEY_PERF_THREADS_SET, true)
+            .apply()
+    }
+
+    fun setCpuRangeOverride(value: String) {
+        prefs.edit()
+            .putString(KEY_PERF_CPU_RANGE, value.trim())
+            .putBoolean(KEY_PERF_CPU_RANGE_SET, true)
+            .apply()
+    }
+
+    fun setPrioOverride(prio: Int, prioBatch: Int) {
+        prefs.edit()
+            .putInt(KEY_PERF_PRIO, prio)
+            .putInt(KEY_PERF_PRIO_BATCH, prioBatch)
+            .putBoolean(KEY_PERF_PRIO_SET, true)
+            .apply()
+    }
+
+    fun clearThreadsOverride() {
+        prefs.edit().putBoolean(KEY_PERF_THREADS_SET, false).apply()
+    }
+
+    fun clearCpuRangeOverride() {
+        prefs.edit()
+            .putBoolean(KEY_PERF_CPU_RANGE_SET, false)
+            .remove(KEY_PERF_CPU_RANGE)
+            .apply()
+    }
+
+    fun clearPrioOverride() {
+        prefs.edit()
+            .putBoolean(KEY_PERF_PRIO_SET, false)
+            .remove(KEY_PERF_PRIO)
+            .remove(KEY_PERF_PRIO_BATCH)
+            .apply()
+    }
+
+    /** Return every performance field to the runtime-computed default. */
+    fun clearPerfOverrides() {
+        prefs.edit()
+            .putBoolean(KEY_PERF_THREADS_SET, false)
+            .putBoolean(KEY_PERF_CPU_RANGE_SET, false)
+            .putBoolean(KEY_PERF_PRIO_SET, false)
+            .remove(KEY_PERF_CPU_RANGE)
+            .remove(KEY_PERF_PRIO)
+            .remove(KEY_PERF_PRIO_BATCH)
+            .apply()
+    }
+
+    /**
+     * The profile for the current cpuset. Threads, range and priority are
+     * auto unless overridden; an override disables only its own field.
+     */
+    fun perfPlan(): PerfPlan {
+        val detection = PerfProfile.detect()
+        val best = detection.best
+        val autoRange = best?.range.orEmpty()
+        val range = if (perfCpuRangeSet) perfCpuRange else autoRange
+        val autoThreads = best?.size ?: minOf(4, detection.allowed.size)
+        val threadsValue = if (perfThreadsSet) {
+            prefs.getInt(KEY_THREADS, hardware.tier.threads)
+        } else {
+            autoThreads
+        }
+        val prio = if (perfPrio >= 0) perfPrio else PerfPlan.DEFAULT_PRIO
+        val prioBatch =
+            if (perfPrioBatch >= 0) perfPrioBatch else PerfPlan.DEFAULT_PRIO_BATCH
+        val cluster = PerfProfile.parseCpuList(range)
+            .filter { it in detection.allowed }
+        return PerfPlan(
+            allowed = detection.allowed,
+            mode = if (detection.visible) PerfPlan.MODE_VISIBLE else PerfPlan.MODE_BACKGROUND,
+            cluster = cluster,
+            cpuRange = range,
+            threads = threadsValue.coerceIn(1, 16),
+            prio = prio.coerceIn(0, 3),
+            prioBatch = prioBatch.coerceIn(0, 3),
+            threadsSet = perfThreadsSet,
+            cpuRangeSet = perfCpuRangeSet,
+            prioSet = perfPrioSet,
+        )
+    }
 
     /**
      * Address both the app API and llama-server bind to. Safe values are
@@ -147,11 +312,13 @@ class Settings(context: Context) {
      */
     fun applyAutoConfigIfNeeded() {
         if (prefs.getBoolean(KEY_AUTO_CONFIG_DONE, false)) return
-        if (!tunedByUser) {
+        if (!tunedByUser && !modelChosenByUser) {
             val tier = hardware.tier
             modelPath = File(File(filesDir, "models"), tier.modelFile).absolutePath
             contextSize = tier.contextSize
-            threads = tier.threads
+            // Write the tier value without marking it a performance override:
+            // the runtime profile still chooses threads from the cpuset.
+            prefs.edit().putInt(KEY_THREADS, tier.threads).apply()
             alias = tier.alias
         }
         prefs.edit().putBoolean(KEY_AUTO_CONFIG_DONE, true).apply()
@@ -196,7 +363,7 @@ class Settings(context: Context) {
     }.toString()
 
     companion object {
-        const val DEFAULT_MODEL_NAME = "gemma-4-E2B-it-Q4_0.gguf"
+        const val DEFAULT_MODEL_NAME = "Qwen3.5-2B-Q4_K_M.gguf"
 
         /**
          * No model host is bundled: a development loopback URL read as a broken
@@ -206,7 +373,7 @@ class Settings(context: Context) {
 
         /** Only value written by builds before the default was removed. */
         private const val LEGACY_DEV_MODEL_URL = "http://127.0.0.1:9000/gemma-4-E2B-it-Q4_0.gguf"
-        const val DEFAULT_ALIAS = "gemma-4-e2b"
+        const val DEFAULT_ALIAS = ModelCatalog.DEFAULT_ID
         const val DEFAULT_BIND_ADDRESS = "127.0.0.1"
         const val BIND_ANY = "0.0.0.0"
         const val LOAD_MODE_MMAP = "mmap"
@@ -278,7 +445,15 @@ class Settings(context: Context) {
         private const val KEY_KEEP_WARM_INTERVAL = "keep_warm_interval_s"
         private const val KEY_LOAD_MODE = "load_mode"
         private const val KEY_TUNED_BY_USER = "tuned_by_user"
+        private const val KEY_MODEL_CHOSEN = "model_chosen_by_user"
         private const val KEY_AUTO_CONFIG_DONE = "auto_config_done"
         private const val KEY_BENCHMARK_HISTORY = "benchmark_history"
+        private const val KEY_PERF_THREADS_SET = "perf_threads_set"
+        private const val KEY_PERF_CPU_RANGE = "perf_cpu_range"
+        private const val KEY_PERF_CPU_RANGE_SET = "perf_cpu_range_set"
+        private const val KEY_PERF_PRIO = "perf_prio"
+        private const val KEY_PERF_PRIO_BATCH = "perf_prio_batch"
+        private const val KEY_PERF_PRIO_SET = "perf_prio_set"
+        private const val KEY_ANIMATE_GENERATING = "animate_avatar_while_generating"
     }
 }
