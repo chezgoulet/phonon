@@ -89,6 +89,7 @@ import org.phononai.app.DeviceReport
 import org.phononai.app.DeviceReportResult
 import org.phononai.app.HardwareProfile
 import org.phononai.app.Kiosk
+import org.phononai.app.PerfProfile
 import org.phononai.app.PhononService
 import org.phononai.app.Settings
 import org.phononai.app.ui.avatar.AvatarView
@@ -381,6 +382,11 @@ private fun ServeScreen(
 
     // Scrollable: the benchmark card adds a result block, and a fixed column
     // clipped the activity row behind the primary action on a 6.1" phone.
+    // The avatar's cost control is a user-visible setting: default off means
+    // the generating state drops to half the motes at 20 fps. Idle is always
+    // the full animation, whatever this says.
+    val animateGenerating = settings.animateAvatarWhileGenerating
+    val reducedAvatar = kind == AvatarKind.Generating && !animateGenerating
     Column(
         Modifier
             .fillMaxSize()
@@ -394,7 +400,12 @@ private fun ServeScreen(
             // so 156 dp yields a ~84 dp visible cloud with the 1.55 × halo
             // still inside the bounds. The benchmark card below needs the
             // height; the orb stays legible at this size.
-            Avatar(kind = kind, amp = (tps / 20f).coerceIn(0f, 1f), modifier = Modifier.size(156.dp))
+            Avatar(
+                kind = kind,
+                amp = (tps / 20f).coerceIn(0f, 1f),
+                reduced = reducedAvatar,
+                modifier = Modifier.size(156.dp),
+            )
             Spacer(Modifier.width(18.dp))
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -422,6 +433,21 @@ private fun ServeScreen(
                     color = PhononColors.TextDim,
                     fontSize = 13.sp,
                     lineHeight = 18.sp,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Spacer(Modifier.height(4.dp))
+                // The performance mode is not a hidden setting: say what the
+                // running child is pinned to, in the operator's words.
+                Text(
+                    text = health?.perfLine ?: "Detecting the CPU set…",
+                    color = if (health?.perfVisible == true) {
+                        PhononColors.Cyan.copy(alpha = 0.85f)
+                    } else {
+                        PhononColors.TextDim.copy(alpha = 0.85f)
+                    },
+                    fontSize = 11.5.sp,
+                    lineHeight = 16.sp,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -841,7 +867,7 @@ private fun RecentActivity(health: Health?, accent: Color) {
 }
 
 @Composable
-private fun Avatar(kind: AvatarKind, amp: Float, modifier: Modifier) {
+private fun Avatar(kind: AvatarKind, amp: Float, reduced: Boolean, modifier: Modifier) {
     val driver = remember { AvatarDriver() }
     AndroidView(
         modifier = modifier,
@@ -855,12 +881,12 @@ private fun Avatar(kind: AvatarKind, amp: Float, modifier: Modifier) {
                 )
                 setVisualCategory("lumen")
                 driver.attach(this)
-                driver.apply(kind, amp)
+                driver.apply(kind, amp, reduced)
             }
         },
         update = { view ->
             driver.attach(view)
-            driver.apply(kind, amp)
+            driver.apply(kind, amp, reduced)
         },
     )
 }
@@ -869,17 +895,27 @@ private class AvatarDriver {
     private var view: AvatarView? = null
     private var lastKind: AvatarKind? = null
     private var lastAmp: Float = -1f
+    private var lastReduced: Boolean? = null
 
     fun attach(view: AvatarView) {
         this.view = view
     }
 
-    fun apply(kind: AvatarKind, amp: Float) {
+    fun apply(kind: AvatarKind, amp: Float, reduced: Boolean) {
         val v = view ?: return
         val ampChanged = abs(lastAmp - amp) >= 0.04f
-        if (kind == lastKind && !(kind == AvatarKind.Generating && ampChanged)) return
+        val reducedChanged = lastReduced != reduced
+        if (kind == lastKind && !reducedChanged &&
+            !(kind == AvatarKind.Generating && ampChanged)
+        ) {
+            return
+        }
         lastKind = kind
         lastAmp = amp
+        lastReduced = reduced
+        // Set before the state: switching cost mode never changes the hue or
+        // archetype, it only changes how many motes and how often they draw.
+        v.setReducedMotion(reduced)
         when (kind) {
             AvatarKind.Stopped -> {
                 v.setIdleTheme("aura")
@@ -1216,6 +1252,7 @@ private fun Chip(text: String, color: Color) {
 
 private class SettingsDraft(context: Context) {
     private val s = Settings(context)
+    private val plan = s.perfPlan()
     var modelPath by mutableStateOf(s.modelPath)
     var contextSize by mutableStateOf(s.contextSize.toString())
     var threads by mutableStateOf(s.threads.toString())
@@ -1231,6 +1268,193 @@ private class SettingsDraft(context: Context) {
     var keepWarm by mutableStateOf(s.keepWarm)
     var reasoning by mutableStateOf(s.reasoning)
     var autoStart by mutableStateOf(s.autoStart)
+    var perfThreads by mutableStateOf(plan.threads.toString())
+    var perfCpuRange by mutableStateOf(plan.cpuRange)
+    var perfPrio by mutableStateOf(plan.prio.toString())
+    var perfPrioBatch by mutableStateOf(plan.prioBatch.toString())
+    var animateGenerating by mutableStateOf(s.animateAvatarWhileGenerating)
+
+    /** Re-read the auto values after an override is cleared or applied. */
+    fun syncPerf() {
+        val next = s.perfPlan()
+        threads = next.threads.toString()
+        perfThreads = next.threads.toString()
+        perfCpuRange = next.cpuRange
+        perfPrio = next.prio.toString()
+        perfPrioBatch = next.prioBatch.toString()
+        animateGenerating = s.animateAvatarWhileGenerating
+    }
+}
+
+@Composable
+private fun PerformanceCard(
+    context: Context,
+    settings: Settings,
+    draft: SettingsDraft,
+    health: Health?,
+    onMessage: (String?) -> Unit,
+) {
+    val plan = settings.perfPlan()
+    // What the operator sees first is the mode the running child is in. If the
+    // app has since moved to another cpuset, say so instead of hiding it.
+    val runningVisible = health?.perfVisible ?: plan.visible
+    val modeLabel = if (runningVisible) "Visible / kiosk" else "Background"
+    val modeDetail = if (runningVisible) {
+        "Full SoC, all 8 cores. 2 threads on 6-7 measured 6.4–7.7 tok/s; 4 unpinned threads 7.6 (128 tokens). The old 14.4 was a short-completion figure."
+    } else {
+        "6 cores, no X1. 2 threads on 4-5 measured 5.6 tok/s; 4 unpinned threads 5.4 (128 tokens)."
+    }
+    val kioskOn = Kiosk.isDeviceOwner(context) || Kiosk.isLockTaskActive(context)
+    val running = health?.state == "ready" || health?.state == "loading" ||
+        health?.state == "restarting"
+
+    PhononCard {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Performance", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                Spacer(Modifier.height(4.dp))
+                Text(modeLabel, color = PhononColors.Cyan, fontSize = 14.sp)
+            }
+            Text(
+                if (plan.auto) "auto-tuned" else "manual",
+                color = if (plan.auto) PhononColors.TextDim else PhononColors.Warn,
+                fontSize = 11.sp,
+            )
+        }
+        Spacer(Modifier.height(6.dp))
+        Text(
+            modeDetail,
+            color = PhononColors.Text,
+            fontSize = 12.sp,
+            lineHeight = 17.sp,
+        )
+        Spacer(Modifier.height(4.dp))
+        Text(
+            if (kioskOn) {
+                "Kiosk is on: pinning this app is what unlocks the X1 cores."
+            } else if (!runningVisible) {
+                "Kiosk — or simply keeping this screen visible — is what unlocks the X1 cores."
+            } else {
+                "This screen being visible is what unlocks the X1 cores; kiosk keeps it that way."
+            },
+            color = PhononColors.TextDim,
+            fontSize = 11.5.sp,
+            lineHeight = 16.sp,
+        )
+        Spacer(Modifier.height(10.dp))
+        Text(
+            "${plan.modeLabel} · ${plan.threads} threads · CPUs ${plan.cpuRangeLabel} · prio ${plan.prio}/${plan.prioBatch}",
+            color = PhononColors.Text,
+            fontFamily = FontFamily.Monospace,
+            fontSize = 12.sp,
+        )
+        if (running && health != null &&
+            (health.perfThreads != plan.threads ||
+                health.perfCpuRange != plan.cpuRange ||
+                health.perfMode != plan.mode)
+        ) {
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "Running child: ${health.perfThreads} threads on ${health.perfCpuRange.ifBlank { "all" }} (${health.perfMode}). " +
+                    "Apply or restart to move it.",
+                color = PhononColors.Warn,
+                fontSize = 11.sp,
+                lineHeight = 15.sp,
+            )
+        }
+        Spacer(Modifier.height(12.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            PhononField(
+                value = draft.perfThreads,
+                onValueChange = { draft.perfThreads = it },
+                label = "Threads",
+                modifier = Modifier.weight(1f),
+                keyboardType = KeyboardType.Number,
+            )
+            PhononField(
+                value = draft.perfCpuRange,
+                onValueChange = { draft.perfCpuRange = it },
+                label = "CPU range",
+                modifier = Modifier.weight(1f),
+            )
+        }
+        Spacer(Modifier.height(10.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            PhononField(
+                value = draft.perfPrio,
+                onValueChange = { draft.perfPrio = it },
+                label = "Prio (0–3)",
+                modifier = Modifier.weight(1f),
+                keyboardType = KeyboardType.Number,
+            )
+            PhononField(
+                value = draft.perfPrioBatch,
+                onValueChange = { draft.perfPrioBatch = it },
+                label = "Prio batch (0–3)",
+                modifier = Modifier.weight(1f),
+                keyboardType = KeyboardType.Number,
+            )
+        }
+        Spacer(Modifier.height(8.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            TextButton(onClick = {
+                val service = AppState.service ?: run {
+                    onMessage("Service is starting")
+                    return@TextButton
+                }
+                val threads = draft.perfThreads.toIntOrNull()
+                val prio = draft.perfPrio.toIntOrNull()
+                val prioBatch = draft.perfPrioBatch.toIntOrNull()
+                if (threads == null || prio == null || prioBatch == null) {
+                    onMessage("Threads and priorities must be numbers")
+                    return@TextButton
+                }
+                val error = service.uiApplyPerf(
+                    threads = threads,
+                    cpuRange = draft.perfCpuRange,
+                    prio = prio,
+                    prioBatch = prioBatch,
+                )
+                if (error == null) draft.syncPerf()
+                onMessage(error)
+            }) {
+                Text("Apply", color = PhononColors.Cyan, fontSize = 13.sp)
+            }
+            TextButton(onClick = {
+                val service = AppState.service ?: run {
+                    onMessage("Service is starting")
+                    return@TextButton
+                }
+                val error = service.uiApplyPerf(reset = true)
+                if (error == null) draft.syncPerf()
+                onMessage(error)
+            }) {
+                Text("Reset to auto", color = PhononColors.TextDim, fontSize = 13.sp)
+            }
+        }
+        Text(
+            "An override pins that field and stops auto-tuning it. Threads also changes the Advanced field; " +
+                "CPU range and priority are applied by restarting the server.",
+            color = PhononColors.TextDim.copy(alpha = 0.8f),
+            fontSize = 11.sp,
+            lineHeight = 16.sp,
+        )
+        Spacer(Modifier.height(10.dp))
+        HorizontalDivider(color = PhononColors.Border)
+        ToggleRow(
+            "Animate avatar while generating",
+            draft.animateGenerating,
+        ) { on ->
+            draft.animateGenerating = on
+            AppState.service?.uiSetAnimateAvatar(on)
+        }
+        Text(
+            "Off by default. Generating drops the avatar to half the motes at 20 fps; idle stays full.",
+            color = PhononColors.TextDim,
+            fontSize = 11.sp,
+            lineHeight = 16.sp,
+        )
+    }
 }
 
 @Composable
@@ -1248,6 +1472,7 @@ private fun SettingsScreen(
     var keySet by remember { mutableStateOf(settings.apiKey.isNotBlank()) }
     var showKey by remember { mutableStateOf<String?>(null) }
     var saveMessage by remember { mutableStateOf<String?>(null) }
+    var perfMessage by remember { mutableStateOf<String?>(null) }
     var report by remember { mutableStateOf<DeviceReportResult?>(null) }
     var reportPreparing by remember { mutableStateOf(false) }
     val activeModel = models.firstOrNull { it.active }
@@ -1328,7 +1553,7 @@ private fun SettingsScreen(
             )
             Spacer(Modifier.height(4.dp))
             Text(
-                "Auto-config: ${device.tier.modelLabel}, ${device.tier.contextSize / 1024}K, ${device.tier.threads} threads",
+                "Tier defaults: ${device.tier.modelLabel}, ${device.tier.contextSize / 1024}K context; the performance profile chooses threads from the cpuset.",
                 color = PhononColors.TextDim,
                 fontSize = 12.sp,
                 lineHeight = 17.sp,
@@ -1371,6 +1596,27 @@ private fun SettingsScreen(
                 color = PhononColors.TextDim.copy(alpha = 0.8f),
                 fontSize = 11.sp,
                 lineHeight = 16.sp,
+            )
+        }
+        Spacer(Modifier.height(12.dp))
+
+        PerformanceCard(
+            context = context,
+            settings = settings,
+            draft = draft,
+            health = health,
+            onMessage = { perfMessage = it },
+        )
+        perfMessage?.let {
+            Spacer(Modifier.height(6.dp))
+            Text(
+                it,
+                color = if (it.contains("must") || it.contains("outside")) {
+                    PhononColors.Danger
+                } else {
+                    PhononColors.TextDim
+                },
+                fontSize = 12.sp,
             )
         }
         Spacer(Modifier.height(12.dp))

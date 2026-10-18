@@ -31,6 +31,7 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
     private lateinit var server: ServerManager
     private lateinit var thermal: ThermalMonitor
     private lateinit var keepWarm: KeepWarm
+    private lateinit var hints: PerfHints
     private lateinit var benchmark: BenchmarkRunner
     private val requests = RequestTracker()
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -79,6 +80,8 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
         keepWarm.start()
 
         benchmark = BenchmarkRunner(settings, server) { thermal.batteryTempC }
+
+        hints = PerfHints(this)
 
         startApi()
 
@@ -161,6 +164,7 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
             if (requests.lastCompletionAtMs > 0) requests.lastCompletionAtMs else JSONObject.NULL,
         )
         json.put("requests_completed", requests.completedCount)
+        if (::hints.isInitialized) hints.healthFields(json)
         // A reload between commit and backend restart must not look `ready`
         // just because the previous process is still up.
         if (isRestarting() && json.optString("state") == ServerState.READY.wire) {
@@ -403,7 +407,11 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
 
                 settings.modelPath = modelPath
                 settings.contextSize = context
-                settings.threads = threads
+                // Only a *changed* thread count is an override. Saving an
+                // unrelated field while the auto profile is active must leave
+                // auto-tuning alone, even though the UI posts the value it
+                // shows.
+                if (threads != settings.threads) settings.threads = threads
                 settings.bindAddress = bindAddress
                 settings.port = port
                 settings.backendPort = backendPort
@@ -450,9 +458,20 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
         server.recordTimings(body)
     }
 
-    override fun requestStarted() = requests.beginClient()
+    override fun requestStarted(path: String) {
+        requests.beginClient()
+        // ADPF describes one unit of work: a generated token. Only completion
+        // routes generate; /v1/models and friends must not open a session.
+        if (isCompletionPath(path)) hints.begin(server.pid, server.perTokenNanos())
+    }
 
-    override fun requestFinished() = requests.endClient()
+    override fun requestFinished(path: String) {
+        requests.endClient()
+        if (isCompletionPath(path)) hints.end(server.perTokenNanos())
+    }
+
+    private fun isCompletionPath(path: String): Boolean =
+        path.endsWith("/completions") || path.endsWith("/embeddings")
 
     /**
      * ApiServer refused to bind because the invariant did not hold at bind
@@ -503,6 +522,71 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
             }
             updateNotification()
         }
+    }
+
+    /**
+     * Activity-only performance-profile override. Not an HTTP route: the
+     * operator edited the Performance card. Writes the fields, then restarts a
+     * running child so the new arguments take effect. [reset] returns every
+     * field to the runtime-computed default.
+     */
+    fun uiApplyPerf(
+        threads: Int? = null,
+        cpuRange: String? = null,
+        prio: Int? = null,
+        prioBatch: Int? = null,
+        reset: Boolean = false,
+    ): String? {
+        synchronized(settings.configLock) {
+            if (reset) {
+                settings.clearPerfOverrides()
+            } else {
+                // Only fields that differ from the runtime default become
+                // overrides. Pressing Apply on an untouched field must not
+                // silently disable auto-tuning for it.
+                val detection = PerfProfile.detect()
+                val autoThreads = detection.best?.size ?: minOf(4, detection.allowed.size)
+                val autoRange = detection.best?.range.orEmpty()
+                threads?.let {
+                    if (it < 1 || it > 16) return "threads must be 1..16"
+                    if (it != autoThreads) settings.setThreadsOverride(it)
+                    else settings.clearThreadsOverride()
+                }
+                cpuRange?.let {
+                    val value = it.trim()
+                    if (!PerfProfile.validCpuRange(value)) {
+                        return "cpu range must look like 4-5"
+                    }
+                    if (PerfProfile.parseCpuList(value).any { cpu -> cpu !in detection.allowed }) {
+                        return "cpu range $value is outside the allowed set"
+                    }
+                    if (value != autoRange) settings.setCpuRangeOverride(value)
+                    else settings.clearCpuRangeOverride()
+                }
+                if (prio != null || prioBatch != null) {
+                    val current = settings.perfPlan()
+                    val p = (prio ?: current.prio).coerceIn(0, 3)
+                    val b = (prioBatch ?: current.prioBatch).coerceIn(0, 3)
+                    if (p != PerfPlan.DEFAULT_PRIO || b != PerfPlan.DEFAULT_PRIO_BATCH) {
+                        settings.setPrioOverride(p, b)
+                    } else {
+                        settings.clearPrioOverride()
+                    }
+                }
+            }
+        }
+        thread(name = "phonon-perf-apply", isDaemon = true) {
+            synchronized(settings.configLock) {
+                configHashAtLaunch = currentConfigHash()
+                if (server.isDesired && !server.thermalPaused) server.restart()
+            }
+            updateNotification()
+        }
+        return null
+    }
+
+    fun uiSetAnimateAvatar(on: Boolean) {
+        settings.animateAvatarWhileGenerating = on
     }
 
     // --- internals --------------------------------------------------------
@@ -594,18 +678,25 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
         }
     }
 
-    private fun currentConfigHash(): String = listOf(
-        settings.modelPath,
-        settings.contextSize,
-        settings.threads,
-        settings.bindAddress,
-        settings.port,
-        settings.backendPort,
-        settings.reasoning,
-        settings.alias,
-        settings.apiKey,
-        settings.loadMode,
-    ).joinToString("|")
+    private fun currentConfigHash(): String {
+        val plan = settings.perfPlan()
+        return listOf(
+            settings.modelPath,
+            settings.contextSize,
+            plan.threads,
+            plan.cpuRange,
+            plan.prio,
+            plan.prioBatch,
+            plan.mode,
+            settings.bindAddress,
+            settings.port,
+            settings.backendPort,
+            settings.reasoning,
+            settings.alias,
+            settings.apiKey,
+            settings.loadMode,
+        ).joinToString("|")
+    }
 
     private fun onBatteryTemp(temp: Float) {
         if (destroyed) return
