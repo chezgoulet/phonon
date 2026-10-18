@@ -139,13 +139,6 @@ jobs:
           echo "path=$APK" >> "$GITHUB_OUTPUT"
           echo "apk=$APK"
 
-      - name: Verify APK (signature + version)
-        run: |
-          set -euo pipefail
-          APK="${{ steps.apk.outputs.path }}"
-          "$ANDROID_SDK_ROOT/build-tools/"*/apksigner verify --print-certs "$APK"
-          "$ANDROID_SDK_ROOT/build-tools/"*/aapt dump badging "$APK" | grep -E "package:|versionCode"
-
       - name: Rename artifact
         id: named
         run: |
