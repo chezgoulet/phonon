@@ -1,0 +1,9 @@
+Fixes the memory check added in 0.1.10, which refused a configuration that actually
+works: a 2B model at 32K on the reference phone with 3.2 GB free. The weights are
+memory-mapped and reclaimable, so the check now compares the KV cache, the
+working margin and the dirty share of the weights against available memory,
+instead of the whole model file. Anything that genuinely will not fit is still
+refused, with the same explanation.
+
+Also confirms the Android 10 build: a clean native build at API 29 links, and the
+earlier failure was a stale incremental build tree, not the platform.
