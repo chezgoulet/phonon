@@ -8,8 +8,8 @@
 # ASSUMPTIONS / GAPS this workflow depends on (see GAPS.md):
 #   * the Gradle wrapper lives in app/ (app/gradlew, with its jar committed)
 #   * GraphQL-free: uses the default GITHUB_TOKEN
-#   * the secrets below exist: KEYSTORE_BASE64, KEYSTORE_PASSWORD,
-#     KEY_ALIAS, KEY_PASSWORD
+#   * the secrets below exist: PHONON_KEYSTORE_BASE64,
+#     PHONON_KEYSTORE_PASSWORD, PHONON_KEY_ALIAS, PHONON_KEY_PASSWORD
 #   * llama.cpp is a pinned submodule (third_party/llama.cpp) built by app/build-native.sh
 
 name: release
@@ -103,7 +103,7 @@ jobs:
 
       - name: Decode keystore
         env:
-          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_BASE64: ${{ secrets.PHONON_KEYSTORE_BASE64 }}
         run: |
           set -euo pipefail
           test -n "$KEYSTORE_BASE64" || { echo "::error::KEYSTORE_BASE64 secret is not set"; exit 1; }
@@ -112,9 +112,9 @@ jobs:
       - name: Build signed release APK
         env:
           PHONON_KEYSTORE: ${{ runner.temp }}/release.keystore
-          PHONON_KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-          PHONON_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-          PHONON_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          PHONON_KEYSTORE_PASSWORD: ${{ secrets.PHONON_KEYSTORE_PASSWORD }}
+          PHONON_KEY_ALIAS: ${{ secrets.PHONON_KEY_ALIAS }}
+          PHONON_KEY_PASSWORD: ${{ secrets.PHONON_KEY_PASSWORD }}
         run: |
           set -euo pipefail
           # The build.gradle.kts release signing block reads these env vars so
