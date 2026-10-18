@@ -65,8 +65,10 @@ notes: >-
 
   Provenance note: docs/performance.md describes its row-by-row model and
   server line as "app 0.4.0 (debug)", while the section carrying these numbers
-  is titled "Current numbers (0.1.7)". One of those two is wrong and the
-  contradiction is in the document, not here. The section title is used above
-  because it is the one attached to the numbers themselves. It should be
-  settled in docs/performance.md before any generator quotes an app version
-  from that file.
+  is titled "Current numbers (0.1.7)". docs/RELEASE.md records that 0.4.x was a
+  pre-reset build that was never published and that public versioning restarted
+  at 0.1.0, so the version strings in docs/performance.md were written before
+  the reset and only the section title was carried forward. The section title is
+  used above because it is the one attached to the numbers. The page should be
+  reconciled with the post-reset scheme before a generator quotes an app version
+  out of it.

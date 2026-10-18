@@ -66,20 +66,66 @@ Everything below is ready; the tag is the only step that publishes.
 
 1. Confirm `versionCode` in `app/app/build.gradle.kts` is greater than the
    highest tagged one. CI refuses the build otherwise.
-2. Confirm the repository secrets exist: `KEYSTORE_BASE64`,
-   `KEYSTORE_PASSWORD`, `KEY_ALIAS`, `KEY_PASSWORD`. CI fails loudly if the
-   keystore is missing, and verifies the signature before attaching the APK.
+2. Confirm the repository secrets exist (names are the workflow's, and they are
+   prefixed): `PHONON_KEYSTORE_BASE64`, `PHONON_KEYSTORE_PASSWORD`,
+   `PHONON_KEY_ALIAS`, `PHONON_KEY_PASSWORD`. CI fails loudly if the keystore is
+   missing, and verifies the signature before attaching the APK.
 3. Tag the commit on `main`:
 
        git tag -a v0.1.0 -m "Phonon 0.1.0"
        git push origin v0.1.0
 
 4. The workflow builds llama.cpp from the pinned submodule, runs Gradle, checks
-   the tag against `versionName`, signs and attaches the APK to a draft release.
+   the tag against `versionName`, signs and attaches the APK to a draft release,
+   and writes a `SHA256SUMS` file covering that APK onto the same release.
 5. Verify before publishing: `apksigner verify --print-certs` on the attached
-   APK, then install it on a clean device and confirm `/health` reports `ready`
-   and a completion returns content.
+   APK, `sha256sum -c SHA256SUMS` against the downloaded APK, then install it on
+   a clean device and confirm `/health` reports `ready` and a completion returns
+   content.
 6. Paste these notes into the release and publish.
+7. Publishing sends a `repository_dispatch` to `chezgoulet/phononai.org` so the
+   site regenerates against this tag. Nothing to do by hand — unless the step
+   warns that the token is missing, in which case see below.
+
+## Repository secrets
+
+Five secrets, and only the first four are required.
+
+| Secret | Needed for | If absent |
+|---|---|---|
+| `PHONON_KEYSTORE_BASE64` | signing the release APK | the build fails |
+| `PHONON_KEYSTORE_PASSWORD` | unlocking the keystore | the build fails |
+| `PHONON_KEY_ALIAS` | selecting the signing key | the build fails |
+| `PHONON_KEY_PASSWORD` | unlocking the signing key | the build fails |
+| `SITE_DISPATCH_TOKEN` | telling phononai.org to rebuild | the release still publishes; the step warns |
+
+### SITE_DISPATCH_TOKEN
+
+The last workflow step POSTs a `repository_dispatch` to the site repository with
+`{"event_type": "app-release", "client_payload": {"tag": "<tag>"}}`. The site
+workflow then checks out this repository at `<tag>` and generates the page from
+it. `GITHUB_TOKEN` cannot do this: it belongs to the repository the workflow runs
+in and has no rights on another one.
+
+Create a **fine-grained personal access token** for the site repository only:
+
+- Resource owner: `chezgoulet`.
+- Repository access: **only** `chezgoulet/phononai.org`.
+- Permissions: **Contents: Read and write**. Nothing else — the dispatch endpoint
+  is the only thing it is used for, and this is why it is fine-grained rather
+  than a classic token: a classic token scoped to one repo still carries every
+  scope the account has.
+- Expiry: set one. When it lapses, the release step starts warning and the site
+  falls back to its daily schedule — a quiet degradation, which is why the
+  warning is in the step rather than silence.
+
+Store it as the secret `SITE_DISPATCH_TOKEN` on `chezgoulet/phonon`.
+
+**Both failure modes are warnings, on purpose.** An absent token, or a dispatch
+the site refuses, leaves the release published and exits zero. The release has
+already shipped at that point; failing the workflow afterwards would mark a good
+release broken, and the site has a scheduled rebuild as a backstop. The warning
+in the run summary is the signal to look.
 
 **Testers carrying a pre-reset build (0.4.x, never published) must uninstall
 it first.** The public scheme restarts at `versionCode = 1`, so the old build is a "downgrade" to Android and
