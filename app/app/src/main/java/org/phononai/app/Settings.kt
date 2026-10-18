@@ -244,9 +244,14 @@ class Settings(context: Context) {
     val exposedOffHost: Boolean
         get() = !isLoopbackBind(bindAddress)
 
-    /** llama-server binds [bindAddress]; 0.0.0.0 and loopback are reached via 127.0.0.1. */
-    fun backendHost(): String =
-        if (bindAddress == BIND_ANY || isLoopbackBind(bindAddress)) "127.0.0.1" else bindAddress
+    /**
+     * The backend always listens on loopback (see ServerManager: argv is
+     * `--host 127.0.0.1`, because the authenticated proxy is the only LAN
+     * listener). [bindAddress] is the *app's* listener, not the engine's, so
+     * this must not follow it: doing so sent the proxy to an address where
+     * llama-server is not bound.
+     */
+    fun backendHost(): String = "127.0.0.1"
 
     /** Port the app's own API listens on (health, /v1 proxy, control routes). */
     var port: Int

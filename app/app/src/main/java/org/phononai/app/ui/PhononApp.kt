@@ -998,6 +998,14 @@ private fun accentFor(kind: AvatarKind): Color = when (kind) {
 // Models
 // ---------------------------------------------------------------------------
 
+/** A non-null `error` field; the JSON always has the key. */
+private fun jsonHasError(json: String): Boolean = try {
+    val obj = JSONObject(json)
+    obj.has("error") && !obj.isNull("error")
+} catch (t: Throwable) {
+    true
+}
+
 @Composable
 private fun ModelsScreen(
     context: Context,
@@ -1168,7 +1176,7 @@ private fun ModelsScreen(
                         service == null -> toast(context, "Service is starting")
                         else -> {
                             val result = service.startDownload(url)
-                            if (result.contains("\"error\"")) {
+                            if (jsonHasError(result)) {
                                 toast(context, JSONObject(result).optString("error", "Download failed"))
                             } else {
                                 toast(context, "Download started")
@@ -1241,7 +1249,7 @@ private fun CatalogEntryCard(
             return
         }
         val result = service.uiDownloadModel(entry.id)
-        if (result.contains("\"error\"")) {
+        if (jsonHasError(result)) {
             toast(context, JSONObject(result).optString("error", "Download failed"))
         } else {
             toast(context, "Downloading ${entry.fileName}")
@@ -1468,7 +1476,7 @@ private fun InstalledModelCard(context: Context, model: InstalledModel, onChange
                         } else {
                             val body = JSONObject().put("model_path", model.file.absolutePath)
                             val result = service.updateSettings(body.toString())
-                            if (result.contains("\"error\"")) {
+                            if (jsonHasError(result)) {
                                 toast(context, JSONObject(result).optString("error", "Could not switch model"))
                             } else {
                                 toast(context, "Active model: ${model.name}")
@@ -1810,7 +1818,7 @@ private fun SettingsScreen(
             put("auto_start", draft.autoStart)
         }
         val result = service.updateSettings(body.toString())
-        if (result.contains("\"error\"")) {
+        if (jsonHasError(result)) {
             return try {
                 JSONObject(result).optString("error", result)
             } catch (_: Throwable) {
@@ -2036,7 +2044,7 @@ private fun SettingsScreen(
                     } else {
                         val newKey = generateApiKey()
                         val result = service.updateSettings(JSONObject().put("api_key", newKey).toString())
-                        if (result.contains("\"error\"")) {
+                        if (jsonHasError(result)) {
                             toast(context, JSONObject(result).optString("error", "Could not rotate key"))
                         } else {
                             keySet = true
@@ -2635,7 +2643,7 @@ private fun SetupScreen(
                                     toast(context, "Service is starting")
                                 } else {
                                     val result = service.uiDownloadModel(entry.id)
-                                    if (result.contains("\"error\"")) {
+                                    if (jsonHasError(result)) {
                                         toast(context, JSONObject(result).optString("error", "Download failed"))
                                     } else {
                                         toast(context, "Downloading ${entry.fileName}")
@@ -2763,7 +2771,7 @@ private fun SetupScreen(
                                 if (lan) put("api_key", generatedKey)
                             }
                             val result = service.updateSettings(body.toString())
-                            if (result.contains("\"error\"")) {
+                            if (jsonHasError(result)) {
                                 toast(context, JSONObject(result).optString("error", "Could not save setup"))
                             } else {
                                 sendServiceAction(context, PhononService.ACTION_START_SERVER)

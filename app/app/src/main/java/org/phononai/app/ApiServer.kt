@@ -289,13 +289,13 @@ class ApiServer(
                     return
                 }
                 val result = api.startDownload(url)
-                val status = if (result.contains("\"error\"")) 409 else 202
+                val status = if (hasError(result)) 409 else 202
                 respond(out, status, "application/json; charset=utf-8", result.toByteArray())
             }
 
             req.method == "POST" && req.path == "/server/start" -> {
                 val result = api.startServer()
-                val status = if (result.contains("\"error\"")) 409 else 202
+                val status = if (hasError(result)) 409 else 202
                 respond(out, status, "application/json; charset=utf-8", result.toByteArray())
             }
 
@@ -310,7 +310,7 @@ class ApiServer(
 
             req.method == "POST" && req.path == "/settings" -> {
                 val result = api.updateSettings(req.body.toString(Charsets.UTF_8))
-                val status = if (result.contains("\"error\"")) 400 else 200
+                val status = if (hasError(result)) 400 else 200
                 respond(out, status, "application/json; charset=utf-8", result.toByteArray())
             }
 
@@ -393,6 +393,14 @@ class ApiServer(
                 put("error", "${t.javaClass.simpleName}: ${t.message}")
             }.toString()
         }
+    }
+
+    /** The JSON always carries an `error` key; only a non-null value is a failure. */
+    private fun hasError(json: String): Boolean = try {
+        val obj = JSONObject(json)
+        obj.has("error") && !obj.isNull("error")
+    } catch (t: Throwable) {
+        true
     }
 
     private fun proxy(req: Request, out: OutputStream) {
