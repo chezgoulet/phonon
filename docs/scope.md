@@ -49,7 +49,7 @@ fixed.
 |---|---|---|---|---|
 | ≤ 9 GB (8 GB class; Pixel 7 reports 7.83 GB) | Qwen3.5-2B Q4_K_M | 32768 | 4 | **Measured** 2026-10-17, Pixel 7 |
 | 9–13 GB (12 GB class) | Qwen3.5-4B Q4_K_M | 32768 | 6 | **Unmeasured** |
-| ≥ 13 GB (16 GB class) | Qwen3.5-8B Q4_K_M | 49152 | 8 | **Unmeasured** |
+| ≥ 13 GB (16 GB class) | Qwen3.5-9B Q4_K_M | 49152 | 8 | **Unmeasured** |
 
 The 8 GB tier deliberately uses 2B, not 4B. On the Pixel 7, 4B measured roughly
 **2–3 tok/s and sat at the memory limit**, while 2B measured **4–6 tok/s at 32K**

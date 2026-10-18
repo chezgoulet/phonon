@@ -31,6 +31,22 @@ class Settings(context: Context) {
     fun defaultModelPath(): String =
         File(File(filesDir, "models"), hardware.tier.modelFile).absolutePath
 
+    /** The catalog entry for the currently selected file, if it is one we know. */
+    fun catalogEntryForCurrentModel(): ModelEntry? =
+        ModelCatalog.byFileName(File(modelPath).name)
+
+    /**
+     * Point settings at a catalog entry: file, default context and alias move
+     * together, so switching family cannot leave a Qwen alias on a Gemma
+     * server. Marks the choice as the operator's; auto-config must not undo it.
+     */
+    fun selectModel(entry: ModelEntry) {
+        modelPath = File(File(filesDir, "models"), entry.fileName).absolutePath
+        contextSize = entry.contextSize
+        alias = entry.id
+        modelChosenByUser = true
+    }
+
     var modelPath: String
         get() = prefs.getString(KEY_MODEL_PATH, null) ?: defaultModelPath()
         set(value) = prefs.edit().putString(KEY_MODEL_PATH, value).apply()
@@ -62,6 +78,12 @@ class Settings(context: Context) {
     var tunedByUser: Boolean
         get() = prefs.getBoolean(KEY_TUNED_BY_USER, false)
         set(value) = prefs.edit().putBoolean(KEY_TUNED_BY_USER, value).apply()
+
+    /** Set by the Models picker or the Setup choice. Auto-configuration never
+     * replaces the model, context or alias after this is set. */
+    var modelChosenByUser: Boolean
+        get() = prefs.getBoolean(KEY_MODEL_CHOSEN, false)
+        set(value) = prefs.edit().putBoolean(KEY_MODEL_CHOSEN, value).apply()
 
     // --- performance profile overrides -----------------------------------
 
@@ -290,7 +312,7 @@ class Settings(context: Context) {
      */
     fun applyAutoConfigIfNeeded() {
         if (prefs.getBoolean(KEY_AUTO_CONFIG_DONE, false)) return
-        if (!tunedByUser) {
+        if (!tunedByUser && !modelChosenByUser) {
             val tier = hardware.tier
             modelPath = File(File(filesDir, "models"), tier.modelFile).absolutePath
             contextSize = tier.contextSize
@@ -341,7 +363,7 @@ class Settings(context: Context) {
     }.toString()
 
     companion object {
-        const val DEFAULT_MODEL_NAME = "gemma-4-E2B-it-Q4_0.gguf"
+        const val DEFAULT_MODEL_NAME = "Qwen3.5-2B-Q4_K_M.gguf"
 
         /**
          * No model host is bundled: a development loopback URL read as a broken
@@ -351,7 +373,7 @@ class Settings(context: Context) {
 
         /** Only value written by builds before the default was removed. */
         private const val LEGACY_DEV_MODEL_URL = "http://127.0.0.1:9000/gemma-4-E2B-it-Q4_0.gguf"
-        const val DEFAULT_ALIAS = "gemma-4-e2b"
+        const val DEFAULT_ALIAS = ModelCatalog.DEFAULT_ID
         const val DEFAULT_BIND_ADDRESS = "127.0.0.1"
         const val BIND_ANY = "0.0.0.0"
         const val LOAD_MODE_MMAP = "mmap"
@@ -423,6 +445,7 @@ class Settings(context: Context) {
         private const val KEY_KEEP_WARM_INTERVAL = "keep_warm_interval_s"
         private const val KEY_LOAD_MODE = "load_mode"
         private const val KEY_TUNED_BY_USER = "tuned_by_user"
+        private const val KEY_MODEL_CHOSEN = "model_chosen_by_user"
         private const val KEY_AUTO_CONFIG_DONE = "auto_config_done"
         private const val KEY_BENCHMARK_HISTORY = "benchmark_history"
         private const val KEY_PERF_THREADS_SET = "perf_threads_set"

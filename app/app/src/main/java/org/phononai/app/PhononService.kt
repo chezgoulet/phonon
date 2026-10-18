@@ -190,7 +190,20 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
 
     override fun downloadJson(): String = DownloadState.toJson()
 
-    override fun startDownload(url: String?): String {
+    override fun startDownload(url: String?): String = beginDownload(url, null, null)
+
+    /**
+     * Activity-only: download one catalog entry to its declared filename and,
+     * once complete, make it the active model. Not an HTTP route; the existing
+     * `/model/download` contract is unchanged.
+     */
+    fun uiDownloadModel(entryId: String): String {
+        val entry = ModelCatalog.byId(entryId)
+            ?: return JSONObject().put("error", "unknown model: $entryId").toString()
+        return beginDownload(entry.url, entry.fileName, entry.id)
+    }
+
+    private fun beginDownload(url: String?, fileName: String?, entryId: String?): String {
         if (DownloadState.active) {
             return JSONObject().put("error", "download already running").toString()
         }
@@ -198,14 +211,21 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
         if (!chosen.startsWith("http://") && !chosen.startsWith("https://")) {
             return JSONObject().put("error", "invalid url: $chosen").toString()
         }
-        val dest = File(File(filesDir, "models"), modelFileName(chosen))
+        val dest = File(File(filesDir, "models"), fileName ?: modelFileName(chosen))
         DownloadState.begin(chosen, dest.absolutePath)
         thread(name = "phonon-download", isDaemon = true) {
             try {
                 ModelDownloader(this).download(chosen, dest) { done, total ->
                     DownloadState.progress(done, total)
                 }
-                settings.modelPath = dest.absolutePath
+                val entry = entryId?.let { ModelCatalog.byId(it) }
+                if (entry != null) {
+                    // File, context and alias move together for a catalog
+                    // entry; a bare URL download only sets the path.
+                    settings.selectModel(entry)
+                } else {
+                    settings.modelPath = dest.absolutePath
+                }
                 DownloadState.success(dest.absolutePath)
                 Log.i(TAG, "download complete: ${dest.absolutePath} (${dest.length()} bytes)")
                 synchronized(settings.configLock) {
@@ -507,6 +527,30 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
     fun uiLogs(): String = logs()
 
     fun uiDownloadJson(): String = downloadJson()
+
+    /**
+     * Activity-only model switch. Writes file, context and alias as one
+     * choice, then reloads: a changed config hash restarts llama-server with
+     * the new alias. Not an HTTP route, so the API surface is unchanged.
+     * Returns an error message, or null when the switch was accepted.
+     */
+    fun uiSelectModel(entryId: String): String? {
+        val entry = ModelCatalog.byId(entryId) ?: return "unknown model: $entryId"
+        val file = ModelCatalog.path(this, entry)
+        if (!file.isFile) return "not installed: ${entry.fileName}"
+        synchronized(settings.configLock) {
+            settings.selectModel(entry)
+            // Choosing a model means serving it; leave configHashAtLaunch
+            // stale so reloadSettings sees the change and restarts the child.
+            wantServer = true
+        }
+        try {
+            reloadExecutor.execute { reloadSettings() }
+        } catch (_: Throwable) {
+            return "service shutting down"
+        }
+        return null
+    }
 
     /**
      * Activity-only manual override for a thermal pause. Deliberately not an HTTP

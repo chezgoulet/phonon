@@ -43,33 +43,29 @@ data class DeviceProfile(
 object HardwareProfile {
     const val GB = 1_000_000_000L
 
-    /** Highest tier whose lower bound the device does not exceed. */
+    /**
+     * Highest tier whose lower bound the device does not exceed. The model in
+     * each tier is the Qwen entry the catalog recommends for it, so there is
+     * one place to change a default. A family the user picked is never
+     * replaced by these defaults (see Settings.applyAutoConfigIfNeeded).
+     */
     private val TIERS = listOf(
-        RamTier(
-            id = "S",
-            modelFile = "Qwen3.5-2B-Q4_K_M.gguf",
-            modelLabel = "Qwen3.5-2B Q4_K_M",
-            alias = "qwen3.5-2b",
-            contextSize = 32_768,
-            threads = 4,
-        ),
-        RamTier(
-            id = "M",
-            modelFile = "Qwen3.5-4B-Q4_K_M.gguf",
-            modelLabel = "Qwen3.5-4B Q4_K_M",
-            alias = "qwen3.5-4b",
-            contextSize = 32_768,
-            threads = 6,
-        ),
-        RamTier(
-            id = "L",
-            modelFile = "Qwen3.5-8B-Q4_K_M.gguf",
-            modelLabel = "Qwen3.5-8B Q4_K_M",
-            alias = "qwen3.5-8b",
-            contextSize = 49_152,
-            threads = 8,
-        ),
+        tier("S", "qwen3.5-2b", threads = 4),
+        tier("M", "qwen3.5-4b", threads = 6),
+        tier("L", "qwen3.5-9b", threads = 8),
     )
+
+    private fun tier(id: String, modelId: String, threads: Int): RamTier {
+        val entry = requireNotNull(ModelCatalog.byId(modelId)) { "no catalog entry $modelId" }
+        return RamTier(
+            id = id,
+            modelFile = entry.fileName,
+            modelLabel = "${entry.displayName} ${entry.quant}",
+            alias = entry.id,
+            contextSize = entry.contextSize,
+            threads = threads,
+        )
+    }
 
     /** Tier boundary: S below 9 GB, M from 9 GB to under 13 GB, L at 13 GB. */
     fun tierForRam(totalRamBytes: Long): RamTier = when {
