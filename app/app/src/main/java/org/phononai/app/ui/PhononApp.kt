@@ -871,7 +871,7 @@ private fun RecentActivity(health: Health?, accent: Color) {
 }
 
 @Composable
-private fun Avatar(kind: AvatarKind, amp: Float, reduced: Boolean, modifier: Modifier) {
+private fun Avatar(kind: AvatarKind, amp: Float, reduced: Boolean, shape: String, modifier: Modifier) {
     val driver = remember { AvatarDriver() }
     AndroidView(
         modifier = modifier,
