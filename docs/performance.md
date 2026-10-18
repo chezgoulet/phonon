@@ -187,3 +187,33 @@ Screenshots: `design/renders/app-serve-performance.png` (Serve mode line and
 (Performance card in visible mode) and
 `design/renders/app-settings-performance-background.png` (the same card for a
 child launched in background, including the "Apply or restart" warning).
+
+## Repacking: the real lever (2026-10-18)
+
+Decode on this phone is bandwidth-bound, so the optimization that matters is the
+one that changes how weights are read, not how many cores read them. llama.cpp's
+ARM **online repacking** rearranges quantized weights in memory for friendlier
+access patterns and explicitly aims at effective bandwidth.
+
+The earlier build (llama.cpp `c0fd786`) compiled with `GGML_CPU_REPACK=ON` but
+contained repack kernels only for **Q4_0** and **Q1_0**. Qwen3.5-2B is Q4_K_M,
+so it went unrepacked. Gemma 4 E2B, which measured 11–12 tok/s earlier, was
+Q4_0 — it was being repacked.
+
+Rebuilding at llama.cpp **`797de63`** with `GGML_CPU_REPACK=ON` includes Q4_K
+repack (87 symbol references in `libggml-cpu.so`). Same phone, 32K context,
+`-t 2 --cpu-range 6-7`, 128 greedy tokens:
+
+| Engine | Model | Decode |
+|---|---|---|
+| `c0fd786` | Qwen3.5-2B Q4_K_M | 5.5–5.9 tok/s |
+| `797de63` (raw server) | Qwen3.5-2B Q4_K_M | **9.20 / 8.84** tok/s |
+| `797de63` (raw server) | Qwen3.5-2B Q4_0 | **9.47** tok/s |
+| `797de63` (through the app) | Qwen3.5-2B Q4_K_M | **8.59 / 8.25** tok/s |
+
+A **~50–60% improvement with no quantization change**, and Q4_0 versus Q4_K_M is
+now within noise — so keep Q4_K_M and its better quality.
+
+Requirement for any future build: `GGML_CPU_REPACK=ON` **and** a llama.cpp
+revision that carries the Q4_K repack kernels. The engineering sample that
+preceded this measured 5.5 tok/s precisely because it lacked them.
