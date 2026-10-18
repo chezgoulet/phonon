@@ -2,10 +2,12 @@ package org.phononai.app.ui
 
 import android.app.Activity
 import android.content.ClipData
+import android.content.ComponentName
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.Intent
+import android.provider.Settings as AndroidSettings
 import android.widget.Toast
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -98,6 +100,7 @@ import org.phononai.app.OemGuidance
 import org.phononai.app.PerfProfile
 import org.phononai.app.PhononService
 import org.phononai.app.Settings
+import org.phononai.app.SocTuning
 import org.phononai.app.ui.avatar.AvatarView
 import org.phononai.app.ui.theme.PhononColors
 import java.io.File
@@ -764,10 +767,44 @@ private fun ThermalCard(
 /** One line describing a stored per-SoC profile from its JSON. */
 private fun tuningSummary(json: String): String = try {
     val o = JSONObject(json)
-    "${o.optInt("decode_threads")}t decode / ${o.optInt("prefill_threads")}t prefill · " +
-        "%.1f tok/s decode".format(o.optDouble("decode_tps"))
+    "%.1f tok/s decode at %dt, %.1f tok/s prefill at -tb %d".format(
+        o.optDouble("decode_tps"),
+        o.optInt("decode_threads"),
+        o.optDouble("prefill_tps"),
+        o.optInt("prefill_threads"),
+    )
 } catch (_: Throwable) {
     json
+}
+
+/**
+ * Open the vendor's own battery/autostart screen when the OEM guidance names
+ * one, and otherwise this app's settings page. A vendor component that is not
+ * installed throws and falls back the same way, so the button always does
+ * something useful.
+ */
+private fun openOemSettings(context: Context, guidance: OemGuidance.Guidance) {
+    OemGuidance.componentOf(guidance.settingsComponent)?.let { (pkg, cls) ->
+        try {
+            context.startActivity(
+                Intent().setComponent(ComponentName(pkg, cls))
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            )
+            return
+        } catch (_: Throwable) {
+            // Unknown or missing component: fall through to our own page.
+        }
+    }
+    try {
+        context.startActivity(
+            Intent(
+                AndroidSettings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                android.net.Uri.parse("package:${context.packageName}"),
+            ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+        )
+    } catch (_: Throwable) {
+        toast(context, "Open Settings → Apps → Phonon")
+    }
 }
 
 /** One line describing the thermal signal actually in use. */
@@ -2113,17 +2150,30 @@ private fun SettingsScreen(
             Text("Tune this phone", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
             Spacer(Modifier.height(6.dp))
             val profile = health?.socTuningProfile.orEmpty()
+            val hasProfile = profile.isNotBlank() && profile != "none"
             Text(
-                if (profile.isBlank() || profile == "none") {
-                    "No measured profile for ${health?.oemVendor?.takeIf { it.isNotBlank() } ?: device.soc}. " +
-                        "The app is using the generic per-cpuset default."
+                if (hasProfile) {
+                    "tuned on this phone: ${tuningSummary(profile)}"
                 } else {
-                    "Measured profile applied: ${tuningSummary(profile)}"
+                    "No measured profile for ${device.soc}. Using the heuristic default: " +
+                        "${health?.perfThreads ?: 0} threads on " +
+                        "${health?.perfCpuRange?.takeIf { it.isNotBlank() } ?: "all allowed"}, " +
+                        "-tb ${health?.perfPrefillThreads ?: 0}."
                 },
                 color = PhononColors.Text,
                 fontSize = 12.sp,
                 lineHeight = 17.sp,
             )
+            health?.socTuningStaleRev?.let { stale ->
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "A profile measured against engine $stale is not applied — this build is " +
+                        "${SocTuning.ENGINE_REV}. Run the sweep again to re-measure it.",
+                    color = PhononColors.Warn,
+                    fontSize = 12.sp,
+                    lineHeight = 17.sp,
+                )
+            }
             if (health?.socTuningRunning == true) {
                 Spacer(Modifier.height(4.dp))
                 Text(
@@ -2134,21 +2184,28 @@ private fun SettingsScreen(
             }
             Spacer(Modifier.height(8.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(
-                    enabled = health?.socTuningRunning != true &&
-                        health?.state == "ready",
-                    onClick = {
-                        val service = AppState.service
-                        if (service == null) {
-                            toast(context, "Service is starting")
-                        } else if (!service.uiTuneThisPhone()) {
-                            toast(context, "Server must be ready and idle to tune")
-                        } else {
-                            toast(context, "Tuning started — about two minutes")
-                        }
-                    },
-                ) {
-                    Text("Run sweep (~2 min)", color = PhononColors.Cyan, fontSize = 13.sp)
+                if (health?.socTuningRunning == true) {
+                    TextButton(
+                        onClick = { AppState.service?.uiCancelSocTuning() },
+                    ) {
+                        Text("Cancel", color = PhononColors.Danger, fontSize = 13.sp)
+                    }
+                } else {
+                    TextButton(
+                        enabled = health?.state == "ready",
+                        onClick = {
+                            val service = AppState.service
+                            if (service == null) {
+                                toast(context, "Service is starting")
+                            } else if (!service.uiTuneThisPhone()) {
+                                toast(context, "Server must be ready and idle to tune")
+                            } else {
+                                toast(context, "Tuning started — about two minutes")
+                            }
+                        },
+                    ) {
+                        Text("Run sweep (~2 min)", color = PhononColors.Cyan, fontSize = 13.sp)
+                    }
                 }
                 TextButton(
                     onClick = {
@@ -2160,8 +2217,9 @@ private fun SettingsScreen(
                 }
             }
             Text(
-                "Tries 3 decode and 2 prefill thread counts on a short agent-shaped prompt, keeps " +
-                    "the fastest of each, and stores it per SoC.",
+                "Tries two decode configs pinned to the fastest cluster and one unpinned, then " +
+                    "two prefill (-tb) values on a long prompt; keeps the fastest of each and " +
+                    "stores it per SoC. It never changes the model.",
                 color = PhononColors.TextDim.copy(alpha = 0.8f),
                 fontSize = 11.sp,
                 lineHeight = 16.sp,
@@ -2182,27 +2240,39 @@ private fun SettingsScreen(
                 lineHeight = 17.sp,
             )
             Spacer(Modifier.height(8.dp))
-            TextButton(onClick = {
-                try {
-                    context.startActivity(
-                        Intent(Intent.ACTION_VIEW, android.net.Uri.parse(oem.dontKillUrl)),
-                    )
-                } catch (_: Throwable) {
-                    toast(context, oem.dontKillUrl)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                // When the vendor exposes a battery/autostart screen we deep-link
+                // into it; otherwise (and if it is not installed) we fall back to
+                // this app's own settings page, which always exists.
+                TextButton(onClick = { openOemSettings(context, oem) }) {
+                    Text("Open battery settings", color = PhononColors.Cyan, fontSize = 13.sp)
                 }
-            }) {
-                Text("Open ${oem.dontKillUrl}", color = PhononColors.Cyan, fontSize = 13.sp)
+                TextButton(onClick = {
+                    try {
+                        context.startActivity(
+                            Intent(Intent.ACTION_VIEW, android.net.Uri.parse(oem.dontKillUrl)),
+                        )
+                    } catch (_: Throwable) {
+                        toast(context, oem.dontKillUrl)
+                    }
+                }) {
+                    Text("dontkillmyapp.com", color = PhononColors.Cyan, fontSize = 13.sp)
+                }
             }
             if (health?.batteryFullWarning == true) {
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    "This phone has been at 100% on the charger for over four hours. Android " +
-                        "usually holds charge around 80% for longevity; if it is not doing so, " +
-                        "unplug when full.",
+                    "This phone has been held at 100% for ${health.batteryFullHours} " +
+                        "hour${if (health.batteryFullHours == 1) "" else "s"}. Android usually " +
+                        "holds charge around 80% for longevity; if it is not doing so, unplug " +
+                        "when full.",
                     color = PhononColors.Warn,
                     fontSize = 12.sp,
                     lineHeight = 17.sp,
                 )
+                TextButton(onClick = { AppState.service?.uiDismissChargeWarning() }) {
+                    Text("Dismiss", color = PhononColors.TextDim, fontSize = 13.sp)
+                }
             }
         }
         Spacer(Modifier.height(12.dp))

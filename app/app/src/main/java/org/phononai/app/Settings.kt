@@ -1,6 +1,7 @@
 package org.phononai.app
 
 import android.content.Context
+import android.os.Build
 import org.json.JSONObject
 import java.io.File
 import java.net.Inet4Address
@@ -168,6 +169,39 @@ class Settings(context: Context) {
         get() = prefs.getString(KEY_SOC_TUNING, "") ?: ""
         set(value) = prefs.edit().putString(KEY_SOC_TUNING, value).apply()
 
+    /** The SoC key used to look up a measured profile (SOC_MODEL, else HARDWARE). */
+    private val socKey: String
+        get() = SocTuning.resolveSoc(
+            sdkInt = Build.VERSION.SDK_INT,
+            socModel = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) Build.SOC_MODEL else null,
+            hardware = Build.HARDWARE,
+        )
+
+    /** The stored profile for this SoC that matches the running engine, or null. */
+    fun storedTuning(): TuningProfile? =
+        SocTuning.lookup(socTuningJson, socKey, SocTuning.ENGINE_REV)
+
+    /** The engine revision of a stored profile that no longer matches, or null. */
+    fun staleTuningEngineRev(): String? =
+        SocTuning.staleEngineRev(socTuningJson, socKey, SocTuning.ENGINE_REV)
+
+    /**
+     * When the battery first read full while charging, persisted so the
+     * four-hour hygiene warning survives a service restart. 0 means not full.
+     */
+    var batteryFullSinceMs: Long
+        get() = prefs.getLong(KEY_BATTERY_FULL_SINCE, 0L)
+        set(value) = prefs.edit().putLong(KEY_BATTERY_FULL_SINCE, value).apply()
+
+    /**
+     * The [batteryFullSinceMs] value the operator dismissed; the warning stays
+     * hidden until the phone drops off full and the timer resets.
+     */
+    var chargeWarningDismissedSinceMs: Long
+        get() = prefs.getLong(KEY_CHARGE_WARNING_DISMISSED, 0L)
+        set(value) = prefs.edit().putLong(KEY_CHARGE_WARNING_DISMISSED, value).apply()
+
+
     /**
      * Off by default: while a request is in flight the avatar drops to a
      * cheaper animation (half the motes, 20 fps) so it does not compete with
@@ -245,6 +279,67 @@ class Settings(context: Context) {
             .apply()
     }
 
+    /** The complete performance-override state, so a sweep can put it back. */
+    data class PerfOverrides(
+        val threadsSet: Boolean,
+        val threads: Int,
+        val rangeSet: Boolean,
+        val range: String,
+        val prefillSet: Boolean,
+        val prefill: Int,
+        val prioSet: Boolean,
+        val prio: Int,
+        val prioBatch: Int,
+    )
+
+    /**
+     * Snapshot the overrides before the tuning sweep writes its own, so the
+     * operator's choices are restored afterwards rather than left as if the
+     * app had overridden them.
+     */
+    fun snapshotPerfOverrides(): PerfOverrides = PerfOverrides(
+        threadsSet = perfThreadsSet,
+        threads = prefs.getInt(KEY_THREADS, hardware.tier.threads),
+        rangeSet = perfCpuRangeSet,
+        range = perfCpuRange,
+        prefillSet = perfPrefillThreadsSet,
+        prefill = perfPrefillThreads,
+        prioSet = perfPrioSet,
+        prio = perfPrio,
+        prioBatch = perfPrioBatch,
+    )
+
+    /** Restore a snapshot from [snapshotPerfOverrides]. */
+    fun restorePerfOverrides(s: PerfOverrides) {
+        prefs.edit().apply {
+            putBoolean(KEY_PERF_THREADS_SET, s.threadsSet)
+            putInt(KEY_THREADS, s.threads)
+            if (s.rangeSet) {
+                putString(KEY_PERF_CPU_RANGE, s.range)
+                putBoolean(KEY_PERF_CPU_RANGE_SET, true)
+            } else {
+                remove(KEY_PERF_CPU_RANGE)
+                putBoolean(KEY_PERF_CPU_RANGE_SET, false)
+            }
+            if (s.prefillSet) {
+                putInt(KEY_PERF_PREFILL, s.prefill)
+                putBoolean(KEY_PERF_PREFILL_SET, true)
+            } else {
+                remove(KEY_PERF_PREFILL)
+                putBoolean(KEY_PERF_PREFILL_SET, false)
+            }
+            if (s.prioSet) {
+                putInt(KEY_PERF_PRIO, s.prio)
+                putInt(KEY_PERF_PRIO_BATCH, s.prioBatch)
+                putBoolean(KEY_PERF_PRIO_SET, true)
+            } else {
+                remove(KEY_PERF_PRIO)
+                remove(KEY_PERF_PRIO_BATCH)
+                putBoolean(KEY_PERF_PRIO_SET, false)
+            }
+        }.apply()
+    }
+
     /**
      * The profile for the current cpuset. Threads, range and priority are
      * auto unless overridden; an override disables only its own field.
@@ -253,19 +348,27 @@ class Settings(context: Context) {
         val detection = PerfProfile.detect()
         val best = detection.best
         val autoRange = best?.range.orEmpty()
-        val range = if (perfCpuRangeSet) perfCpuRange else autoRange
         // The fastest cluster can be a single prime core (Pixel 8/9, most
         // Snapdragons). One thread leaves the machine idle, so floor it at two.
         val autoThreads = (best?.size ?: minOf(4, detection.allowed.size)).coerceAtLeast(2)
-        val threadsValue = if (perfThreadsSet) {
-            prefs.getInt(KEY_THREADS, hardware.tier.threads)
-        } else {
-            autoThreads
-        }
+        // Precedence: an operator override, then a stored per-SoC profile
+        // measured against this engine, then the runtime heuristic. The profile
+        // path never writes an override, so an engine-revision mismatch falls
+        // back to the heuristic on its own and a later rebuild stops applying a
+        // stale number without the operator having to clear anything.
+        val effective = SocTuning.decideEffective(
+            userThreads = if (perfThreadsSet) prefs.getInt(KEY_THREADS, hardware.tier.threads) else null,
+            userCpuRange = if (perfCpuRangeSet) perfCpuRange else null,
+            userPrefillThreads = if (perfPrefillThreadsSet) perfPrefillThreads else null,
+            profile = storedTuning(),
+            autoThreads = autoThreads,
+            autoCpuRange = autoRange,
+        )
+        val range = effective.cpuRange
         val prio = if (perfPrio >= 0) perfPrio else PerfPlan.DEFAULT_PRIO
         val prioBatch =
             if (perfPrioBatch >= 0) perfPrioBatch else PerfPlan.DEFAULT_PRIO_BATCH
-        val prefillThreads = if (perfPrefillThreadsSet) perfPrefillThreads else 0
+        val prefillThreads = effective.prefillThreads
         val cluster = PerfProfile.parseCpuList(range)
             .filter { it in detection.allowed }
         return PerfPlan(
@@ -273,7 +376,7 @@ class Settings(context: Context) {
             mode = if (detection.visible) PerfPlan.MODE_VISIBLE else PerfPlan.MODE_BACKGROUND,
             cluster = cluster,
             cpuRange = range,
-            threads = threadsValue.coerceIn(1, 16),
+            threads = effective.threads.coerceIn(1, 16),
             prio = prio.coerceIn(0, 3),
             prioBatch = prioBatch.coerceIn(0, 3),
             threadsSet = perfThreadsSet,
@@ -582,6 +685,8 @@ class Settings(context: Context) {
         private const val KEY_PERF_PREFILL = "perf_prefill_threads"
         private const val KEY_PERF_PREFILL_SET = "perf_prefill_threads_set"
         private const val KEY_SOC_TUNING = "soc_tuning_profiles"
+        private const val KEY_BATTERY_FULL_SINCE = "battery_full_since_ms"
+        private const val KEY_CHARGE_WARNING_DISMISSED = "charge_warning_dismissed_since_ms"
         private const val KEY_ANIMATE_GENERATING = "animate_avatar_while_generating"
         private const val KEY_PRESENCE_SHAPE = "visual_shape_presence"
         private const val KEY_SERVING_REQUESTED = "serving_requested"

@@ -67,12 +67,12 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
     @Volatile private var thermalSource: ThermalPolicy.Source = ThermalPolicy.Source.BATTERY
     @Volatile private var thermalDetail: String = "unknown"
 
-    /** Wall clock when the battery first read 100% while charging; 0 otherwise. */
-    @Volatile private var fullSinceMs: Long = 0L
-
     /** True while the manual per-SoC tuning sweep is running. */
     @Volatile private var tuningRunning: Boolean = false
     @Volatile private var tuningState: String = "idle"
+
+    /** Set by the Cancel action; checked between sweep steps. */
+    @Volatile private var tuningCancelled: Boolean = false
 
     /** Serialises reloads so two settings changes cannot rebind each other's config. */
     private val reloadExecutor = Executors.newSingleThreadExecutor { r ->
@@ -86,10 +86,10 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
         // Before the supervisor reads model_path/context/threads: first start
         // after install or data clear gets the RAM-tier defaults.
         settings.applyAutoConfigIfNeeded()
-        // A measured per-SoC profile, when one exists, replaces the generic
-        // per-cpuset default. Absent on a fresh install (the sweep is manual).
+        // The per-SoC store is constructed so /health and the Settings card can
+        // read it. Nothing is applied here: perfPlan() consults the stored
+        // profile directly, so a fresh install (no profile) is unchanged.
         socTuning = SocTuning(settings)
-        socTuning.applyIfPresent()
         createNotificationChannel()
         acquireWakeLock()
 
@@ -227,20 +227,32 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
         json.put("thermal_headroom", thermal.headroom?.toDouble() ?: JSONObject.NULL)
         if (::socTuning.isInitialized) {
             json.put("soc_tuning_profile", socTuning.activeProfileJson())
+            // A stored profile measured against a different engine is not
+            // applied; say which revision it was, so the UI can ask for a re-run.
+            val stale = socTuning.staleEngineRev()
+            if (stale != null) json.put("soc_tuning_stale_rev", stale)
         }
         json.put("soc_tuning_running", tuningRunning)
         json.put("soc_tuning_state", tuningState)
         // Charging hygiene: the platform owns charge limiting, so all the app can
         // do is notice and say so. Four hours at 100% is the brief's threshold.
+        // The timestamp is persisted, so a service restart does not reset the
+        // clock on a phone left plugged in.
         val fullBattery = batterySnapshot ?: BatteryHealth.snapshot(this)
         val oem = OemGuidance.forDevice()
         json.put("oem_vendor", oem.vendor)
         json.put("oem_dont_kill_url", oem.dontKillUrl)
+        val fullSince = settings.batteryFullSinceMs
+        val nowMs = System.currentTimeMillis()
+        val heldFull = OemGuidance.fullHours(fullSince, nowMs)
+        val dismissed = fullSince > 0 && settings.chargeWarningDismissedSinceMs == fullSince
         json.put(
             "battery_full_warning",
-            OemGuidance.sittingFull(fullBattery, fullSinceMs, System.currentTimeMillis()),
+            OemGuidance.sittingFull(fullBattery, fullSince, nowMs) && !dismissed,
         )
-        if (fullSinceMs > 0) json.put("battery_full_since_ms", fullSinceMs)
+        json.put("battery_full_hours", heldFull ?: 0)
+        json.put("battery_full_dismissed", dismissed)
+        if (fullSince > 0) json.put("battery_full_since_ms", fullSince)
         // A reload between commit and backend restart must not look `ready`
         // just because the previous process is still up.
         if (isRestarting() && json.optString("state") == ServerState.READY.wire) {
@@ -821,9 +833,11 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
      * Run the per-SoC sweep. Not automatic: it restarts the server once per
      * configuration and takes a couple of minutes, so it only runs when the
      * operator asks. Returns false when a sweep is already running or the server
-     * is not ready.
+     * is not ready. It never touches the selected model: only threads, the CPU
+     * pin and `-tb` are varied.
      *
-     * NOTE: implemented but not yet exercised on a device; see the branch report.
+     * NOTE: implemented and unit-tested at the logic level; the end-to-end run
+     * still needs a device. See the branch report for the exact steps.
      */
     fun uiTuneThisPhone(): Boolean {
         if (!::socTuning.isInitialized) return false
@@ -831,6 +845,7 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
         synchronized(tuningGuard) {
             if (tuningRunning) return false
             tuningRunning = true
+            tuningCancelled = false
         }
         thread(name = "phonon-tune", isDaemon = true) {
             try {
@@ -845,52 +860,92 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
         return true
     }
 
+    /** Ask the running sweep to stop after the current step. */
+    fun uiCancelSocTuning() {
+        tuningCancelled = true
+        tuningState = "cancelling…"
+    }
+
+    /** Hide the charge-hygiene line until the phone drops off full. */
+    fun uiDismissChargeWarning() {
+        settings.chargeWarningDismissedSinceMs = settings.batteryFullSinceMs
+    }
+
     private val tuningGuard = Any()
 
     private fun runTuningSweep() {
+        val detection = PerfProfile.detect()
+        val fast = detection.best
+        val fastRange = fast?.range.orEmpty()
+        val decodeConfigs = SocTuning.decodeConfigs(fastRange)
+        val prefillValues = SocTuning.prefillConfigs(fast?.size ?: 0)
+        // The operator's own overrides are restored when the sweep ends, so the
+        // sweep's temporary values never masquerade as their chosen settings.
+        val saved = settings.snapshotPerfOverrides()
         val decode = mutableListOf<Pair<Int, Double>>()
-        for (threads in SocTuning.DECODE_THREADS) {
-            tuningState = "decode: $threads threads (${decode.size + 1}/${SocTuning.DECODE_THREADS.size})"
-            settings.setThreadsOverride(threads)
-            server.restart()
-            if (!awaitReady()) continue
-            val run = measureOnce() ?: continue
-            decode.add(threads to run.optDouble("decode_tps", 0.0))
-        }
         val prefill = mutableListOf<Pair<Int, Double>>()
-        for (tb in SocTuning.PREFILL_THREADS) {
-            tuningState = "prefill: $tb threads (${prefill.size + 1}/${SocTuning.PREFILL_THREADS.size})"
-            settings.setPrefillThreadsOverride(tb)
-            server.restart()
-            if (!awaitReady()) continue
-            val run = measureOnce() ?: continue
-            prefill.add(tb to run.optDouble("prefill_tps", 0.0))
+        var bestRange = fastRange
+        try {
+            decodeConfigs.forEachIndexed { i, cfg ->
+                if (tuningCancelled) return
+                tuningState = "decode ${i + 1}/${decodeConfigs.size}: ${cfg.label}"
+                applySweepConfig(cfg.threads, cfg.cpuRange)
+                server.restart()
+                if (!awaitReady() || tuningCancelled) return@forEachIndexed
+                val run = measureOnce(SocTuning.DECODE_PROMPT, SocTuning.DECODE_TOKENS)
+                    ?: return@forEachIndexed
+                decode.add(cfg.threads to run.optDouble("decode_tps", 0.0))
+                if (decode.maxByOrNull { it.second }?.first == cfg.threads) bestRange = cfg.cpuRange
+            }
+            prefillValues.forEachIndexed { i, tb ->
+                if (tuningCancelled) return
+                tuningState = "prefill ${i + 1}/${prefillValues.size}: -tb $tb"
+                settings.setPrefillThreadsOverride(tb)
+                server.restart()
+                if (!awaitReady() || tuningCancelled) return@forEachIndexed
+                val run = measureOnce(SocTuning.PREFILL_PROMPT, SocTuning.PREFILL_TOKENS)
+                    ?: return@forEachIndexed
+                prefill.add(tb to run.optDouble("prefill_tps", 0.0))
+            }
+            val profile = SocTuning.best(
+                soc = socTuning.soc,
+                decodeCpuRange = bestRange,
+                contextSize = settings.contextSize,
+                keepWarmIntervalS = settings.keepWarmIntervalS,
+                decode = decode,
+                prefill = prefill,
+                engineRev = SocTuning.ENGINE_REV,
+            )
+            if (profile == null) {
+                tuningState = "failed: no usable measurement"
+                return
+            }
+            socTuning.save(profile)
+            tuningState = "done: %.1f tok/s decode at %dt, %.1f tok/s prefill at -tb %d"
+                .format(
+                    profile.decodeTps, profile.decodeThreads,
+                    profile.prefillTps, profile.prefillThreads,
+                )
+            Log.i(TAG, "tuning profile saved: $tuningState")
+        } finally {
+            settings.restorePerfOverrides(saved)
+            if (tuningCancelled) tuningState = "cancelled"
+            // Relaunch once so the final state — the saved profile, or the
+            // restored operator overrides — is what the running child gets.
+            if (!destroyed) server.restart()
         }
-        // Only the winning decode config is a decode measurement; the prefill
-        // sweep ran under the last decode settings, so keep the decode whose
-        // number came from the same run shape.
-        val plan = settings.perfPlan()
-        val profile = SocTuning.best(
-            soc = socTuning.soc,
-            cpuRange = plan.cpuRange,
-            context = settings.contextSize,
-            keepWarmIntervalS = settings.keepWarmIntervalS,
-            decode = decode,
-            prefill = prefill,
-        )
-        if (profile == null) {
-            tuningState = "failed: no usable measurement"
-            return
-        }
-        socTuning.save(profile)
-        socTuning.applyIfPresent()
-        tuningState = "done: ${profile.decodeThreads}t decode / ${profile.prefillThreads}t prefill"
-        Log.i(TAG, "tuning profile saved: $tuningState")
+    }
+
+    /** Point a sweep step at [threads] and [cpuRange] (empty = unpinned). */
+    private fun applySweepConfig(threads: Int, cpuRange: String) {
+        settings.setThreadsOverride(threads)
+        if (PerfProfile.validCpuRange(cpuRange)) settings.setCpuRangeOverride(cpuRange)
+        else settings.clearCpuRangeOverride()
     }
 
     private fun awaitReady(timeoutMs: Long = TUNING_READY_TIMEOUT_MS): Boolean {
         val deadline = System.currentTimeMillis() + timeoutMs
-        while (System.currentTimeMillis() < deadline && !destroyed) {
+        while (System.currentTimeMillis() < deadline && !destroyed && !tuningCancelled) {
             when (server.state) {
                 ServerState.READY -> return true
                 ServerState.ERROR, ServerState.THERMAL_PAUSE -> return false
@@ -904,18 +959,28 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
         return false
     }
 
-    /** One 128-token benchmarking run through the app's own /v1. */
-    private fun measureOnce(): JSONObject? {
-        benchmark.start()
+    /**
+     * One benchmarking run through the app's own /v1, with the prompt the step
+     * needs: a short agent-shaped prompt for decode, a long one for prefill.
+     * Returns the fresh result, or null when the run failed or was cancelled.
+     */
+    private fun measureOnce(prompt: String, maxTokens: Int): JSONObject? {
+        val before = settings.benchmarkHistory.firstOrNull()?.optString("timestamp")
+        benchmark.start(prompt, maxTokens)
         val deadline = System.currentTimeMillis() + TUNING_MEASURE_TIMEOUT_MS
-        while (benchmark.running && System.currentTimeMillis() < deadline && !destroyed) {
+        while (benchmark.running && System.currentTimeMillis() < deadline &&
+            !destroyed && !tuningCancelled
+        ) {
             try {
                 Thread.sleep(250)
             } catch (_: InterruptedException) {
                 return null
             }
         }
-        return settings.benchmarkHistory.firstOrNull()
+        val latest = settings.benchmarkHistory.firstOrNull() ?: return null
+        // Guard against returning a stale entry when this run produced nothing.
+        if (latest.optString("timestamp") == before) return null
+        return latest
     }
 
     // --- internals --------------------------------------------------------
@@ -1070,11 +1135,16 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
         val battery = BatteryHealth.snapshot(this)
         batterySnapshot = battery
         // Track how long the phone has sat at 100% on the charger, for the
-        // charge-hygiene warning. Reset as soon as it drops off full.
+        // charge-hygiene warning. Persisted, so a service restart on a phone
+        // left plugged in does not quietly restart the clock; reset the instant
+        // it drops off full, and clear the operator's dismissal with it.
         if (battery.charging && battery.levelPct == 100) {
-            if (fullSinceMs == 0L) fullSinceMs = System.currentTimeMillis()
-        } else {
-            fullSinceMs = 0L
+            if (settings.batteryFullSinceMs == 0L) {
+                settings.batteryFullSinceMs = System.currentTimeMillis()
+            }
+        } else if (settings.batteryFullSinceMs != 0L) {
+            settings.batteryFullSinceMs = 0L
+            settings.chargeWarningDismissedSinceMs = 0L
         }
         val pauseBelow = settings.batteryPauseBelow
         if (battery.known && !battery.charging && pauseBelow > 0 &&

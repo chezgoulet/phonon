@@ -33,7 +33,7 @@ class BenchmarkRunner(
     @Volatile private var lastLoadAtMs = 0L
 
     /** Start on a background thread; returns immediately. */
-    fun start(): Boolean {
+    fun start(prompt: String = PROMPT, maxTokens: Int = MAX_TOKENS): Boolean {
         synchronized(this) {
             if (running) return false
             running = true
@@ -42,7 +42,7 @@ class BenchmarkRunner(
         }
         thread(name = "phonon-benchmark", isDaemon = true) {
             try {
-                runOnce()
+                runOnce(prompt, maxTokens)
             } catch (t: Throwable) {
                 if (!cancelled) {
                     lastError = "${t.javaClass.simpleName}: ${t.message}"
@@ -77,7 +77,7 @@ class BenchmarkRunner(
         }.toString()
     }
 
-    private fun runOnce() {
+    private fun runOnce(prompt: String, maxTokens: Int) {
         val pid = server.pid
         if (server.state != ServerState.READY || pid <= 0) {
             lastError = "server is not ready"
@@ -127,9 +127,9 @@ class BenchmarkRunner(
                 put("model", settings.alias)
                 put("messages", org.json.JSONArray().put(JSONObject().apply {
                     put("role", "user")
-                    put("content", PROMPT)
+                    put("content", prompt)
                 }))
-                put("max_tokens", MAX_TOKENS)
+                put("max_tokens", maxTokens)
                 put("temperature", 0)
                 put("stream", true)
                 put("stream_options", JSONObject().put("include_usage", true))
