@@ -1,0 +1,33 @@
+# Runs the desktop-JVM regression tests for the app's HTTP proxy
+# (tools/proxy-harness). No Android SDK, NDK or phone; about three minutes,
+# most of it the deliberate 150 s silent-prefill case.
+
+name: proxy-harness
+
+on:
+  push:
+    paths:
+      - 'app/app/src/main/java/org/phononai/app/ApiServer.kt'
+      - 'tools/proxy-harness/**'
+      - '.github/workflows/proxy-harness.yml'
+  pull_request:
+    paths:
+      - 'app/app/src/main/java/org/phononai/app/ApiServer.kt'
+      - 'tools/proxy-harness/**'
+      - '.github/workflows/proxy-harness.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  harness:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Run proxy regression tests
+        run: tools/proxy-harness/run.sh

@@ -11,6 +11,13 @@ phone.
   mandatory check command; commit on green, hard reset and branch deletion on
   red; never merges or pushes.
 - `tasks.example.jsonl` — task schema and three mechanical examples.
+- `proxy-harness/` — regression tests for the app's HTTP proxy
+  (`ApiServer.kt`), compiled unchanged against small stubs and run on a desktop
+  JVM in front of a fake llama-server. Covers silent prefill longer than the
+  stall window, a reader that stops draining, unauthenticated large bodies, the
+  body cap and a client dripping its headers. `tools/proxy-harness/run.sh`;
+  about three minutes. CI runs it when `ApiServer.kt` changes. It does not
+  replace a device run: it proves the proxy's behaviour, not the phone's.
 
 ## Use
 

@@ -270,14 +270,19 @@ class ApiServer(
 
     private fun handle(socket: Socket) {
         socket.use { s ->
-            s.soTimeout = 30_000
+            s.soTimeout = CLIENT_READ_TIMEOUT_MS
             val guard = GuardedOutput(s.getOutputStream())
             val watchdog = armStallGuard(s, guard)
             try {
                 val input = BufferedInputStream(s.getInputStream())
                 val output = BufferedOutputStream(guard)
-                val req = readRequest(input, output, s.inetAddress.hostAddress ?: "") ?: return
-                route(req, output)
+                // Only the request head is read before the rate limit and the
+                // key check. The body is read in route(), after both pass, so
+                // an unauthenticated client cannot make us buffer anything
+                // larger than a header block.
+                val head = readHead(input, s, s.inetAddress.hostAddress ?: "") ?: return
+                s.soTimeout = CLIENT_READ_TIMEOUT_MS
+                route(head, input, output)
                 output.flush()
             } catch (t: Throwable) {
                 Log.w(TAG, "request failed: ${t.javaClass.simpleName}: ${t.message}")
@@ -290,14 +295,20 @@ class ApiServer(
     /**
      * A socket has no write timeout: a reader that stops reading parks the
      * worker in write() until the kernel gives up, which can be long enough to
-     * matter. This closes the connection once no bytes have moved for
-     * [WRITE_STALL_MS]. Progress, not a start-to-finish deadline, is the test,
-     * so a slow but live streaming generation is untouched.
+     * matter. This closes the connection once a single write has been blocked
+     * for [WRITE_STALL_MS].
+     *
+     * The test is a *blocked write*, not a quiet socket. A quiet socket is the
+     * normal state during prefill: llama-server sends no bytes, not even
+     * response headers, until the first token exists, and on a phone that can
+     * take many minutes. An idle-since-last-byte rule drops exactly those
+     * requests (0.1.4 dropped every request whose prefill exceeded 120 s).
      */
     private fun armStallGuard(socket: Socket, guard: GuardedOutput): ScheduledFuture<*>? = try {
         stallWatchdog.scheduleWithFixedDelay(
             {
-                if (System.currentTimeMillis() - guard.lastProgressMs > WRITE_STALL_MS) {
+                val since = guard.blockedSinceMs
+                if (since != 0L && System.currentTimeMillis() - since > WRITE_STALL_MS) {
                     Log.w(TAG, "dropping stalled client $socket")
                     try {
                         socket.close()
@@ -305,40 +316,48 @@ class ApiServer(
                     }
                 }
             },
-            WRITE_STALL_MS,
-            WRITE_STALL_MS,
+            STALL_CHECK_MS,
+            STALL_CHECK_MS,
             TimeUnit.MILLISECONDS,
         )
     } catch (_: Throwable) {
         null
     }
 
-    /** Timestamps write progress so the stall watchdog can see a reader stop. */
+    /**
+     * Records when the current write or flush started, so the stall watchdog
+     * can tell a reader that stopped draining from a backend that has not
+     * produced anything yet. Zero means no write is in progress.
+     */
     private class GuardedOutput(private val out: OutputStream) : OutputStream() {
         @Volatile
-        var lastProgressMs = System.currentTimeMillis()
+        var blockedSinceMs = 0L
             private set
 
-        override fun write(b: Int) {
-            out.write(b)
-            lastProgressMs = System.currentTimeMillis()
+        private inline fun timed(block: () -> Unit) {
+            blockedSinceMs = System.currentTimeMillis()
+            try {
+                block()
+            } finally {
+                blockedSinceMs = 0L
+            }
         }
 
-        override fun write(b: ByteArray, off: Int, len: Int) {
-            out.write(b, off, len)
-            lastProgressMs = System.currentTimeMillis()
-        }
+        override fun write(b: Int) = timed { out.write(b) }
 
-        override fun flush() = out.flush()
+        override fun write(b: ByteArray, off: Int, len: Int) = timed { out.write(b, off, len) }
+
+        override fun flush() = timed { out.flush() }
 
         override fun close() = out.close()
     }
 
-    private fun route(req: Request, out: OutputStream) {
+    private fun route(head: Head, input: BufferedInputStream, out: OutputStream) {
         // Per source address, shared by the control routes and /v1. Checked
-        // before auth so a flood cannot reach the key comparison either; a
-        // configured rate_limit_per_min of 0 disables it.
-        if (req.path != "/health" && !rateLimiter.allow(req.remoteAddress)) {
+        // before auth and before the body is read, so a flood can reach
+        // neither the key comparison nor the body buffer; a configured
+        // rate_limit_per_min of 0 disables it.
+        if (head.path != "/health" && !rateLimiter.allow(head.remoteAddress)) {
             respond(
                 out, 429, "application/json; charset=utf-8",
                 """{"error":"rate limit exceeded","retry_after_s":1}""".toByteArray(),
@@ -349,7 +368,7 @@ class ApiServer(
         // /health stays unauthenticated so a liveness probe works without the
         // key. Everything else on the operator port requires the key when one
         // is configured. With no key and loopback binding this is unchanged.
-        if (req.path != "/health" && !authorized(req)) {
+        if (head.path != "/health" && !authorized(head.headers)) {
             respond(
                 out, 401, "application/json; charset=utf-8",
                 """{"error":"unauthorized"}""".toByteArray(),
@@ -357,6 +376,37 @@ class ApiServer(
             )
             return
         }
+        val tooLarge = {
+            respond(
+                out, 413, "application/json; charset=utf-8",
+                ("""{"error":"request body too large","max_bytes":""" +
+                    MAX_REQUEST_BODY + "}").toByteArray(),
+            )
+        }
+        // Refuse a declared oversize body before inviting it.
+        val declared = head.headers["content-length"]?.toLongOrNull()
+        if (declared != null && declared > MAX_REQUEST_BODY) {
+            tooLarge()
+            return
+        }
+        // Only an authorized client is invited to send its body.
+        if (head.headers["expect"]?.lowercase()?.contains("100-continue") == true) {
+            out.write("HTTP/1.1 100 Continue\r\n\r\n".toByteArray(Charsets.ISO_8859_1))
+            out.flush()
+        }
+        val body = try {
+            readBody(input, head.headers)
+        } catch (_: BodyTooLarge) {
+            tooLarge()
+            return
+        }
+        routeAuthorized(
+            Request(head.method, head.path, head.query, head.headers, body, head.remoteAddress),
+            out,
+        )
+    }
+
+    private fun routeAuthorized(req: Request, out: OutputStream) {
         // A reload owns the listener for a moment while the backend is
         // replaced. Control requests must not race it: answer with a body and
         // a retry hint instead of disappearing with the old socket.
@@ -463,10 +513,10 @@ class ApiServer(
             path.startsWith("/model/") || path.startsWith("/server/") ||
             path.startsWith("/debug/")
 
-    private fun authorized(req: Request): Boolean {
+    private fun authorized(headers: Map<String, String>): Boolean {
         val key = settings.apiKey
         if (key.isBlank()) return true
-        val header = req.headers["authorization"] ?: return false
+        val header = headers["authorization"] ?: return false
         if (!header.startsWith("Bearer ", ignoreCase = true)) return false
         val presented = header.substring(7).trim()
         if (presented.isEmpty()) return false
@@ -530,7 +580,11 @@ class ApiServer(
                 return
             }
             socket.tcpNoDelay = true
-            socket.soTimeout = 600_000
+            // Prefill sends nothing until the first token: at ~11.6 tok/s a
+            // 7K-token prompt is already ten minutes of silence. Match the
+            // gateway's request timeout (gateway/litellm.yaml) so the proxy is
+            // never the component that gives up first.
+            socket.soTimeout = BACKEND_READ_TIMEOUT_MS
             val bin = BufferedInputStream(socket.getInputStream())
             val bout = BufferedOutputStream(socket.getOutputStream())
 
@@ -681,21 +735,38 @@ class ApiServer(
         }
     }
 
-    private fun readRequest(
+    /**
+     * Read the request line and headers only. Everything here happens before
+     * the client has proved anything, so it is bounded three ways: total head
+     * bytes ([MAX_HEAD_BYTES]), header line count ([MAX_HEADER_LINES]) and
+     * wall time ([HEAD_DEADLINE_MS]), the last so a client dripping one byte
+     * per read timeout cannot hold a worker indefinitely.
+     */
+    private fun readHead(
         input: BufferedInputStream,
-        out: OutputStream,
+        socket: Socket,
         remoteAddress: String,
-    ): Request? {
-        val requestLine = readLine(input) ?: return null
+    ): Head? {
+        val deadline = System.currentTimeMillis() + HEAD_DEADLINE_MS
+        var budget = MAX_HEAD_BYTES
+        fun nextLine(): String? {
+            val remaining = deadline - System.currentTimeMillis()
+            if (remaining <= 0) throw IOException("request head deadline exceeded")
+            socket.soTimeout = remaining.toInt().coerceAtLeast(1)
+            val line = readLine(input, budget, deadline) ?: return null
+            budget -= line.length + 2
+            return line
+        }
+        val requestLine = nextLine() ?: return null
         if (requestLine.isBlank()) return null
         val parts = requestLine.split(' ')
         if (parts.size < 2) throw IOException("bad request line")
         val method = parts[0]
         val rawTarget = parts[1]
-        var headers = LinkedHashMap<String, String>()
+        val headers = LinkedHashMap<String, String>()
         var headerLines = 0
         while (true) {
-            val line = readLine(input) ?: break
+            val line = nextLine() ?: break
             if (line.isEmpty()) break
             // A per-line length cap alone still allows an unbounded number of
             // lines; bound the count too and close the connection beyond it.
@@ -705,24 +776,25 @@ class ApiServer(
             headers[line.substring(0, idx).trim().lowercase()] =
                 line.substring(idx + 1).trim()
         }
-        if (headers["expect"]?.lowercase()?.contains("100-continue") == true) {
-            out.write("HTTP/1.1 100 Continue\r\n\r\n".toByteArray(Charsets.ISO_8859_1))
-            out.flush()
-        }
-        val body = when {
+        val q = rawTarget.indexOf('?')
+        val path = if (q < 0) rawTarget else rawTarget.substring(0, q)
+        val query = if (q < 0) "" else rawTarget.substring(q + 1)
+        return Head(method, path, query, headers, remoteAddress)
+    }
+
+    private class BodyTooLarge : IOException("request body too large")
+
+    /** Read the body; called only after the rate limit and the key check pass. */
+    private fun readBody(input: BufferedInputStream, headers: Map<String, String>): ByteArray =
+        when {
             headers["transfer-encoding"]?.lowercase()?.contains("chunked") == true ->
                 readChunkedBody(input)
             else -> {
                 val len = headers["content-length"]?.toLongOrNull() ?: 0L
-                if (len > MAX_REQUEST_BODY) throw IOException("request body too large")
+                if (len > MAX_REQUEST_BODY) throw BodyTooLarge()
                 readBytes(input, len)
             }
         }
-        val q = rawTarget.indexOf('?')
-        val path = if (q < 0) rawTarget else rawTarget.substring(0, q)
-        val query = if (q < 0) "" else rawTarget.substring(q + 1)
-        return Request(method, path, query, headers, body, remoteAddress)
-    }
 
     private fun readChunkedBody(input: BufferedInputStream): ByteArray {
         val out = ByteArrayOutputStream()
@@ -737,7 +809,7 @@ class ApiServer(
                 }
                 return out.toByteArray()
             }
-            if (out.size() + size > MAX_REQUEST_BODY) throw IOException("request body too large")
+            if (size < 0 || out.size().toLong() + size > MAX_REQUEST_BODY) throw BodyTooLarge()
             out.write(readBytes(input, size.toLong()))
             readLine(input)
         }
@@ -758,8 +830,13 @@ class ApiServer(
         return out.toByteArray()
     }
 
-    private fun readLine(input: InputStream): String? {
+    private fun readLine(
+        input: InputStream,
+        maxBytes: Int = MAX_LINE_BYTES,
+        deadlineMs: Long = 0L,
+    ): String? {
         val out = ByteArrayOutputStream()
+        val cap = minOf(maxBytes, MAX_LINE_BYTES)
         while (true) {
             val b = input.read()
             if (b < 0) return if (out.size() == 0) null else out.toString(Charsets.ISO_8859_1.name())
@@ -768,7 +845,10 @@ class ApiServer(
                 return s.removeSuffix("\r")
             }
             out.write(b)
-            if (out.size() > 64 * 1024) throw IOException("header line too long")
+            if (out.size() > cap) throw IOException("header line too long")
+            if (deadlineMs != 0L && System.currentTimeMillis() > deadlineMs) {
+                throw IOException("request head deadline exceeded")
+            }
         }
     }
 
@@ -808,12 +888,21 @@ class ApiServer(
         401 -> "Unauthorized"
         404 -> "Not Found"
         409 -> "Conflict"
+        413 -> "Payload Too Large"
         429 -> "Too Many Requests"
         500 -> "Internal Server Error"
         502 -> "Bad Gateway"
         503 -> "Service Unavailable"
         else -> "Status"
     }
+
+    private data class Head(
+        val method: String,
+        val path: String,
+        val query: String,
+        val headers: Map<String, String>,
+        val remoteAddress: String,
+    )
 
     private data class Request(
         val method: String,
@@ -826,15 +915,34 @@ class ApiServer(
 
     private companion object {
         const val TAG = "Phonon"
-        const val MAX_REQUEST_BODY = 64L * 1024 * 1024
+        /**
+         * 8 MB: a 64K-token prompt is well under 1 MB of JSON, and this leaves
+         * room for a few base64 images. It is only reachable after auth.
+         */
+        const val MAX_REQUEST_BODY = 8L * 1024 * 1024
+
+        /** Whole request line plus headers, read before auth. */
+        const val MAX_HEAD_BYTES = 64 * 1024
+        const val MAX_LINE_BYTES = 64 * 1024
+
+        /** Wall-clock budget for the request head, read before auth. */
+        const val HEAD_DEADLINE_MS = 10_000L
+        const val CLIENT_READ_TIMEOUT_MS = 30_000
+
+        /**
+         * Read timeout on the llama-server socket. Matches the gateway's
+         * 1800 s request timeout so the proxy never gives up first.
+         */
+        const val BACKEND_READ_TIMEOUT_MS = 1_800_000
         const val MAX_CAPTURE = 4 * 1024 * 1024
         const val BIND_ATTEMPTS = 20
         const val MAX_HEADER_LINES = 100
         const val MAX_WORKERS = 32
         const val MAX_QUEUED = 32
 
-        /** No bytes written for this long means the reader has stopped reading. */
+        /** A single write blocked this long means the reader has stopped reading. */
         const val WRITE_STALL_MS = 120_000L
+        const val STALL_CHECK_MS = 10_000L
 
         /** Upper bound on clients the rate limiter remembers at once. */
         const val MAX_TRACKED = 1024
