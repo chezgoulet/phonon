@@ -251,6 +251,18 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
                     DownloadState.progress(done, total)
                 }
                 val entry = entryId?.let { ModelCatalog.byId(it) }
+                // Vision needs the projector next to the weights; without it
+                // llama-server is text-only whatever the model can do.
+                if (entry != null && entry.mmprojUrl.isNotBlank()) {
+                    val projector = File(modelsDir, entry.mmprojFileName)
+                    if (!projector.isFile || projector.length() != entry.mmprojSizeBytes) {
+                        DownloadState.begin(entry.mmprojUrl, projector.absolutePath)
+                        ModelDownloader(this).download(
+                            entry.mmprojUrl, projector, entry.mmprojSha256, entryId,
+                        ) { done, total -> DownloadState.progress(done, total) }
+                        Log.i(TAG, "vision projector ready: ${projector.absolutePath}")
+                    }
+                }
                 if (entry != null) {
                     // File, context and alias move together for a catalog
                     // entry; a bare URL download only sets the path.

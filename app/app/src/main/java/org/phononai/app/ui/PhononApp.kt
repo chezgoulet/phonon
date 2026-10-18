@@ -1376,6 +1376,20 @@ private fun CatalogEntryCard(
         if (profile.isNotBlank()) {
             Text(profile, color = PhononColors.TextDim, fontSize = 11.5.sp, lineHeight = 16.sp)
         }
+        if (entry.mmprojFileName.isNotBlank()) {
+            Spacer(Modifier.height(4.dp))
+            val visionReady = entry.mmprojFileName in installed
+            Text(
+                if (visionReady) {
+                    "vision ready — this server accepts images"
+                } else {
+                    "vision: the projector downloads with the model"
+                },
+                color = if (visionReady) PhononColors.Cyan else PhononColors.TextDim,
+                fontSize = 11.sp,
+                lineHeight = 15.sp,
+            )
+        }
         if (entry.vendorClaim.isNotBlank()) {
             Spacer(Modifier.height(4.dp))
             Text(
@@ -2688,8 +2702,8 @@ private fun SetupScreen(
                 Spacer(Modifier.height(6.dp))
                 Text(
                     "Qwen3.5 decodes at about 9.2 tok/s on the Pixel 7 reference; Gemma 4 at " +
-                        "about 7.0. Both are text-only in this build — Gemma's image path is " +
-                        "not wired up yet, whatever the model itself can do.",
+                        "about 7.0. Both ship with a vision projector, so the server accepts " +
+                        "images once the model has downloaded.",
                     color = PhononColors.TextDim,
                     fontSize = 13.sp,
                     lineHeight = 18.sp,

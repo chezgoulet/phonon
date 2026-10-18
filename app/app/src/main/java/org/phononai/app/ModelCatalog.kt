@@ -71,6 +71,11 @@ data class ModelEntry(
     /** A vendor-reported figure and where it came from, if any. */
     val vendorClaim: String = "",
     val source: String = "",
+    /** Vision projector, downloaded alongside the model. Blank means text-only. */
+    val mmprojFileName: String = "",
+    val mmprojUrl: String = "",
+    val mmprojSizeBytes: Long = 0,
+    val mmprojSha256: String = "",
 ) {
     val measured: Boolean get() = decodeRuns.isNotEmpty()
 
@@ -125,6 +130,10 @@ object ModelCatalog {
             arch = "dense 2B, hybrid attention",
             jobFit = "agent work: the fastest measured model, and the default",
             measuredOn = "Pixel 7",
+            mmprojFileName = "mmproj-F16.gguf",
+            mmprojUrl = "https://huggingface.co/unsloth/Qwen3.5-2B-GGUF/resolve/main/mmproj-F16.gguf",
+            mmprojSizeBytes = 668227264L,
+            mmprojSha256 = "7035e9cb8d7c6a9681d07eef9a364783e86ea4cd73faab2eabb4f43a101830c7",
         ),
         ModelEntry(
             id = "qwen3.5-4b",
@@ -145,6 +154,10 @@ object ModelCatalog {
             arch = "dense 4B, hybrid attention",
             jobFit = "better answers when speed matters less",
             measuredOn = "Pixel 7",
+            mmprojFileName = "mmproj-F16.gguf",
+            mmprojUrl = "https://huggingface.co/unsloth/Qwen3.5-4B-GGUF/resolve/main/mmproj-F16.gguf",
+            mmprojSizeBytes = 672423616L,
+            mmprojSha256 = "cd88edcf8d031894960bb0c9c5b9b7e1fea6ebee02b9f7ce925a00d12891f864",
         ),
         ModelEntry(
             id = "qwen3.5-9b",
@@ -184,6 +197,10 @@ object ModelCatalog {
             arch = "dense E2B",
             jobFit = "chat and images, at about two tok/s less than Qwen",
             measuredOn = "Pixel 7",
+            mmprojFileName = "mmproj-gemma-4-E2B-it-Q8_0.gguf",
+            mmprojUrl = "https://huggingface.co/ggml-org/gemma-4-E2B-it-GGUF/resolve/main/mmproj-gemma-4-E2B-it-Q8_0.gguf",
+            mmprojSizeBytes = 557368064L,
+            mmprojSha256 = "9406f99c16d68cda4f1f0552192dcc99021ea1fc6d2fd50b1dc3ccf30d04b292",
         ),
         ModelEntry(
             id = "gemma-4-e4b",
@@ -205,6 +222,10 @@ object ModelCatalog {
             arch = "dense E4B",
             jobFit = "larger Gemma; runs on 8 GB at 16K",
             measuredOn = "Pixel 7",
+            mmprojFileName = "mmproj-gemma-4-E4B-it-Q8_0.gguf",
+            mmprojUrl = "https://huggingface.co/ggml-org/gemma-4-E4B-it-GGUF/resolve/main/mmproj-gemma-4-E4B-it-Q8_0.gguf",
+            mmprojSizeBytes = 559874816L,
+            mmprojSha256 = "197f49a93027f9843772bd24a6a9e0be2a32a788de5a3def330e9c585d86edd1",
         ),
         ModelEntry(
             id = "minicpm5-2b",

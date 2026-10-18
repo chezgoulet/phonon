@@ -426,6 +426,18 @@ class ServerManager(
 
     private fun buildArgs(model: File, logFile: File, plan: PerfPlan): List<String> = buildList {
         add("-m"); add(model.absolutePath)
+        // A projector beside the weights turns the server multimodal. Its
+        // absence is why the app used to be text-only with vision models.
+        run {
+            val entry = settings.catalogEntryForCurrentModel()
+            val name = entry?.mmprojFileName.orEmpty()
+            if (name.isNotBlank()) {
+                val projector = File(model.parentFile, name)
+                if (projector.isFile) {
+                    add("--mmproj"); add(projector.absolutePath)
+                }
+            }
+        }
         add("-c"); add(settings.contextSize.toString())
         add("-t"); add(plan.threads.toString())
         // Decode is bandwidth-bound and gains nothing from more threads; prefill
