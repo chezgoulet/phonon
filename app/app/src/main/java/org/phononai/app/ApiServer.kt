@@ -29,8 +29,8 @@ interface ApiHandler {
     fun settingsJson(): String
     fun updateSettings(body: String): String
     fun recordResponseBody(body: String)
-    fun requestStarted()
-    fun requestFinished()
+    fun requestStarted(path: String)
+    fun requestFinished(path: String)
 
     /** A serialized reload is in flight; control endpoints answer 503. */
     fun isRestarting(): Boolean
@@ -330,11 +330,11 @@ class ApiServer(
                     }.toString()
                     respond(out, 503, "application/json; charset=utf-8", body.toByteArray())
                 } else {
-                    api.requestStarted()
+                    api.requestStarted(req.path)
                     try {
                         proxy(req, out)
                     } finally {
-                        api.requestFinished()
+                        api.requestFinished(req.path)
                     }
                 }
             }

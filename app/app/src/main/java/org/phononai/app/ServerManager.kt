@@ -62,6 +62,10 @@ class ServerManager(
     @Volatile var mlockRefused: Boolean = false
         private set
 
+    /** The profile the running child was launched with; null when stopped. */
+    @Volatile var planAtLaunch: PerfPlan? = null
+        private set
+
     /** Wall clock when the current child was spawned; changes on every load. */
     @Volatile var loadedAtMs: Long = 0L
         private set
@@ -217,6 +221,10 @@ class ServerManager(
         } else {
             null
         }
+        // Report the profile the running child actually got. When no child is
+        // running, report what would be chosen now.
+        val detected = settings.perfPlan()
+        val plan = if (pid > 0) planAtLaunch ?: detected else detected
         return JSONObject().apply {
             put("state", state.wire)
             put("model", File(settings.modelPath).name)
@@ -234,8 +242,34 @@ class ServerManager(
             put("load_mode", settings.loadMode)
             put("mlock_refused", mlockRefused)
             put("error", lastError ?: JSONObject.NULL)
+            // Read-only performance profile. The running values are what the
+            // child was launched with; detected values are what Android would
+            // allow a new child to use right now.
+            put("perf_mode", plan.mode)
+            put("perf_allowed_cpus", plan.allowed.joinToString(","))
+            put("perf_cpu_range", plan.cpuRange)
+            put("perf_threads", plan.threads)
+            put("perf_prio", plan.prio)
+            put("perf_prio_batch", plan.prioBatch)
+            put("perf_auto", plan.auto)
+            put(
+                "perf_overrides",
+                listOfNotNull(
+                    "threads".takeIf { plan.threadsSet },
+                    "cpu_range".takeIf { plan.cpuRangeSet },
+                    "priority".takeIf { plan.prioSet },
+                ).joinToString(","),
+            )
+            put("perf_detected_mode", detected.mode)
+            put("perf_detected_cpu_range", detected.cpuRange)
+            put("perf_detected_threads", detected.threads)
         }.toString()
     }
+
+    /** Per-token time at the last observed decode rate (200 ms until known). */
+    fun perTokenNanos(): Long =
+        lastDecodeTps?.takeIf { it > 0 }?.let { (1_000_000_000.0 / it).toLong() }
+            ?: DEFAULT_TOKEN_NANOS
 
     /** Called by the proxy for non-streaming response bodies. */
     fun recordTimings(body: String) {
@@ -268,7 +302,9 @@ class ServerManager(
         val logDir = File(context.filesDir, "logs").apply { mkdirs() }
         val logFile = File(logDir, "llama-server.log")
         if (logFile.exists()) logFile.delete()
-        val args = buildArgs(model, logFile)
+        val plan = settings.perfPlan()
+        planAtLaunch = plan
+        val args = buildArgs(model, logFile, plan)
         val printable = args.mapIndexed { i, arg ->
             if (i > 0 && args[i - 1] == "--api-key") "***" else arg
         }.joinToString(" ")
@@ -313,10 +349,15 @@ class ServerManager(
         thread(name = "phonon-ready-$gen", isDaemon = true) { pollReady(gen, p) }
     }
 
-    private fun buildArgs(model: File, logFile: File): List<String> = buildList {
+    private fun buildArgs(model: File, logFile: File, plan: PerfPlan): List<String> = buildList {
         add("-m"); add(model.absolutePath)
         add("-c"); add(settings.contextSize.toString())
-        add("-t"); add(settings.threads.toString())
+        add("-t"); add(plan.threads.toString())
+        if (plan.cpuRange.isNotBlank()) {
+            add("--cpu-range"); add(plan.cpuRange)
+        }
+        add("--prio"); add(plan.prio.toString())
+        add("--prio-batch"); add(plan.prioBatch.toString())
         add("-np"); add("1")
         add("-fa"); add("on")
         add("--jinja")
@@ -568,6 +609,7 @@ class ServerManager(
         const val READY_TIMEOUT_MS = 300_000L
         const val READY_POLL_MS = 500L
         const val MAX_BACKOFF_MS = 30_000L
+        const val DEFAULT_TOKEN_NANOS = 200_000_000L
         val DECODE_RE = Regex("\"predicted_per_second\"\\s*:\\s*([0-9]+(?:\\.[0-9]+)?)")
         val PROMPT_RE = Regex("\"prompt_per_second\"\\s*:\\s*([0-9]+(?:\\.[0-9]+)?)")
     }

@@ -5,6 +5,7 @@ import android.util.Base64
 import org.json.JSONObject
 import org.phononai.app.PhononService
 import org.phononai.app.Settings
+import org.phononai.app.PerfPlan
 import java.io.File
 import java.net.Inet4Address
 import java.net.NetworkInterface
@@ -32,7 +33,33 @@ data class Health(
     val requestsInFlight: Int,
     val lastCompletionAt: Long?,
     val requestsCompleted: Int,
-)
+    val perfMode: String,
+    val perfAllowedCpus: String,
+    val perfCpuRange: String,
+    val perfThreads: Int,
+    val perfPrio: Int,
+    val perfPrioBatch: Int,
+    val perfAuto: Boolean,
+    val perfOverrides: String,
+    val perfDetectedMode: String,
+    val perfDetectedCpuRange: String,
+    val perfDetectedThreads: Int,
+    val perfHintActive: Boolean,
+    val perfHintTargetMs: Double?,
+    val perfHintDetail: String,
+) {
+    /** Mode the running child was launched in; falls back to detection. */
+    val perfVisible: Boolean get() = perfMode == PerfPlan.MODE_VISIBLE
+    val perfDetectedVisible: Boolean get() = perfDetectedMode == PerfPlan.MODE_VISIBLE
+
+    /** One compact line for the Serve screen. */
+    val perfLine: String
+        get() = if (perfVisible) {
+            "Visible / kiosk · all 8 cores · $perfThreads threads on $perfCpuRange"
+        } else {
+            "Background · no X1 · $perfThreads threads on $perfCpuRange"
+        }
+}
 
 fun parseHealth(raw: String): Health {
     val j = JSONObject(raw)
@@ -57,6 +84,20 @@ fun parseHealth(raw: String): Health {
         requestsInFlight = j.optInt("requests_in_flight", 0),
         lastCompletionAt = j.optLongOrNull("last_completion_at"),
         requestsCompleted = j.optInt("requests_completed", 0),
+        perfMode = j.optString("perf_mode", PerfPlan.MODE_BACKGROUND),
+        perfAllowedCpus = j.optString("perf_allowed_cpus", ""),
+        perfCpuRange = j.optString("perf_cpu_range", ""),
+        perfThreads = j.optInt("perf_threads", 4),
+        perfPrio = j.optInt("perf_prio", PerfPlan.DEFAULT_PRIO),
+        perfPrioBatch = j.optInt("perf_prio_batch", PerfPlan.DEFAULT_PRIO_BATCH),
+        perfAuto = j.optBoolean("perf_auto", true),
+        perfOverrides = j.optString("perf_overrides", ""),
+        perfDetectedMode = j.optString("perf_detected_mode", PerfPlan.MODE_BACKGROUND),
+        perfDetectedCpuRange = j.optString("perf_detected_cpu_range", ""),
+        perfDetectedThreads = j.optInt("perf_detected_threads", 4),
+        perfHintActive = j.optBoolean("perf_hint_active", false),
+        perfHintTargetMs = j.optDoubleOrNull("perf_hint_target_ms"),
+        perfHintDetail = j.optString("perf_hint_detail", ""),
     )
 }
 

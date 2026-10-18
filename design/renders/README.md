@@ -1,8 +1,11 @@
 # Phonon UI renders — observed on device
 
 Device: stock Pixel 7 (`panther`), serial `2A091FDH200AJ1`, Android 17.
-Model: `Qwen3.5-2B-Q4_K_M.gguf`, 32,768 context, 4 threads.
-Serving state: `bind_address=0.0.0.0`, API key set, keep-warm on (45 s).
+Model: `Qwen3.5-2B-Q4_K_M.gguf`, 32,768 context.
+Serving state on the performance captures: app 0.4.0, auto profile
+(2 threads pinned to the fastest allowed cluster), `bind_address=0.0.0.0`,
+API key set, keep-warm on (45 s). The older captures in this directory were
+taken on app 0.3.0 with 4 threads.
 
 These are device captures (`adb exec-out screencap -p`), not mockups.
 
@@ -20,6 +23,9 @@ These are device captures (`adb exec-out screencap -p`), not mockups.
 | `app-settings-advanced2.png` | Settings, empty default download URL, load mode, switches, log, save |
 | `app-settings-kiosk.png` | Settings, Kiosk / appliance mode: Device Owner `no`, provisioning command |
 | `app-setup.png` | Setup, LAN/phone-only, node name, masked generated key |
+| `app-serve-performance.png` | Serve with the performance mode line (`Visible / kiosk · all 8 cores · 2 threads on 6-7`) and 7.6 tok/s last rate |
+| `app-settings-performance.png` | Settings Performance card: mode, measured rate, auto values, overrides, avatar toggle |
+| `app-settings-performance-background.png` | The same card running in background mode, with the "Running child ... Apply or restart" warning |
 
 ## v1 features captured 2026-10-17
 
@@ -138,6 +144,31 @@ Measured through the app proxy on the same device, non-streaming, greedy:
 
 The final screenshot shows the 4.81 tok/s last-rate card. These are app-path
 numbers, not raw server numbers. No reboot was performed.
+
+## Performance modes captured 2026-10-17
+
+App 0.4.0, same Pixel 7. The activity was kept visible (the `top-app` cpuset);
+kiosk itself could not be entered on this phone (see above), and the visible
+mode uses the same cpuset.
+
+- **Serve line.** `app-serve-performance.png` shows the avatar, `Serving`,
+  `Visible / kiosk · all 8 cores · 2 threads on 6-7`, 7.6 tok/s last rate and
+  33.2 °C. The line is generated from `/health` (`perf_mode`, `perf_threads`,
+  `perf_cpu_range`), not from a hard-coded string.
+- **Background card.** `app-settings-performance-background.png` was captured by
+  starting the server with the activity behind the launcher, then bringing the
+  activity back: the header and warning report the running child on 4–5
+  (background) while the fields show what a restart would choose now (6–7,
+  visible). That is the card refusing to claim the running mode was changed
+  when only the app's cpuset moved.
+- **Settings card.** `app-settings-performance.png` shows the Performance card:
+  `Visible / kiosk`, the observed 128-token rate, the note that the activity
+  being visible is what unlocks the X1 cores, `2 threads · CPUs 6-7 ·
+  prio 1/2`, the four override fields, `Reset to auto`, and
+  `Animate avatar while generating` (off).
+- The four measured cells, variance, ADPF evidence, avatar CPU numbers and the
+  short-completion caveat for the older 14.4 tok/s figure are in
+  [`../../docs/performance.md`](../../docs/performance.md).
 
 ## Regression checks
 
