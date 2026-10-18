@@ -32,6 +32,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -132,6 +133,7 @@ private data class PrimaryAction(
 fun PhononApp() {
     val context = LocalContext.current
     val settings = remember { Settings(context) }
+    LaunchedEffect(Unit) { AppState.presenceShape = settings.presenceShape }
     var health by remember { mutableStateOf<Health?>(null) }
     var benchmark by remember { mutableStateOf<BenchmarkState?>(null) }
     var download by remember { mutableStateOf<DownloadProgress?>(null) }
@@ -875,11 +877,11 @@ private fun Avatar(kind: AvatarKind, amp: Float, reduced: Boolean, modifier: Mod
         modifier = modifier,
         factory = { context ->
             AvatarView(context).apply {
-                setIdleTheme("aura")
+                setIdleTheme(shape)
                 applyStateShapes(
                     speaking = "waveform",
                     listening = "iris",
-                    thinking = "flame",
+                    thinking = "bloom",
                 )
                 setVisualCategory("lumen")
                 driver.attach(this)
@@ -888,6 +890,7 @@ private fun Avatar(kind: AvatarKind, amp: Float, reduced: Boolean, modifier: Mod
         },
         update = { view ->
             driver.attach(view)
+            view.setIdleTheme(shape)
             driver.apply(kind, amp, reduced)
         },
     )
@@ -1673,6 +1676,40 @@ private fun PerformanceCard(
         Text(
             "Off by default. Full animation costs about 2.4% of decode while a request runs; " +
                 "the reduced mode costs about 1.5%. Idle stays full either way.",
+            color = PhononColors.TextDim,
+            fontSize = 11.sp,
+            lineHeight = 16.sp,
+        )
+
+        Spacer(Modifier.height(12.dp))
+        Text("Shape", color = PhononColors.Text, fontSize = 13.sp)
+        Spacer(Modifier.height(6.dp))
+        Row(
+            Modifier.horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            val shapes = listOf("Aura" to "aura", "Iris" to "iris", "Vortex" to "vortex",
+                "Waveform" to "waveform", "Bloom" to "bloom", "Sphere" to "sphere")
+            shapes.forEach { (label, token) ->
+                val selected = AppState.presenceShape == token
+                Text(
+                    label,
+                    color = if (selected) PhononColors.Cyan else PhononColors.TextDim,
+                    fontSize = 12.sp,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(14.dp))
+                        .border(1.dp, if (selected) PhononColors.Cyan else PhononColors.Border,
+                            RoundedCornerShape(14.dp))
+                        .clickable {
+                            AppState.presenceShape = token
+                            settings.presenceShape = token
+                        }
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                )
+            }
+        }
+        Text(
+            "The shape the being takes while idle.",
             color = PhononColors.TextDim,
             fontSize = 11.sp,
             lineHeight = 16.sp,

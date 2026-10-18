@@ -129,6 +129,11 @@ class Settings(context: Context) {
         get() = prefs.getBoolean(KEY_ANIMATE_GENERATING, false)
         set(value) = prefs.edit().putBoolean(KEY_ANIMATE_GENERATING, value).apply()
 
+    /** The idle shape the presence takes. Unknown tokens fall back to "aura". */
+    var presenceShape: String
+        get() = prefs.getString(KEY_PRESENCE_SHAPE, "aura") ?: "aura"
+        set(value) = prefs.edit().putString(KEY_PRESENCE_SHAPE, value).apply()
+
     fun setThreadsOverride(value: Int) {
         prefs.edit()
             .putInt(KEY_THREADS, value)
@@ -455,5 +460,6 @@ class Settings(context: Context) {
         private const val KEY_PERF_PRIO_BATCH = "perf_prio_batch"
         private const val KEY_PERF_PRIO_SET = "perf_prio_set"
         private const val KEY_ANIMATE_GENERATING = "animate_avatar_while_generating"
+        private const val KEY_PRESENCE_SHAPE = "visual_shape_presence"
     }
 }

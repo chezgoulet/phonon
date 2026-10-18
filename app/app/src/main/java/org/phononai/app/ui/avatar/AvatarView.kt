@@ -155,12 +155,8 @@ class AvatarView @JvmOverloads constructor(
         // ---- shape picker in Settings (the presence-shape picker AND the three
         // ---- state pickers), and themeArch() maps the same tokens onto archetypes, so
         // ---- the picker vocabulary and the rendered shapes can never drift apart.
-        val SHAPE_LABELS = arrayOf("Aura", "Iris", "Vortex", "Waveform", "Scan", "Constellation",
-            "Bracket", "Flame", "Ribbon", "Infall", "Bloom", "Soundwave", "Arc", "Nucleus",
-            "Eye", "Water", "Radar", "Octopus", "Sphere")
-        val SHAPE_TOKENS = arrayOf("aura", "iris", "vortex", "waveform", "scan", "constellation",
-            "bracket", "flame", "ribbon", "infall", "bloom", "soundwave", "arc", "nucleus",
-            "eye", "water", "radar", "octopus", "sphere")
+        val SHAPE_LABELS = arrayOf("Aura", "Iris", "Vortex", "Waveform", "Bloom", "Sphere")
+        val SHAPE_TOKENS = arrayOf("aura", "iris", "vortex", "waveform", "bloom", "sphere")
         /** Per-state shape tokens (Settings -> Visuals). An ACTIVE state renders as the
          *  archetype the user picked here, DEFAULTING to the Wave 1 semantic fits below
          *  so the being fires soundwave/eye/radar in context out of the box. Stored in
@@ -169,9 +165,9 @@ class AvatarView @JvmOverloads constructor(
         const val KEY_SHAPE_SPEAKING = "visual_shape_speaking"
         const val KEY_SHAPE_LISTENING = "visual_shape_listening"
         const val KEY_SHAPE_THINKING = "visual_shape_thinking"
-        const val DEFAULT_SHAPE_SPEAKING = "soundwave"
-        const val DEFAULT_SHAPE_LISTENING = "eye"
-        const val DEFAULT_SHAPE_THINKING = "radar"
+        const val DEFAULT_SHAPE_SPEAKING = "waveform"
+        const val DEFAULT_SHAPE_LISTENING = "iris"
+        const val DEFAULT_SHAPE_THINKING = "bloom"
 
         private const val TAU = (PI * 2).toFloat()
         private const val SPIRAL_TURNS = 2.0f
@@ -685,7 +681,12 @@ class AvatarView @JvmOverloads constructor(
     }
 
     /** Idle shape/theme: "aura" (default dispersed breath) or one of SHAPES. */
-    fun setIdleTheme(theme: String) { idleTheme = theme.lowercase(); invalidate() }
+    fun setIdleTheme(theme: String) {
+        val next = theme.lowercase()
+        if (next == idleTheme) return
+        idleTheme = next
+        invalidate()
+    }
     /** Auto-advance the idle theme every cycleSec (false = stay on one). */
     fun setCycleThemes(cycle: Boolean) { cycleThemes = cycle; invalidate() }
     fun setCycleSec(sec: Float) { cycleSec = sec; invalidate() }
