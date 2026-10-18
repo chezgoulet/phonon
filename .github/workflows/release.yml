@@ -114,6 +114,14 @@ jobs:
           # CI signs without committing secrets. See GAPS.md item "signing config".
           ./app/gradlew -p app --no-daemon :app:assembleRelease
 
+      - name: Verify the APK is signed
+        run: |
+          set -euo pipefail
+          APK=$(find app/app/build/outputs/apk/release -name '*.apk' | head -n1)
+          test -n "$APK" || { echo "::error::no release APK produced"; exit 1; }
+          "$ANDROID_SDK_ROOT/build-tools/35.0.0/apksigner" verify --print-certs "$APK" >/dev/null \
+            || { echo "::error::release APK is not signed"; exit 1; }
+
       - name: Locate APK
         id: apk
         run: |

@@ -29,3 +29,6 @@ app/app/src/main/jniLibs/
 
 # native build intermediates
 app/app/.cxx/
+
+# native build output (built from third_party/llama.cpp)
+.native-build/

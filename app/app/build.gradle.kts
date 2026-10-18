@@ -20,9 +20,26 @@ android {
         }
     }
 
+    // Signing material comes from the environment so CI can sign without a
+    // keystore in the repo. A local `assembleRelease` without those variables
+    // produces an unsigned APK, which is what you want for inspection.
+    val releaseKeystore: String? = System.getenv("PHONON_KEYSTORE")
+    signingConfigs {
+        if (!releaseKeystore.isNullOrBlank()) {
+            create("release") {
+                storeFile = file(releaseKeystore)
+                storePassword = System.getenv("PHONON_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("PHONON_KEY_ALIAS")
+                keyPassword = System.getenv("PHONON_KEY_PASSWORD")
+            }
+        }
+    }
     buildTypes {
         release {
             isMinifyEnabled = false
+            if (!releaseKeystore.isNullOrBlank()) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
 
