@@ -428,6 +428,10 @@ class ServerManager(
         add("-m"); add(model.absolutePath)
         add("-c"); add(settings.contextSize.toString())
         add("-t"); add(plan.threads.toString())
+        // Decode is bandwidth-bound and gains nothing from more threads; prefill
+        // is compute-bound and wants the mid and big cores too. Measured on a
+        // Pixel 7: -tb 4 lifted a 2,415-token prefill from 58 to 82 tok/s.
+        add("-tb"); add((plan.threads * 2).coerceIn(2, 6).toString())
         if (plan.cpuRange.isNotBlank()) {
             add("--cpu-range"); add(plan.cpuRange)
         }

@@ -222,7 +222,9 @@ class Settings(context: Context) {
         val best = detection.best
         val autoRange = best?.range.orEmpty()
         val range = if (perfCpuRangeSet) perfCpuRange else autoRange
-        val autoThreads = best?.size ?: minOf(4, detection.allowed.size)
+        // The fastest cluster can be a single prime core (Pixel 8/9, most
+        // Snapdragons). One thread leaves the machine idle, so floor it at two.
+        val autoThreads = (best?.size ?: minOf(4, detection.allowed.size)).coerceAtLeast(2)
         val threadsValue = if (perfThreadsSet) {
             prefs.getInt(KEY_THREADS, hardware.tier.threads)
         } else {

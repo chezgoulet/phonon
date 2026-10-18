@@ -31,6 +31,11 @@ fi
 
 echo "llama.cpp at $(git -C "$SRC" rev-parse --short HEAD) ($(git -C "$SRC" log -1 --format='%s'))"
 
+# -march is not optional: a cross-compile otherwise targets baseline ARMv8, so
+# the dot-product kernels are absent and the repack selector (which requires
+# them) never engages. Every phone this project targets has dotprod. Measured on
+# the Pixel 7: decode 9.2 -> 13.7 tok/s, 2,415-token prefill 15 -> 58 tok/s from
+# this flag, 82 with -tb 4 passed to llama-server.
 cmake -S "$SRC" -B "$BUILD" \
   -DCMAKE_TOOLCHAIN_FILE="$NDK/build/cmake/android.toolchain.cmake" \
   -DANDROID_ABI=arm64-v8a \
@@ -40,6 +45,8 @@ cmake -S "$SRC" -B "$BUILD" \
   -DLLAMA_CURL=OFF \
   -DGGML_OPENMP=OFF \
   -DGGML_CPU_REPACK=ON \
+  -DCMAKE_C_FLAGS="-march=armv8.2-a+dotprod+fp16" \
+  -DCMAKE_CXX_FLAGS="-march=armv8.2-a+dotprod+fp16" \
   -DLLAMA_BUILD_TESTS=OFF \
   -DLLAMA_BUILD_EXAMPLES=OFF \
   -DLLAMA_BUILD_SERVER=ON
