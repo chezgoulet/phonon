@@ -671,7 +671,7 @@ class ServerManager(
         private const val DRAIN_MAX_MS = 120_000L
         const val TAG = "Phonon"
         const val BIN_NAME = "libllama-server.so"
-        const val READY_TIMEOUT_MS = 300_000L
+        const val READY_TIMEOUT_MS = 120_000L
         const val READY_POLL_MS = 500L
         const val MAX_BACKOFF_MS = 30_000L
         const val DEFAULT_TOKEN_NANOS = 200_000_000L

@@ -129,6 +129,14 @@ class Settings(context: Context) {
         get() = prefs.getBoolean(KEY_ANIMATE_GENERATING, false)
         set(value) = prefs.edit().putBoolean(KEY_ANIMATE_GENERATING, value).apply()
 
+    /**
+     * Whether the operator wants the server running. Persisted so an explicit
+     * Stop survives a service restart; autoStart alone cannot express "stopped".
+     */
+    var servingRequested: Boolean
+        get() = prefs.getBoolean(KEY_SERVING_REQUESTED, true)
+        set(value) = prefs.edit().putBoolean(KEY_SERVING_REQUESTED, value).apply()
+
     /** The idle shape the presence takes. Unknown tokens fall back to "aura". */
     var presenceShape: String
         get() = prefs.getString(KEY_PRESENCE_SHAPE, "aura") ?: "aura"
@@ -487,5 +495,6 @@ class Settings(context: Context) {
         private const val KEY_PERF_PRIO_SET = "perf_prio_set"
         private const val KEY_ANIMATE_GENERATING = "animate_avatar_while_generating"
         private const val KEY_PRESENCE_SHAPE = "visual_shape_presence"
+        private const val KEY_SERVING_REQUESTED = "serving_requested"
     }
 }

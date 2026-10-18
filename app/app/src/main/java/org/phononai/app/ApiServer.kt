@@ -24,6 +24,9 @@ interface ApiHandler {
     fun logs(): String
     fun downloadJson(): String
     fun startDownload(url: String?): String
+
+    /** Start a catalog download by entry id: the only path that carries a hash. */
+    fun startCatalogDownload(id: String): String
     fun startServer(): String
     fun stopServer()
     fun settingsJson(): String
@@ -288,7 +291,12 @@ class ApiServer(
                     )
                     return
                 }
-                val result = api.startDownload(url)
+                val id = try {
+                    if (text.isBlank()) null else JSONObject(text).optString("id").ifBlank { null }
+                } catch (t: Throwable) {
+                    null
+                }
+                val result = if (id != null) api.startCatalogDownload(id) else api.startDownload(url)
                 val status = if (hasError(result)) 409 else 202
                 respond(out, status, "application/json; charset=utf-8", result.toByteArray())
             }

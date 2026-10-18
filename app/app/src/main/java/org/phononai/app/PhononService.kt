@@ -90,7 +90,8 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
         thread(name = "phonon-boot", isDaemon = true) {
             server.killStaleServers()
             synchronized(settings.configLock) {
-                wantServer = settings.autoStart && File(settings.modelPath).isFile
+                wantServer = settings.autoStart && settings.servingRequested &&
+                    File(settings.modelPath).isFile
                 val exposure = settings.exposureError
                 if (exposure != null) {
                     server.refuseUnsafeExposure(exposure)
@@ -269,6 +270,8 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
         return DownloadState.toJson()
     }
 
+    override fun startCatalogDownload(id: String): String = uiDownloadModel(id)
+
     override fun startServer(): String {
         synchronized(settings.configLock) {
             settings.exposureError?.let { message ->
@@ -282,6 +285,7 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
                 return error("model not found or unreadable: ${model.absolutePath}")
             }
             wantServer = true
+            settings.servingRequested = true
             configHashAtLaunch = currentConfigHash()
         }
         thread(name = "phonon-start", isDaemon = true) {
@@ -295,6 +299,7 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
         thread(name = "phonon-stop", isDaemon = true) {
             synchronized(settings.configLock) {
                 wantServer = false
+                settings.servingRequested = false
                 server.stop()
             }
             updateNotification()
@@ -574,8 +579,10 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
             wantServer = true
         }
         try {
-            reloadExecutor.execute { reloadSettings() }
+            beginReload()
+            reloadExecutor.execute { reloadSettings(markReload = true) }
         } catch (_: Throwable) {
+            endReload()
             return "service shutting down"
         }
         return null
@@ -930,7 +937,7 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
             raw
         }
         val safe = decoded.replace(Regex("[^A-Za-z0-9._-]"), "_")
-        if (safe == "." || safe == ".." || safe.isBlank()) return "model.gguf"
+        if (safe == "." || safe == ".." || safe.isBlank()) return ""
         return if (safe.isBlank()) "model.gguf" else safe
     }
 
@@ -950,6 +957,6 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
         private const val WAKE_LOCK_TAG = "Phonon::llama-server"
 
         /** Upper bound on how long control endpoints report 503 after a reload. */
-        private const val RELOAD_SETTLE_TIMEOUT_MS = 300_000L
+        private const val RELOAD_SETTLE_TIMEOUT_MS = 120_000L
     }
 }
