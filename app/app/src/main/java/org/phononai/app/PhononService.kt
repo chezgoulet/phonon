@@ -260,14 +260,24 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
                 }
                 DownloadState.success(dest.absolutePath)
                 Log.i(TAG, "download complete: ${dest.absolutePath} (${dest.length()} bytes)")
-                synchronized(settings.configLock) {
+                val relaunch = synchronized(settings.configLock) {
                     // If the server was running, it is running the previous
                     // model: apply the new one. If it was stopped, leave it
                     // stopped — autoStart governs boot, not this decision.
                     if (server.isDesired && !server.thermalPaused) {
                         wantServer = true
                         configHashAtLaunch = currentConfigHash()
-                        server.start()
+                        true
+                    } else {
+                        false
+                    }
+                }
+                // The launch goes on the reload executor like every other
+                // child start: never under settings.configLock.
+                if (relaunch) {
+                    try {
+                        reloadExecutor.execute { server.start() }
+                    } catch (_: Throwable) {
                     }
                 }
                 updateNotification()
@@ -633,12 +643,13 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
      * simply pauses once more.
      */
     fun uiResumeThermal() {
-        thread(name = "phonon-resume", isDaemon = true) {
-            synchronized(settings.configLock) {
-                configHashAtLaunch = currentConfigHash()
+        try {
+            reloadExecutor.execute {
+                synchronized(settings.configLock) { configHashAtLaunch = currentConfigHash() }
                 server.resumeFromThermal()
+                updateNotification()
             }
-            updateNotification()
+        } catch (_: Throwable) {
         }
     }
 
@@ -693,12 +704,16 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
                 }
             }
         }
-        thread(name = "phonon-perf-apply", isDaemon = true) {
-            synchronized(settings.configLock) {
-                configHashAtLaunch = currentConfigHash()
+        // The restart runs on the reload executor, not under
+        // settings.configLock, for the same reason as a settings reload.
+        try {
+            reloadExecutor.execute {
+                synchronized(settings.configLock) { configHashAtLaunch = currentConfigHash() }
                 if (server.isDesired && !server.thermalPaused) server.restart()
+                updateNotification()
             }
-            updateNotification()
+        } catch (_: Throwable) {
+            return "service shutting down"
         }
         return null
     }
