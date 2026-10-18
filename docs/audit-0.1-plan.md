@@ -17,10 +17,12 @@ person running the phone, not by how hard they are.
 | A3 signed records | shipped 0.1.2 / 0.1.3 | device: catalog download verified and recorded; second request accepted on the record |
 | A4 dot names | shipped 0.1.2 / 0.1.3 | scripted: path stays inside models/, dot names refused |
 | B1 settle windows | shipped 0.1.3 | code-only (timeouts 300 s → 120 s) |
-| B2 config-lock hold | **deferred to 0.1.4** | not started |
+| B2 config-lock hold | shipped 0.1.4 | code + timing check |
 | B3 persisted stop | shipped 0.1.3 | device: stop survives force-stop; start survives too |
 | B4 reload marking | shipped 0.1.3 | code-only |
-| C1–C3 hardening | not started | — |
+| C1 proxy limits | shipped 0.1.4 | code + scripted checks |
+| C2 device-admin trim | shipped 0.1.4 | manifest check |
+| C3 main-thread work | shipped 0.1.4 | code |
 
 ## How work is accepted
 

@@ -1,0 +1,12 @@
+Gate C of the audit, and the last of Gate B.
+
+The proxy now runs on a bounded worker pool, caps the number of header lines, and
+drops a connection whose reader has stopped draining. A configurable rate limit
+(600 requests per minute per client by default, 0 to disable) covers the control
+routes and /v1 together, and model_path must resolve inside the app's models
+directory. Kiosk no longer requests wipe or password device-admin policies it
+never implemented. The once-a-second health poll runs off the composition thread,
+and the battery snapshot is cached on the 30-second thermal tick.
+
+A settings change no longer holds the configuration lock across the engine
+teardown, so control requests are answered while a restart is in progress.
