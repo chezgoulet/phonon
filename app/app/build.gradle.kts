@@ -103,6 +103,9 @@ dependencies {
     // feature parsing, the memory-fit estimate, the thermal decision) is unit
     // tested on the JVM; the framework-touching wiring needs a device.
     testImplementation("junit:junit:4.13.2")
+    // The per-SoC profile is stored as org.json; unit tests parse it on the JVM
+    // with the real library, not the stubbed android.jar copy.
+    testImplementation("org.json:json:20231013")
 }
 
 // The fadvise shim is a debug-only test instrument. Keep it out of release

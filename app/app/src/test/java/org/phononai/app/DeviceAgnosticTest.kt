@@ -173,8 +173,8 @@ class DeviceAgnosticTest {
     fun bestProfilePicksTheFastestConfigOfEach() {
         val p = SocTuning.best(
             soc = "tensor",
-            cpuRange = "6-7",
-            context = 32768,
+            decodeCpuRange = "6-7",
+            contextSize = 32768,
             keepWarmIntervalS = 45,
             decode = listOf(2 to 6.1, 4 to 7.4, 6 to 5.9),
             prefill = listOf(2 to 40.0, 4 to 61.0),
@@ -184,11 +184,19 @@ class DeviceAgnosticTest {
         assertEquals(4, p.prefillThreads)
         assertEquals(7.4, p.decodeTps, 0.001)
         assertEquals(61.0, p.prefillTps, 0.001)
+        // The profile carries the engine it was measured against.
+        assertEquals(SocTuning.ENGINE_REV, p.engineRev)
+        assertEquals("6-7", p.decodeCpuRange)
+        assertEquals(32768, p.contextSize)
     }
 
     @Test
     fun bestProfileIsNullWithoutDecodeMeasurements() {
-        assertNull(SocTuning.best("tensor", "6-7", 8192, 45, emptyList(), listOf(2 to 40.0)))
+        assertNull(
+            SocTuning.best(
+                "tensor", "6-7", 8192, 45, emptyList(), listOf(2 to 40.0),
+            ),
+        )
     }
 
     // --- generic perf text (item 3) ---------------------------------------
@@ -197,5 +205,220 @@ class DeviceAgnosticTest {
     fun cpuListParserHandlesRangesAndSparseSets() {
         assertEquals(listOf(0, 1, 2, 3, 4, 5), PerfProfile.parseCpuList("0-5"))
         assertEquals(listOf(0, 2, 3, 7), PerfProfile.parseCpuList("0,2-3,7"))
+    }
+
+    // --- SoC key resolution (item 1) --------------------------------------
+
+    @Test
+    fun socKeyUsesSocModelOnApi31AndHardwareBelow() {
+        assertEquals("Tensor G2", SocTuning.resolveSoc(34, "Tensor G2", "gs201"))
+        // Below API 31 SOC_MODEL does not exist, so HARDWARE is the key.
+        assertEquals("gs201", SocTuning.resolveSoc(30, "Tensor G2", "gs201"))
+        assertEquals("", SocTuning.resolveSoc(34, null, null))
+    }
+
+    // --- profile lookup and engine-revision invalidation (item 1) ---------
+
+    private fun profileJson(engineRev: String): String {
+        val p = TuningProfile(
+            soc = "Tensor G2",
+            decodeThreads = 4,
+            decodeCpuRange = "6-7",
+            prefillThreads = 4,
+            contextSize = 32768,
+            keepWarmIntervalS = 45,
+            engineRev = engineRev,
+            measuredAt = "2026-10-18T00:00:00Z",
+            decodeTps = 14.4,
+            prefillTps = 79.0,
+        )
+        return org.json.JSONObject().put("Tensor G2", p.toJson()).toString()
+    }
+
+    @Test
+    fun profileRoundTripsThroughJson() {
+        val json = profileJson(SocTuning.ENGINE_REV)
+        val p = SocTuning.lookup(json, "Tensor G2", SocTuning.ENGINE_REV)
+        assertNotNull(p)
+        assertEquals(4, p!!.decodeThreads)
+        assertEquals("6-7", p.decodeCpuRange)
+        assertEquals(4, p.prefillThreads)
+        assertEquals(32768, p.contextSize)
+        assertEquals(SocTuning.ENGINE_REV, p.engineRev)
+        assertEquals(14.4, p.decodeTps, 0.001)
+        assertEquals(79.0, p.prefillTps, 0.001)
+    }
+
+    @Test
+    fun aNewEngineRevisionInvalidatesTheStoredProfile() {
+        val json = profileJson("797de63")
+        // Same revision: applied. A rebuild: not applied, and the stale revision
+        // is reported so the UI can ask for a re-run.
+        assertNotNull(SocTuning.lookup(json, "Tensor G2", "797de63"))
+        assertNull(SocTuning.lookup(json, "Tensor G2", "abcdef0"))
+        assertEquals("797de63", SocTuning.staleEngineRev(json, "Tensor G2", "abcdef0"))
+        assertNull(SocTuning.staleEngineRev(json, "Tensor G2", "797de63"))
+    }
+
+    @Test
+    fun unknownSocOrBlankJsonYieldsNoProfile() {
+        val json = profileJson(SocTuning.ENGINE_REV)
+        assertNull(SocTuning.lookup(json, "Other SoC", SocTuning.ENGINE_REV))
+        assertNull(SocTuning.lookup("", "Tensor G2", SocTuning.ENGINE_REV))
+        assertNull(SocTuning.lookup("not json", "Tensor G2", SocTuning.ENGINE_REV))
+    }
+
+    // --- effective perf precedence (item 1) -------------------------------
+
+    private val measured = TuningProfile(
+        soc = "Tensor G2",
+        decodeThreads = 4,
+        decodeCpuRange = "6-7",
+        prefillThreads = 4,
+        contextSize = 32768,
+        keepWarmIntervalS = 45,
+        engineRev = SocTuning.ENGINE_REV,
+        measuredAt = "2026-10-18T00:00:00Z",
+        decodeTps = 14.4,
+        prefillTps = 79.0,
+    )
+
+    @Test
+    fun heuristicIsUsedWhenThereIsNoProfileOrOverride() {
+        val e = SocTuning.decideEffective(
+            userThreads = null,
+            userCpuRange = null,
+            userPrefillThreads = null,
+            profile = null,
+            autoThreads = 2,
+            autoCpuRange = "6-7",
+        )
+        assertEquals(2, e.threads)
+        assertEquals("6-7", e.cpuRange)
+        assertEquals(0, e.prefillThreads)
+    }
+
+    @Test
+    fun storedProfileBeatsTheHeuristicButNotAnOverride() {
+        val adopted = SocTuning.decideEffective(
+            userThreads = null,
+            userCpuRange = null,
+            userPrefillThreads = null,
+            profile = measured,
+            autoThreads = 2,
+            autoCpuRange = "0-3",
+        )
+        assertEquals(4, adopted.threads)
+        assertEquals("6-7", adopted.cpuRange)
+        assertEquals(4, adopted.prefillThreads)
+
+        val overridden = SocTuning.decideEffective(
+            userThreads = 8,
+            userCpuRange = "4-5",
+            userPrefillThreads = 6,
+            profile = measured,
+            autoThreads = 2,
+            autoCpuRange = "0-3",
+        )
+        assertEquals(8, overridden.threads)
+        assertEquals("4-5", overridden.cpuRange)
+        assertEquals(6, overridden.prefillThreads)
+    }
+
+    @Test
+    fun anInvalidStoredRangeFallsBackToTheHeuristic() {
+        val odd = measured.copy(decodeCpuRange = "not-a-range")
+        val e = SocTuning.decideEffective(
+            userThreads = null,
+            userCpuRange = null,
+            userPrefillThreads = null,
+            profile = odd,
+            autoThreads = 2,
+            autoCpuRange = "0-5",
+        )
+        assertEquals("0-5", e.cpuRange)
+        // The thread count is still the measured one.
+        assertEquals(4, e.threads)
+    }
+
+    // --- sweep configuration (item 1) -------------------------------------
+
+    @Test
+    fun decodeSweepTriesTwoPinnedAndOneUnpinned() {
+        val configs = SocTuning.decodeConfigs("6-7")
+        assertEquals(3, configs.size)
+        assertEquals(2, configs[0].threads)
+        assertEquals("6-7", configs[0].cpuRange)
+        assertEquals(4, configs[1].threads)
+        assertEquals("6-7", configs[1].cpuRange)
+        assertEquals(2, configs[2].threads)
+        assertEquals("", configs[2].cpuRange)
+    }
+
+    @Test
+    fun decodeSweepDegradesWhenThereIsNoClusterToPin() {
+        val configs = SocTuning.decodeConfigs("")
+        assertEquals(3, configs.size)
+        assertTrue(configs.all { it.cpuRange.isEmpty() })
+    }
+
+    @Test
+    fun prefillSweepUsesTwoAndTheFastCoreCount() {
+        assertEquals(listOf(2, 5), SocTuning.prefillConfigs(5))
+        // A two-core fast cluster would give two identical values, so use four.
+        assertEquals(listOf(2, 4), SocTuning.prefillConfigs(2))
+        assertEquals(listOf(2, 4), SocTuning.prefillConfigs(0))
+    }
+
+    // --- OEM guidance mapping (item 2) ------------------------------------
+
+    @Test
+    fun knownVendorsGetAnIntentAndAnUnknownVendorDoesNot() {
+        for (m in listOf("samsung", "Xiaomi", "OnePlus", "HUAWEI", "OPPO", "vivo")) {
+            val g = OemGuidance.forManufacturer(m)
+            assertNotNull("$m should deep-link", OemGuidance.componentOf(g.settingsComponent))
+            assertTrue(g.dontKillUrl.startsWith("https://dontkillmyapp.com/"))
+        }
+        // An unknown vendor must not be handed a wrong intent.
+        val unknown = OemGuidance.forManufacturer("SomePhone Co")
+        assertNull(OemGuidance.componentOf(unknown.settingsComponent))
+        assertEquals("https://dontkillmyapp.com/", unknown.dontKillUrl)
+    }
+
+    @Test
+    fun malformedComponentsAreRejected() {
+        assertNull(OemGuidance.componentOf(null))
+        assertNull(OemGuidance.componentOf(""))
+        assertNull(OemGuidance.componentOf("com.vendor.app"))
+        assertNull(OemGuidance.componentOf("/Activity"))
+        assertNull(OemGuidance.componentOf("com.vendor.app/"))
+        assertEquals("com.a" to "com.a.B", OemGuidance.componentOf("com.a/com.a.B"))
+    }
+
+    // --- charge-held-at-100% duration maths (item 2) ----------------------
+
+    @Test
+    fun fullHoursIsNullUntilTheThresholdIsCrossed() {
+        val now = 10_000_000_000L
+        assertNull(OemGuidance.fullHours(0L, now))
+        assertNull(OemGuidance.fullHours(now + 1, now))
+        assertNull(OemGuidance.fullHours(now - OemGuidance.FULL_CHARGE_WARN_MS + 1, now))
+        assertEquals(4, OemGuidance.fullHours(now - OemGuidance.FULL_CHARGE_WARN_MS, now))
+        assertEquals(5, OemGuidance.fullHours(now - 5 * 3_600_000L, now))
+    }
+
+    @Test
+    fun sittingFullNeedsChargingAtOneHundredForFourHours() {
+        val full = BatterySnapshot(levelPct = 100, charging = true, tempC = 30f, chargeCounterUah = null)
+        val now = 20_000_000_000L
+        assertTrue(OemGuidance.sittingFull(full, now - OemGuidance.FULL_CHARGE_WARN_MS, now))
+        assertFalse(OemGuidance.sittingFull(full, now - 60_000L, now))
+        // Unplugged, or not full: never a warning.
+        assertFalse(
+            OemGuidance.sittingFull(full.copy(charging = false), now - OemGuidance.FULL_CHARGE_WARN_MS, now),
+        )
+        assertFalse(
+            OemGuidance.sittingFull(full.copy(levelPct = 99), now - OemGuidance.FULL_CHARGE_WARN_MS, now),
+        )
     }
 }

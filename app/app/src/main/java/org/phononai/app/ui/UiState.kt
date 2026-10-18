@@ -72,9 +72,14 @@ data class Health(
     val socTuningProfile: String,
     val socTuningRunning: Boolean,
     val socTuningState: String,
+    /** Engine revision of a stored profile that no longer matches this build. */
+    val socTuningStaleRev: String?,
     val oemVendor: String,
     val oemDontKillUrl: String,
     val batteryFullWarning: Boolean,
+    /** Whole hours held at 100%, 0 when below the warning threshold. */
+    val batteryFullHours: Int,
+    val batteryFullDismissed: Boolean,
 ) {
     /** Mode the running child was launched in; falls back to detection. */
     val perfVisible: Boolean get() = perfMode == PerfPlan.MODE_VISIBLE
@@ -154,9 +159,16 @@ fun parseHealth(raw: String): Health {
         socTuningProfile = j.optString("soc_tuning_profile", "none"),
         socTuningRunning = j.optBoolean("soc_tuning_running", false),
         socTuningState = j.optString("soc_tuning_state", "idle"),
+        socTuningStaleRev = if (j.isNull("soc_tuning_stale_rev")) {
+            null
+        } else {
+            j.optString("soc_tuning_stale_rev").ifBlank { null }
+        },
         oemVendor = j.optString("oem_vendor", ""),
         oemDontKillUrl = j.optString("oem_dont_kill_url", ""),
         batteryFullWarning = j.optBoolean("battery_full_warning", false),
+        batteryFullHours = j.optInt("battery_full_hours", 0),
+        batteryFullDismissed = j.optBoolean("battery_full_dismissed", false),
     )
 }
 
