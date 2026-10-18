@@ -188,15 +188,76 @@ the model list still refreshes after a download.
   key comparison, the settings two-phase validation, lock ordering and the
   thermal drain were checked and hold; the plan does not spend time there.
 
-## Decisions needed
+## Decisions (answered 2026-10-18)
 
-1. **A3's `.complete` sidecar** changes the on-disk layout slightly. Acceptable?
-   The alternative is re-hashing on every start, which costs seconds on a 3 GB
-   file.
-2. **C1's rate limit** needs a number. Proposal: 60 control requests per minute
-   per client, which is far above any legitimate use.
-3. **C2** reduces device-admin powers — confirm kiosk does not rely on
-   `force-lock` beyond Lock Task.
+### 1. The sidecar record — approved, with provenance
+
+Each model gets a sibling record, `<name>.phonon`, written only after the
+download has been size- and hash-checked:
+
+```json
+{
+  "file": "Qwen3.5-2B-Q4_K_M.gguf",
+  "bytes": 1280835840,
+  "sha256": "…",
+  "source": "https://huggingface.co/…",
+  "catalog_id": "qwen3.5-2b",
+  "verified_at": "2026-10-18T14:03:11Z",
+  "app_version": "0.1.2",
+  "signer": "<APK signing certificate SHA-256>"
+}
+```
+
+It is signed with HMAC-SHA256 using a key generated in the Android Keystore
+(StrongBox where the device has it) under an app-private alias. Editing the
+record on disk, or copying one in from elsewhere, fails verification and the
+model is treated as unverified.
+
+What that proves and what it does not: it proves **this installation wrote this
+record for this file at this time**. It does not prove the bytes came from
+Hugging Face — that guarantee is the catalog hash compiled into the signed APK,
+which is the anchor. The record's value is speed (no re-hashing 3 GB on every
+start) and rollback resistance (a replaced model no longer matches its record).
+
+A `.phonon` record that fails verification causes the model to be re-hashed; a
+hash mismatch deletes it.
+
+### 2. Rate limits — generous by default, configurable
+
+Default **600 requests per minute per client**, with a burst of 100. That is an
+order of magnitude above anything an agent doing real work produces on a phone
+whose requests take minutes, so it only catches a misbehaving client.
+
+Exposed as `rate_limit_per_min` in `/settings` and in the app's Advanced card,
+where **0 disables the limiter** for operators who do not want it. Control
+endpoints and `/v1` share the budget; the limiter is per source address.
+
+Implemented in Gate C, not before: the current single-threaded-per-connection
+proxy has no scheduler to hang it off until C1 lands.
+
+### 3. Kiosk and device-admin policies — the policies are not needed
+
+Answered from upstream, not from memory:
+
+- `DevicePolicyManager.setLockTaskPackages` throws `SecurityException` unless the
+  caller is **the device owner, the profile owner (of an affiliated user or
+  profile, or when no device owner is set), or holds
+  `MANAGE_DEVICE_POLICY_LOCK_TASK`** — AOSP
+  `core/java/android/app/admin/DevicePolicyManager.java`, javadoc on
+  `setLockTaskPackages`, current main.
+- The dedicated-device guide describes the same flow: a DPC allowlists packages
+  with `setLockTaskPackages` before they can enter lock task mode
+  (developer.android.com/work/dpc/dedicated-devices/lock-task-mode).
+
+None of `force-lock`, `wipe-data`, `expire-password` or `reset-password` is part
+of that path. They are legacy device-admin capabilities the app never
+implements, and they grant destructive powers for nothing.
+
+**Decision:** ship `res/xml/device_admin.xml` with an empty `<uses-policies />`
+set. The receiver and the manifest metadata stay — Device Owner provisioning
+needs a `DeviceAdminReceiver` component — but the app no longer requests powers
+it does not use. `docs/kiosk.md` will state this explicitly so a reader does not
+have to trust the diff.
 
 ## Order
 
