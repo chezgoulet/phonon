@@ -96,6 +96,17 @@ object DeviceReport {
                 put("steps", oem.steps)
                 put("dont_kill_url", oem.dontKillUrl)
             })
+            // Charging limit as the service last established it, plus the week's
+            // exposure. Mode, source and hours only — no key, no serial.
+            put("charge", JSONObject().apply {
+                val charge = health?.optJSONObject("charge")
+                put("mode", charge?.optString("mode") ?: "unknown")
+                put("source", charge?.optString("source") ?: "none")
+                put("confirmed", charge?.optBoolean("confirmed") ?: false)
+                put("hours_above_80", charge?.optInt("hours_above_80") ?: 0)
+                put("can_toggle", charge?.optBoolean("can_toggle") ?: false)
+                put("oem_steps", OemGuidance.chargingForDevice().steps)
+            })
             put("app", JSONObject().apply {
                 put("package", context.packageName)
                 put("version_name", BuildConfig.VERSION_NAME)

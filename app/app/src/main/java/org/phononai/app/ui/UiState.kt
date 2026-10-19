@@ -26,6 +26,15 @@ data class Health(
     val gatewayConfigured: Boolean,
     val gatewayRegistered: Boolean,
     val gatewayLastError: String?,
+    /** `limit-80` / `adaptive` / `off` / `unknown`; null before the first sample. */
+    val chargeMode: String?,
+    /** `secure`, `plateau`, `recalibration` or `none` — how the mode was established. */
+    val chargeSource: String?,
+    val chargeConfirmed: Boolean,
+    val chargeHoursAbove80: Int,
+    /** True only when WRITE_SECURE_SETTINGS is held, i.e. the switch is real. */
+    val chargeCanToggle: Boolean,
+    val chargeDetail: String,
     val lastDecodeTps: Double?,
     val lastPromptTps: Double?,
     val restartCount: Int,
@@ -138,6 +147,14 @@ fun parseHealth(raw: String): Health {
         gatewayLastError = j.optJSONObject("gateway")?.let { g ->
             if (g.isNull("last_error")) null else g.optString("last_error").ifBlank { null }
         },
+        chargeMode = j.optJSONObject("charge")?.let {
+            if (it.isNull("mode")) null else it.optString("mode").ifBlank { null }
+        },
+        chargeSource = j.optJSONObject("charge")?.optString("source")?.ifBlank { null },
+        chargeConfirmed = j.optJSONObject("charge")?.optBoolean("confirmed") ?: false,
+        chargeHoursAbove80 = j.optJSONObject("charge")?.optInt("hours_above_80") ?: 0,
+        chargeCanToggle = j.optJSONObject("charge")?.optBoolean("can_toggle") ?: false,
+        chargeDetail = j.optJSONObject("charge")?.optString("detail").orEmpty(),
         lastDecodeTps = j.optDoubleOrNull("last_decode_tps"),
         lastPromptTps = j.optDoubleOrNull("last_prompt_tps"),
         restartCount = j.optInt("restart_count"),

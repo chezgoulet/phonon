@@ -45,6 +45,14 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
         java.util.concurrent.Executors.newSingleThreadExecutor { r ->
             Thread(r, "phonon-gateway").apply { isDaemon = true }
         }
+    /**
+     * Charging-limit evidence. The tracker is process state (it needs a history
+     * of observations); the SoC ring is persisted, so the weekly number does
+     * not restart with the service.
+     */
+    private val chargeTracker = ChargeLimitTracker()
+    @Volatile private var lastChargeReading: ChargeReading? = null
+    private var socHistory: SocHistory? = null
 
     @Volatile private var api: ApiServer? = null
     @Volatile private var apiPort: Int = -1
@@ -200,6 +208,34 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
 
     // --- ApiHandler -------------------------------------------------------
 
+    /**
+     * The model Home Assistant sees. The alias is what llama-server is launched
+     * with, so it is the name the proxy accepts; the digest and size come from
+     * the catalog entry for the current file, and an unhashed file (pasted URL)
+     * reports `sha256:unknown` rather than inventing one.
+     */
+    override fun servedModel(): OllamaCompat.ServedModel {
+        val file = File(settings.modelPath)
+        val entry = settings.catalogEntryForCurrentModel()
+        val digest = entry?.sha256?.takeIf { it.length == 64 }
+            ?.let { "sha256:$it" }
+            ?: "sha256:unknown"
+        val modifiedAt = OllamaCompat.createdAt(
+            if (file.isFile) file.lastModified() else System.currentTimeMillis(),
+        )
+        return OllamaCompat.ServedModel(
+            name = settings.alias.ifBlank { "phonon" },
+            digest = digest,
+            sizeBytes = if (file.isFile) file.length() else 0L,
+            family = entry?.family?.key ?: file.name.substringBefore('.').lowercase(),
+            parameterSize = OllamaCompat.parameterSizeOf(entry?.displayName ?: file.name),
+            quantization = entry?.quant?.takeIf { it.isNotBlank() } ?: "unknown",
+            contextLength = settings.contextSize,
+            modifiedAt = modifiedAt,
+            displayName = entry?.displayName ?: file.nameWithoutExtension,
+        )
+    }
+
     override fun healthJson(): String {
         val json = JSONObject(server.healthJson(thermal.batteryTempC))
         keepWarm.healthFields(json)
@@ -295,6 +331,23 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
             put("registered", gatewayRegistered)
             put("last_error", gatewayLastError ?: JSONObject.NULL)
         })
+        // Charging limit: either read from the platform or inferred from a
+        // 20-minute plateau, plus this week's exposure above 80%. No key, no
+        // serial — safe to publish on the LAN.
+        val chargeNow = lastChargeReading ?: chargeTracker.observe(
+            nowMs,
+            fullBattery.levelPct,
+            fullBattery.charging,
+            if (fullBattery.known) ChargeSettings.readMode(this) else null,
+        )
+        json.put(
+            "charge",
+            ChargeLimit.healthJson(
+                chargeNow,
+                chargeHistory().hoursAbove(80, nowMs),
+                ChargeSettings.canWrite(this),
+            ),
+        )
         // A reload between commit and backend restart must not look `ready`
         // just because the previous process is still up.
         if (isRestarting() && json.optString("state") == ServerState.READY.wire) {
@@ -1337,6 +1390,35 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
         ).joinToString("|")
     }
 
+    /** The persisted hourly SoC ring, loaded once per process. */
+    private fun chargeHistory(): SocHistory {
+        socHistory?.let { return it }
+        return SocHistory.fromJson(settings.socHistoryJson).also { socHistory = it }
+    }
+
+    /**
+     * One charging observation per thermal tick.
+     *
+     * The reading is stored so `/health` and the card report the same thing the
+     * detector last concluded, rather than re-deriving a verdict from a single
+     * sample (which is how a phone passing through 79% becomes "the limit is
+     * on").
+     */
+    private fun recordCharge(battery: BatterySnapshot) {
+        if (destroyed || !battery.known) return
+        val nowMs = System.currentTimeMillis()
+        lastChargeReading = chargeTracker.observe(
+            nowMs = nowMs,
+            levelPct = battery.levelPct,
+            charging = battery.charging,
+            secureMode = ChargeSettings.readMode(this),
+        )
+        val history = chargeHistory()
+        if (history.record(nowMs, battery.levelPct)) {
+            settings.socHistoryJson = history.toJson()
+        }
+    }
+
     private fun onThermalSample(sample: ThermalSample) {
         if (destroyed) return
         val stop = settings.thermalStopC
@@ -1349,6 +1431,10 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
         batterySnapshot = battery
         // An IP change invalidates the api_base the gateway is holding.
         reregisterIfAddressChanged()
+        // The plateau detector and the weekly SoC ring ride the same tick as
+        // the thermal policy: one sample every 30 s is enough resolution for a
+        // 20-minute plateau and an hourly ring.
+        recordCharge(battery)
         // Track how long the phone has sat at 100% on the charger, for the
         // charge-hygiene warning. Persisted, so a service restart on a phone
         // left plugged in does not quietly restart the clock; reset the instant
