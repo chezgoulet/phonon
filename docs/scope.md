@@ -144,6 +144,16 @@ obligations — keep it that way by recording every dependency's origin in
 - Template/version pinning surfaced in the UI, so "tool calls broke" reports can
   be triaged immediately
 
+## Decision: the app ships CPU-only
+
+The Mali/Vulkan path is not shipped and is not planned. The engine is built with
+CPU backends only (`build-native.sh`), because the phone's GPU shares the memory
+bus with the CPU and the measured bottleneck is bandwidth, not compute. The
+optional OpenCL backend exists for Adreno and is off by default; it is labelled
+untested on the hardware it targets. A report that tool calls "broke" after a
+GOOGLE build change is therefore a CPU-kernel or template question, not a GPU
+driver one.
+
 ## Open items
 
 - **Thermal profiling under sustained load.** Two phones pegged at ~15 t/s will
