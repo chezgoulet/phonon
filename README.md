@@ -5,7 +5,8 @@
 Phonon turns spare Android phones into a private, OpenAI-compatible inference
 pool on your LAN. The pool's parallelism is the number of phones. Adding a phone
 adds a worker, not speed: a two-phone pool runs two tasks at once, each at one
-phone's pace.
+phone's pace. [Adding a phone](docs/multi-node.md) covers provisioning, the
+gateway entries and what failover does and does not do.
 
 This is a ground-up rebuild. The previous Phonon (2026) was a broad project with
 a Go coordinator, an NPU story and an e-waste framing. It is retired. What

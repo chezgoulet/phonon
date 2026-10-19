@@ -1,0 +1,51 @@
+# Draft F-Droid metadata for Phonon.
+#
+# The submission target is a merge request against the fdroiddata repository;
+# this file lives here so it is versioned with the app it describes. Field
+# names follow the Build Metadata Reference. The two values that must be
+# confirmed against the buildserver before submitting are marked CONFIRM.
+
+Categories:
+  - Internet
+  - Development
+
+License: Apache-2.0
+
+AuthorName: Phonon
+WebSite: https://phononai.org
+SourceCode: https://github.com/chezgoulet/phonon
+IssueTracker: https://github.com/chezgoulet/phonon/issues
+Changelog: https://github.com/chezgoulet/phonon/blob/main/fastlane/metadata/android/en-US/changelogs/%c.txt
+
+AutoName: Phonon
+
+RepoType: git
+Repo: https://github.com/chezgoulet/phonon.git
+
+Builds:
+  - versionName: 0.1.15
+    versionCode: 16
+    commit: v0.1.15
+    submodules: true
+    # The engine is compiled from the pinned submodule during the build. It is
+    # not a prebuilt library and nothing in jniLibs is committed.
+    prebuild:
+      - ./app/build-native.sh
+    # The Gradle wrapper lives in app/, not at the repository root.
+    build:
+      - ./app/gradlew -p app assembleRelease
+    output: app/app/build/outputs/apk/release/app-release-unsigned.apk
+    # CONFIRM: the buildserver must offer this NDK. It is r30-rc1; every
+    # measured number was produced with it. If sdkmanager cannot fetch an rc,
+    # switch to stable 30.0.16248370 in ndkVersion, ANDROID_NDK_VERSION and
+    # here together, and re-run the benchmarks before publishing figures.
+    ndk: 30.0.16138531
+
+AutoUpdateMode: Version
+UpdateCheckMode: Tags
+CurrentVersion: 0.1.15
+CurrentVersionCode: 16
+
+# No Binaries: / AllowedAPKSigningKeys entry yet. F-Droid signs with its own
+# key by default. One signature across GitHub Releases, Obtainium and F-Droid
+# requires reproducible builds first; see docs/FDROID-GAPS.md.
