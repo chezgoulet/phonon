@@ -37,6 +37,15 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
     private val requests = RequestTracker()
     private val mainHandler = Handler(Looper.getMainLooper())
 
+    /**
+     * Charging-limit evidence. The tracker is process state (it needs a history
+     * of observations); the SoC ring is persisted, so the weekly number does
+     * not restart with the service.
+     */
+    private val chargeTracker = ChargeLimitTracker()
+    @Volatile private var lastChargeReading: ChargeReading? = null
+    private var socHistory: SocHistory? = null
+
     @Volatile private var api: ApiServer? = null
     @Volatile private var apiPort: Int = -1
     @Volatile private var apiBind: String? = null
@@ -301,6 +310,23 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
         json.put("battery_full_hours", heldFull ?: 0)
         json.put("battery_full_dismissed", dismissed)
         if (fullSince > 0) json.put("battery_full_since_ms", fullSince)
+        // Charging limit: either read from the platform or inferred from a
+        // 20-minute plateau, plus this week's exposure above 80%. No key, no
+        // serial — safe to publish on the LAN.
+        val chargeNow = lastChargeReading ?: chargeTracker.observe(
+            nowMs,
+            fullBattery.levelPct,
+            fullBattery.charging,
+            if (fullBattery.known) ChargeSettings.readMode(this) else null,
+        )
+        json.put(
+            "charge",
+            ChargeLimit.healthJson(
+                chargeNow,
+                chargeHistory().hoursAbove(80, nowMs),
+                ChargeSettings.canWrite(this),
+            ),
+        )
         // A reload between commit and backend restart must not look `ready`
         // just because the previous process is still up.
         if (isRestarting() && json.optString("state") == ServerState.READY.wire) {
@@ -1218,6 +1244,35 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
         ).joinToString("|")
     }
 
+    /** The persisted hourly SoC ring, loaded once per process. */
+    private fun chargeHistory(): SocHistory {
+        socHistory?.let { return it }
+        return SocHistory.fromJson(settings.socHistoryJson).also { socHistory = it }
+    }
+
+    /**
+     * One charging observation per thermal tick.
+     *
+     * The reading is stored so `/health` and the card report the same thing the
+     * detector last concluded, rather than re-deriving a verdict from a single
+     * sample (which is how a phone passing through 79% becomes "the limit is
+     * on").
+     */
+    private fun recordCharge(battery: BatterySnapshot) {
+        if (destroyed || !battery.known) return
+        val nowMs = System.currentTimeMillis()
+        lastChargeReading = chargeTracker.observe(
+            nowMs = nowMs,
+            levelPct = battery.levelPct,
+            charging = battery.charging,
+            secureMode = ChargeSettings.readMode(this),
+        )
+        val history = chargeHistory()
+        if (history.record(nowMs, battery.levelPct)) {
+            settings.socHistoryJson = history.toJson()
+        }
+    }
+
     private fun onThermalSample(sample: ThermalSample) {
         if (destroyed) return
         val stop = settings.thermalStopC
@@ -1228,6 +1283,10 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
         // documented as a ROM/root capability, not something this code claims.
         val battery = BatteryHealth.snapshot(this)
         batterySnapshot = battery
+        // The plateau detector and the weekly SoC ring ride the same tick as
+        // the thermal policy: one sample every 30 s is enough resolution for a
+        // 20-minute plateau and an hourly ring.
+        recordCharge(battery)
         // Track how long the phone has sat at 100% on the charger, for the
         // charge-hygiene warning. Persisted, so a service restart on a phone
         // left plugged in does not quietly restart the clock; reset the instant

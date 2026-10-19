@@ -201,6 +201,15 @@ class Settings(context: Context) {
         get() = prefs.getLong(KEY_CHARGE_WARNING_DISMISSED, 0L)
         set(value) = prefs.edit().putLong(KEY_CHARGE_WARNING_DISMISSED, value).apply()
 
+    /**
+     * Hourly state-of-charge ring, as JSON. Persisted so "hours above 80% this
+     * week" survives a service restart — the metric is about a week, not about
+     * how long the app has been up. Corrupt or absent means an empty ring.
+     */
+    var socHistoryJson: String
+        get() = prefs.getString(KEY_SOC_HISTORY, "").orEmpty()
+        set(value) = prefs.edit().putString(KEY_SOC_HISTORY, value).apply()
+
 
     /**
      * Off by default: while a request is in flight the avatar drops to a
@@ -750,6 +759,7 @@ class Settings(context: Context) {
         private const val KEY_SOC_TUNING = "soc_tuning_profiles"
         private const val KEY_BATTERY_FULL_SINCE = "battery_full_since_ms"
         private const val KEY_CHARGE_WARNING_DISMISSED = "charge_warning_dismissed_since_ms"
+        private const val KEY_SOC_HISTORY = "soc_history"
         private const val KEY_ANIMATE_GENERATING = "animate_avatar_while_generating"
         private const val KEY_PRESENCE_SHAPE = "visual_shape_presence"
         private const val KEY_SERVING_REQUESTED = "serving_requested"
