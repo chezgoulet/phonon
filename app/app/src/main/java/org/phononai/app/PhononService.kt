@@ -185,6 +185,34 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
 
     // --- ApiHandler -------------------------------------------------------
 
+    /**
+     * The model Home Assistant sees. The alias is what llama-server is launched
+     * with, so it is the name the proxy accepts; the digest and size come from
+     * the catalog entry for the current file, and an unhashed file (pasted URL)
+     * reports `sha256:unknown` rather than inventing one.
+     */
+    override fun servedModel(): OllamaCompat.ServedModel {
+        val file = File(settings.modelPath)
+        val entry = settings.catalogEntryForCurrentModel()
+        val digest = entry?.sha256?.takeIf { it.length == 64 }
+            ?.let { "sha256:$it" }
+            ?: "sha256:unknown"
+        val modifiedAt = OllamaCompat.createdAt(
+            if (file.isFile) file.lastModified() else System.currentTimeMillis(),
+        )
+        return OllamaCompat.ServedModel(
+            name = settings.alias.ifBlank { "phonon" },
+            digest = digest,
+            sizeBytes = if (file.isFile) file.length() else 0L,
+            family = entry?.family?.key ?: file.name.substringBefore('.').lowercase(),
+            parameterSize = OllamaCompat.parameterSizeOf(entry?.displayName ?: file.name),
+            quantization = entry?.quant?.takeIf { it.isNotBlank() } ?: "unknown",
+            contextLength = settings.contextSize,
+            modifiedAt = modifiedAt,
+            displayName = entry?.displayName ?: file.nameWithoutExtension,
+        )
+    }
+
     override fun healthJson(): String {
         val json = JSONObject(server.healthJson(thermal.batteryTempC))
         keepWarm.healthFields(json)

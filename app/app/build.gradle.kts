@@ -159,3 +159,14 @@ fun Project.engineRevFromSubmodule(): String {
     }
     return "unknown"
 }
+
+// Dev harness for the Ollama-compatible surface: serves the real routes on the
+// JVM so the `ollama` Python client can drive them without installing the app.
+// See OllamaShimServer in the test sources and docs/home-assistant.md.
+tasks.register<JavaExec>("ollamaShim") {
+    group = "verification"
+    description = "Serve the Ollama-compatible /api routes on the JVM for client tests."
+    dependsOn("compileDebugUnitTestKotlin")
+    classpath = tasks.named<Test>("testDebugUnitTest").get().classpath
+    mainClass.set("org.phononai.app.OllamaShimServer")
+}
