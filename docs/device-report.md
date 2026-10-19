@@ -39,6 +39,20 @@ shows the path in the preview.
 - package name
 - `versionName` and `versionCode`
 
+**Engine**
+
+- `engine_rev` — the pinned llama.cpp submodule's HEAD read at build time (e.g.
+  `797de63b2f`), or `unknown` when the build could not read it. It is never a
+  hand-written revision, so it cannot drift from the submodule that was compiled.
+- `template_mode` / `template_source` — how prompts are formatted: `jinja` (the
+  server runs `llama-server --jinja`) and `model` (the model's own chat template;
+  no template file is passed). If a custom template ever becomes configurable,
+  these carry it.
+
+All three come from build-time constants (`EngineProvenance`), and the same
+fields are on `/health`, so the report and the API cannot name an engine other
+than the one compiled.
+
 **Model**
 
 - file name, SHA-256, size in bytes

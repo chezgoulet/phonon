@@ -65,6 +65,12 @@ data class Health(
     val cpuI8mm: Boolean,
     val cpuFeatures: String,
     val nativeRequiredFeatures: String,
+    /** Which llama.cpp this build carries, e.g. "797de63b2f". */
+    val engineRev: String,
+    /** Prompt-formatting mode the server runs: "jinja" today. */
+    val templateMode: String,
+    /** Where that template comes from: "model", or a template file. */
+    val templateSource: String,
     val memAvailGb: String,
     val memRequiredBytes: Long,
     val memKvBytes: Long,
@@ -166,6 +172,9 @@ fun parseHealth(raw: String): Health {
         cpuI8mm = j.optBoolean("cpu_i8mm", false),
         cpuFeatures = j.optString("cpu_features", ""),
         nativeRequiredFeatures = j.optString("native_required_features", ""),
+        engineRev = j.optString("engine_rev", ""),
+        templateMode = j.optString("template_mode", ""),
+        templateSource = j.optString("template_source", ""),
         memAvailGb = j.optString("mem_avail_gb", ""),
         memRequiredBytes = j.optLong("mem_required_bytes", 0),
         memKvBytes = j.optLong("mem_kv_estimate_bytes", 0),
