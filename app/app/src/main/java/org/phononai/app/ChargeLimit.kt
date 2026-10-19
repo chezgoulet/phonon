@@ -65,15 +65,28 @@ object ChargeSettings {
         context.checkSelfPermission(Manifest.permission.WRITE_SECURE_SETTINGS) ==
             PackageManager.PERMISSION_GRANTED
 
+    /**
+     * Why the last read produced nothing, for the card to show.
+     *
+     * A device where `adb shell settings get secure charge_optimization_mode`
+     * answers `0` while the app reads nothing is either refusing the read to
+     * apps or storing a shape `getInt` will not coerce. Swallowing that told the
+     * operator "unknown" with no way to act on it, so the reason is kept.
+     */
+    @Volatile
+    var lastReadError: String? = null
+
     /** The raw value, or null when this device does not expose the key. */
-    fun readModeValue(context: Context): Int? =
+    fun readModeValue(context: Context): Int? {
         try {
-            Settings.Secure.getInt(context.contentResolver, KEY_MODE)
-        } catch (_: Settings.SettingNotFoundException) {
-            null
-        } catch (_: Throwable) {
-            null
+            val raw = Settings.Secure.getString(context.contentResolver, KEY_MODE)
+            lastReadError = if (raw == null) "not present in Settings.Secure" else null
+            return raw?.trim()?.toIntOrNull()
+        } catch (t: Throwable) {
+            lastReadError = t.javaClass.simpleName + (t.message?.let { ": $it" } ?: "")
+            return null
         }
+    }
 
     fun readAdaptive(context: Context): Boolean? =
         try {
@@ -236,20 +249,25 @@ class ChargeLimitTracker(
                 mode = ChargeMode.UNKNOWN,
                 source = "none",
                 confirmed = false,
-                detail = "at 100%: could be a recalibration charge or no limit at all",
+                detail = "at 100%: could be a recalibration charge or no limit at all" +
+                    readSuffix(),
             )
         }
         return ChargeReading(
             mode = ChargeMode.UNKNOWN,
             source = "none",
             confirmed = false,
-            detail = if (charging) {
+            detail = (if (charging) {
                 "watching for a plateau at 80%"
             } else {
                 "not charging; the limit cannot be inferred"
-            },
+            }) + readSuffix(),
         )
     }
+
+    /** The platform read's own complaint, when there was one. */
+    private fun readSuffix(): String =
+        ChargeSettings.lastReadError?.let { " (setting read: $it)" } ?: ""
 }
 
 /**
