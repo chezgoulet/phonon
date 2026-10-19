@@ -13,13 +13,16 @@ Verified two ways.
 runner produced the same APK:
 
 ```
-sha256 d7da6c2c... (see the run) at commit 6a7af33, NDK 30.0.16138531
+sha256 2503a2d9175a36e0a6ba3231a345afbe133ccc5458318f18949c90565e6c734f
+commit 6a7af33, NDK 30.0.16138531
 ```
 
 **Different machines** — the shipped `v0.1.18` APK, built on a GitHub runner,
 was compared entry by entry against a rebuild of the same tag on our own host:
 
 ```
+local rebuild (unsigned)  72cfdb750aa9e46f77e559d112bd73c12bcf5700d20ca509e6b47176af5f3610
+shipped v0.1.18 (signed)  d7da6c2c2334bed198b1d5aeda59ee86d25f80977b7406a3a795ca8868701a22
 entries compared: 120
 MATCH: every non-signature entry is identical
 ```
