@@ -75,6 +75,8 @@ cmake -S "$SRC" -B "$BUILD" \
   -DGGML_BACKEND_DL=ON \
   -DGGML_CPU_KLEIDIAI="${PHONON_NATIVE_KLEIDIAI:-ON}" \
   "$OPENCL_FLAG" \
+  -DLLAMA_BUILD_UI=OFF \
+  -DLLAMA_USE_PREBUILT_UI=OFF \
   -DLLAMA_BUILD_TESTS=OFF \
   -DLLAMA_BUILD_EXAMPLES=OFF \
   -DLLAMA_BUILD_SERVER=ON
@@ -82,3 +84,12 @@ cmake -S "$SRC" -B "$BUILD" \
 cmake --build "$BUILD" -j"$(nproc)" --target llama-server
 
 "$HERE/sync-native.sh" "$BUILD/bin"
+
+# The NDK's toolchain appends -Wl,--build-id=sha1 after our flags, so the note
+# survives every attempt to disable it through CMake. Nothing on Android reads
+# it; removing it here is what makes two checkouts produce identical libraries.
+OC="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-objcopy"
+for so in "$HERE/app/src/main/jniLibs/arm64-v8a/"*.so; do
+  "$OC" --remove-section=.note.gnu.build-id "$so" "$so.nobuildid"
+  mv "$so.nobuildid" "$so"
+done
