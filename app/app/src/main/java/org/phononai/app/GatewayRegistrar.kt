@@ -232,8 +232,14 @@ class LiteLlmRegistrar(
      */
     private fun failure(status: Int, body: String): GatewayResult {
         val raw = gatewayMessage(body) ?: body.take(300).ifBlank { "HTTP $status" }
+        val lower = raw.lowercase()
+        val databaseMissing = lower.contains("store_model_in_db") ||
+            lower.contains("no connected db") ||
+            lower.contains("no db connected") ||
+            lower.contains("no database") ||
+            lower.contains("db connection")
         val hint = when {
-            raw.contains("STORE_MODEL_IN_DB", true) || raw.contains("No DB Connected", true) ->
+            databaseMissing ->
                 "the gateway must run with store_model_in_db: true and a DATABASE_URL"
             status == 401 || status == 403 ->
                 "the gateway rejected the key; it must be a proxy key allowed to manage models"

@@ -243,6 +243,21 @@ class GatewayRegistrarTest {
     }
 
     @Test
+    fun `the wording this LiteLLM build actually sends is recognised`() {
+        // Measured on the live proxy: a DB-less gateway answers 400 with
+        // "No connected db." — not the "No DB Connected" spelling, and not the
+        // STORE_MODEL_IN_DB one. The hint was missing on the device because of
+        // it, which is the only thing standing between the operator and a fix.
+        newStatus = 400
+        newBody = """{"error":{"message":"No connected db.","type":"no_db_connection"}}"""
+        val failure = registrar().register() as GatewayResult.Failure
+        assertEquals(
+            "the gateway must run with store_model_in_db: true and a DATABASE_URL",
+            failure.hint,
+        )
+    }
+
+    @Test
     fun `the older STORE_MODEL_IN_DB wording is recognised too`() {
         newStatus = 400
         newBody = """{"error":{"message":"Set STORE_MODEL_IN_DB=True to use /model/new"}}"""

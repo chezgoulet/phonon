@@ -3488,7 +3488,7 @@ private fun GatewayCard(context: Context, settings: Settings, health: Health?) {
     var keyDraft by remember { mutableStateOf("") }
     var status by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
-    val keyStored = remember { GatewayKeyStore.has(context) }
+    var keyStored by remember { mutableStateOf(GatewayKeyStore.has(context)) }
 
     fun apply() {
         val trimmed = url.trim()
@@ -3506,6 +3506,7 @@ private fun GatewayCard(context: Context, settings: Settings, health: Health?) {
                 return
             }
             keyDraft = ""
+            keyStored = true
         }
         settings.gatewayUrl = trimmed
         settings.gatewayEnabled = enabled
