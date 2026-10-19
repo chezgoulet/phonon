@@ -47,8 +47,10 @@ the repository.
 
 ## Decided
 
-- **One signature.** Reproducible builds are verified
-  ([`REPRODUCIBLE.md`](REPRODUCIBLE.md)), so the metadata uses `Binaries:` and
+- **One signature.** Reproducible builds are verified on one machine and across
+  machines — the shipped v0.1.18 APK matches a rebuild of its tag in all 120
+  non-signature entries ([`REPRODUCIBLE.md`](REPRODUCIBLE.md)). The metadata
+  uses `Binaries:` and
   `AllowedAPKSigningKeys:` and F-Droid publishes the APK we sign. If the
   buildserver cannot reproduce it, deleting those two lines falls back to
   F-Droid's own key without changing anything else.

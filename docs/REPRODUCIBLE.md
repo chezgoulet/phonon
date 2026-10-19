@@ -7,13 +7,26 @@ proof.
 
 ## Status
 
-Verified. Two builds at `/tmp/repro/one` and `/tmp/repro/two` on a clean GitHub
+Verified two ways.
+
+**Same machine, two paths** — two builds at different paths on a clean GitHub
 runner produced the same APK:
 
 ```
-sha256 a767070286eebc9050ec25c29fce21e79447736234f42b1bb5186d35de3a8c12
-commit 5881cf5, NDK 30.0.16138531
+sha256 d7da6c2c... (see the run) at commit 6a7af33, NDK 30.0.16138531
 ```
+
+**Different machines** — the shipped `v0.1.18` APK, built on a GitHub runner,
+was compared entry by entry against a rebuild of the same tag on our own host:
+
+```
+entries compared: 120
+MATCH: every non-signature entry is identical
+```
+
+The signature (`META-INF/`) is the only difference, and only because the local
+rebuild is unsigned. That is the property F-Droid needs: it can rebuild the tag
+and get the same code we signed.
 
 `.github/workflows/reproducible.yml` re-runs that comparison on every change to
 the app or the engine submodule, and fails the build if the bytes differ.
