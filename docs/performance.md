@@ -15,6 +15,23 @@ Model and server for every row:
   `ignore_eos: true`, non-streaming, through the app's own
   `/v1/chat/completions` proxy
 
+## Current numbers (0.1.14)
+
+Re-measured 2026-10-19 on app 0.1.14, the build with runtime CPU kernel variants
+and the sweep-chosen profile (2 decode threads unpinned, `-tb 4`), through the
+app's own endpoint:
+
+| Regime | Decode | Prefill |
+|---|---|---|
+| burst, 128 greedy tokens | **14.01 tok/s** | 91.4 tok/s |
+| sustained, 38 × 192 tokens over 874 s | **10.54 tok/s** median, 8.94 floor | 58.8 tok/s |
+| recovery, five idle minutes | 14.33 tok/s | 98.4 tok/s |
+| one agent-shaped turn (2,251 prompt + 128 generated) | — | 84.5 tok/s, **29.0 s wall** |
+
+Peak resident set during the agent turn: 2,667 MB. Battery 23.3 → 33.2 °C across
+the sustained run. Full method and the harness's threshold caveat:
+[`sustained-load.md`](sustained-load.md).
+
 ## Current numbers (0.1.7)
 
 The build now targets ARMv8.2 with dot-product instructions, and prefill has its
