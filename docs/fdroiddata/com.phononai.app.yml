@@ -23,9 +23,9 @@ RepoType: git
 Repo: https://github.com/chezgoulet/phonon.git
 
 Builds:
-  - versionName: 0.1.15
-    versionCode: 16
-    commit: v0.1.15
+  - versionName: 0.1.16
+    versionCode: 17
+    commit: v0.1.16
     submodules: true
     # The engine is compiled from the pinned submodule during the build. It is
     # not a prebuilt library and nothing in jniLibs is committed.
@@ -43,8 +43,8 @@ Builds:
 
 AutoUpdateMode: Version
 UpdateCheckMode: Tags
-CurrentVersion: 0.1.15
-CurrentVersionCode: 16
+CurrentVersion: 0.1.16
+CurrentVersionCode: 17
 
 # No Binaries: / AllowedAPKSigningKeys entry yet. F-Droid signs with its own
 # key by default. One signature across GitHub Releases, Obtainium and F-Droid

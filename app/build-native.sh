@@ -68,7 +68,7 @@ cmake -S "$SRC" -B "$BUILD" \
   -DGGML_OPENMP=OFF \
   -DGGML_CPU_REPACK=ON \
   -DCMAKE_C_FLAGS="$PREFIX_MAP" \
-  -DCMAKE_CXX_FLAGS="$PREFIX_MAP" \
+  -DCMAKE_CXX_FLAGS="$PREFIX_MAP -Wl,--build-id=none" \
   -DCMAKE_SHARED_LINKER_FLAGS="-Wl,--build-id=none" \
   -DCMAKE_EXE_LINKER_FLAGS="-Wl,--build-id=none" \
   -DGGML_CPU_ALL_VARIANTS=ON \
