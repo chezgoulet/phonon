@@ -106,6 +106,72 @@ object OemGuidance {
     }
 
     /**
+     * The vendor's charging-limit screen, when one exists.
+     *
+     * Separate from the background-kill guidance: a kiosk install that holds
+     * WRITE_SECURE_SETTINGS does not need it, and an operator whose phone does
+     * not expose the secure key needs a path that actually exists on their
+     * device. [settingsComponent] is null where no stable component is known,
+     * and the caller falls back to the platform battery settings.
+     */
+    data class ChargingGuidance(
+        val vendor: String,
+        val steps: String,
+        val settingsComponent: String?,
+    )
+
+    fun chargingForDevice(): ChargingGuidance = chargingFor(Build.MANUFACTURER ?: "")
+
+    fun chargingFor(manufacturer: String): ChargingGuidance {
+        val key = manufacturer.trim().lowercase()
+        return when {
+            key.contains("google") || key.contains("pixel") -> ChargingGuidance(
+                "Google Pixel",
+                "Settings → Battery → Charging optimization → Limit to 80%",
+                PIXEL_BATTERY,
+            )
+            key.contains("samsung") -> ChargingGuidance(
+                "Samsung",
+                "Settings → Battery → Protect battery",
+                null,
+            )
+            key.contains("xiaomi") || key.contains("redmi") || key.contains("poco") -> ChargingGuidance(
+                "Xiaomi (MIUI/HyperOS)",
+                "Settings → Battery → Battery protection (some builds: Charging limit)",
+                null,
+            )
+            key.contains("oneplus") || key.contains("oppo") || key.contains("realme") -> ChargingGuidance(
+                "OnePlus/OPPO/realme",
+                "Settings → Battery → Battery health → Charging limit",
+                null,
+            )
+            key.contains("huawei") || key.contains("honor") -> ChargingGuidance(
+                "Huawei/Honor",
+                "Settings → Battery → Battery protection (some builds: Smart charge)",
+                null,
+            )
+            key.contains("vivo") || key.contains("iqoo") -> ChargingGuidance(
+                "vivo/iQOO",
+                "Settings → Battery → Charging limit",
+                null,
+            )
+            else -> ChargingGuidance(
+                if (Build.MANUFACTURER.isNullOrBlank()) "this device" else Build.MANUFACTURER,
+                "Settings → Battery: look for Charging optimization, Battery protection " +
+                    "or Charging limit.",
+                null,
+            )
+        }
+    }
+
+    /**
+     * Pixel's battery page. Kept as a constant, not built per call, so a typo
+     * cannot turn into a silent fallback.
+     */
+    private const val PIXEL_BATTERY =
+        "com.android.settings/com.android.settings.Settings\$BatterySettingsActivity"
+
+    /**
      * Split a `package/class` component into its parts, or null when it is
      * absent or malformed. Pure so the caller never builds an Intent from junk.
      */

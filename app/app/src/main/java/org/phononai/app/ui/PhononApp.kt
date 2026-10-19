@@ -89,6 +89,10 @@ import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import org.phononai.app.AppState
 import org.phononai.app.BuildConfig
+import org.phononai.app.ChargeLimit
+import org.phononai.app.ChargeMode
+import org.phononai.app.ChargeReading
+import org.phononai.app.ChargeSettings
 import org.phononai.app.DeviceReport
 import org.phononai.app.DeviceReportResult
 import org.phononai.app.FieldReportResult
@@ -546,6 +550,8 @@ private fun ServeScreen(
             health = health,
         )
         Spacer(Modifier.height(14.dp))
+        ChargeCard(health = health, context = context)
+        Spacer(Modifier.height(14.dp))
         BenchmarkCard(
             state = benchmark,
             onRun = onRunBenchmark,
@@ -764,6 +770,157 @@ private fun ThermalCard(
             fontSize = 13.sp,
             lineHeight = 18.sp,
         )
+    }
+}
+
+/**
+ * The charging-optimisation card.
+ *
+ * It reports only what the app could establish — read from the platform, or
+ * inferred from a 20-minute plateau — and offers exactly the action it can back
+ * up: a real switch when WRITE_SECURE_SETTINGS is held, the OEM screen when it
+ * is not. There is never a switch that silently writes nothing.
+ */
+@Composable
+private fun ChargeCard(health: Health?, context: Context) {
+    val reading = ChargeReading(
+        mode = ChargeMode.fromWire(health?.chargeMode),
+        source = health?.chargeSource ?: "none",
+        confirmed = health?.chargeConfirmed == true,
+        detail = health?.chargeDetail.orEmpty(),
+    )
+    val guidance = remember { OemGuidance.chargingForDevice() }
+    var error by remember { mutableStateOf<String?>(null) }
+    // Optimistic only between the write and the next /health poll; the platform
+    // is the source of truth, so a failed write falls back instead of lying.
+    var pending by remember { mutableStateOf<Boolean?>(null) }
+    val checked = pending ?: (reading.mode == ChargeMode.LIMIT_80)
+    val accent = when (reading.mode) {
+        ChargeMode.LIMIT_80, ChargeMode.ADAPTIVE -> PhononColors.Cyan
+        ChargeMode.OFF -> PhononColors.Warn
+        ChargeMode.UNKNOWN -> PhononColors.TextDim
+    }
+    val stateWord = when (reading.mode) {
+        ChargeMode.LIMIT_80 -> if (reading.confirmed) "LIMIT 80%" else "LIMIT 80%?"
+        ChargeMode.ADAPTIVE -> "ADAPTIVE"
+        ChargeMode.OFF -> "NO LIMIT"
+        ChargeMode.UNKNOWN -> "UNCONFIRMED"
+    }
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(PhononColors.Surface)
+            .border(1.dp, PhononColors.Border, RoundedCornerShape(18.dp))
+            .padding(16.dp),
+    ) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text(
+                "CHARGING",
+                color = PhononColors.TextDim,
+                fontSize = 11.sp,
+                letterSpacing = 0.9.sp,
+            )
+            Text(
+                stateWord,
+                color = accent,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+        }
+        Spacer(Modifier.height(10.dp))
+        Text(
+            ChargeLimit.cardLine(reading, health?.chargeHoursAbove80 ?: 0),
+            color = PhononColors.TextDim,
+            fontSize = 13.sp,
+            lineHeight = 18.sp,
+        )
+        if (reading.mode == ChargeMode.OFF) {
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "Held at 100% on a charger, this cell ages faster than at 80%. " +
+                    "The platform owns the charger; this card can only report it.",
+                color = PhononColors.Warn.copy(alpha = 0.85f),
+                fontSize = 12.sp,
+                lineHeight = 16.sp,
+            )
+        }
+        Spacer(Modifier.height(12.dp))
+        if (health?.chargeCanToggle == true) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Limit to 80%", color = PhononColors.Text, fontSize = 14.sp)
+                    Text(
+                        "Writes Settings.Secure.charge_optimization_mode.",
+                        color = PhononColors.TextDim.copy(alpha = 0.85f),
+                        fontSize = 11.5.sp,
+                        lineHeight = 15.sp,
+                    )
+                }
+                PhononSwitch(checked = checked) { on ->
+                    val failure = ChargeSettings.writeLimit80(context, on)
+                    error = failure
+                    pending = if (failure == null) on else null
+                }
+            }
+        } else {
+            Text(
+                "Without WRITE_SECURE_SETTINGS the app cannot write this setting, " +
+                    "so there is no switch here. Grant it over adb for a real one.",
+                color = PhononColors.TextDim.copy(alpha = 0.85f),
+                fontSize = 11.5.sp,
+                lineHeight = 15.sp,
+            )
+        }
+        Spacer(Modifier.height(4.dp))
+        TextButton(onClick = { openChargingSettings(context, guidance) }) {
+            Text("Open charging settings", color = PhononColors.Cyan, fontSize = 13.sp)
+        }
+        Text(
+            guidance.steps,
+            color = PhononColors.TextDim.copy(alpha = 0.8f),
+            fontSize = 11.5.sp,
+            lineHeight = 15.sp,
+        )
+        error?.let {
+            Spacer(Modifier.height(6.dp))
+            Text(it, color = PhononColors.Danger, fontSize = 12.sp, lineHeight = 16.sp)
+        }
+    }
+}
+
+/**
+ * Open the vendor's charging screen when one is known, then the platform's
+ * battery settings, then the settings root. Each step can fail on a device that
+ * changed its activity names, so each is tried in turn rather than assumed.
+ */
+private fun openChargingSettings(context: Context, guidance: OemGuidance.ChargingGuidance) {
+    OemGuidance.componentOf(guidance.settingsComponent)?.let { (pkg, cls) ->
+        try {
+            context.startActivity(
+                Intent().setComponent(ComponentName(pkg, cls))
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            )
+            return
+        } catch (_: Throwable) {
+            // Fall through to the platform screen.
+        }
+    }
+    try {
+        context.startActivity(
+            Intent(AndroidSettings.ACTION_BATTERY_SAVER_SETTINGS)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+        )
+        return
+    } catch (_: Throwable) {
+        // Fall through to the settings root.
+    }
+    try {
+        context.startActivity(
+            Intent(AndroidSettings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+        )
+    } catch (_: Throwable) {
+        toast(context, "Open Settings → Battery")
     }
 }
 
