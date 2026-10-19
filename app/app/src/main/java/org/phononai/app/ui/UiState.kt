@@ -22,6 +22,10 @@ data class Health(
     val pauseReason: String?,
     val batteryLevel: Int?,
     val batteryCharging: Boolean?,
+    /** Gateway registration: state only — never the key, never the URL. */
+    val gatewayConfigured: Boolean,
+    val gatewayRegistered: Boolean,
+    val gatewayLastError: String?,
     val lastDecodeTps: Double?,
     val lastPromptTps: Double?,
     val restartCount: Int,
@@ -129,6 +133,11 @@ fun parseHealth(raw: String): Health {
         pauseReason = if (j.isNull("pause_reason")) null else j.optString("pause_reason").ifBlank { null },
         batteryLevel = j.optIntOrNull("battery_level"),
         batteryCharging = if (j.has("battery_charging")) j.optBoolean("battery_charging") else null,
+        gatewayConfigured = j.optJSONObject("gateway")?.optBoolean("configured") ?: false,
+        gatewayRegistered = j.optJSONObject("gateway")?.optBoolean("registered") ?: false,
+        gatewayLastError = j.optJSONObject("gateway")?.let { g ->
+            if (g.isNull("last_error")) null else g.optString("last_error").ifBlank { null }
+        },
         lastDecodeTps = j.optDoubleOrNull("last_decode_tps"),
         lastPromptTps = j.optDoubleOrNull("last_prompt_tps"),
         restartCount = j.optInt("restart_count"),

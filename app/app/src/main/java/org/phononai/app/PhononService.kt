@@ -37,6 +37,15 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
     private val requests = RequestTracker()
     private val mainHandler = Handler(Looper.getMainLooper())
 
+    /** Gateway registration state, published in /health without the key or URL. */
+    @Volatile private var gatewayRegistered = false
+    @Volatile private var gatewayLastError: String? = null
+    @Volatile private var gatewayApiBase: String? = null
+    private val gatewayExecutor =
+        java.util.concurrent.Executors.newSingleThreadExecutor { r ->
+            Thread(r, "phonon-gateway").apply { isDaemon = true }
+        }
+
     @Volatile private var api: ApiServer? = null
     @Volatile private var apiPort: Int = -1
     @Volatile private var apiBind: String? = null
@@ -181,6 +190,12 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
             syncWakeLock()
             updateNotification()
         }
+        // READY is the moment the node can actually answer a completion, which
+        // is what the gateway entry promises. Register off the caller's thread:
+        // a slow gateway must not delay the server's own state machine.
+        if (server.state == ServerState.READY) {
+            gatewayExecutor.execute { registerWithGateway("serving") }
+        }
     }
 
     // --- ApiHandler -------------------------------------------------------
@@ -273,6 +288,13 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
         json.put("battery_full_hours", heldFull ?: 0)
         json.put("battery_full_dismissed", dismissed)
         if (fullSince > 0) json.put("battery_full_since_ms", fullSince)
+        // Registration state only: no key, and not even the URL, which can carry
+        // a token in a path or a username.
+        json.put("gateway", JSONObject().apply {
+            put("configured", settings.gatewayEnabled && settings.gatewayUrl.isNotBlank())
+            put("registered", gatewayRegistered)
+            put("last_error", gatewayLastError ?: JSONObject.NULL)
+        })
         // A reload between commit and backend restart must not look `ready`
         // just because the previous process is still up.
         if (isRestarting() && json.optString("state") == ServerState.READY.wire) {
@@ -448,6 +470,131 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
             }
         } catch (_: Throwable) {
         }
+        // Best effort, and deliberately not awaited: an unreachable gateway
+        // must not block a shutdown. Whatever is left behind is updated on the
+        // next start instead.
+        gatewayExecutor.execute {
+            val registrar = gatewayRegistrar()
+            if (registrar != null) {
+                when (val result = registrar.deregister()) {
+                    is GatewayResult.Ok -> {
+                        gatewayRegistered = false
+                        gatewayLastError = null
+                    }
+                    is GatewayResult.Failure -> gatewayLastError =
+                        "deregister: ${result.message}"
+                }
+            }
+        }
+    }
+
+    // --- gateway registration (#351) ---------------------------------------
+
+    /** The UI's Save and Test paths call this after writing settings. */
+    fun uiGatewayChanged() {
+        gatewayExecutor.execute {
+            if (settings.gatewayEnabled) {
+                registerWithGateway("settings")
+            } else {
+                gatewayRegistered = false
+                gatewayLastError = null
+            }
+        }
+    }
+
+    private fun gatewayModelName(): String = "phone-${settings.gatewayNodeId}"
+
+    /**
+     * The api_base the gateway will use to reach this node.
+     *
+     * A wildcard or loopback bind is reached on the LAN address, not on
+     * 127.0.0.1: a gateway in another container cannot route to the phone's
+     * loopback, and registering a base it cannot reach would register a broken
+     * entry that fails at request time.
+     */
+    private fun gatewayApiBase(): String {
+        val host = if (settings.bindAddress != Settings.BIND_ANY &&
+            !Settings.isLoopbackBind(settings.bindAddress)
+        ) {
+            settings.bindAddress
+        } else {
+            lanAddress() ?: settings.apiHost()
+        }
+        return "http://$host:${settings.port}/v1"
+    }
+
+    private fun lanAddress(): String? = try {
+        java.net.NetworkInterface.getNetworkInterfaces()?.toList()
+            ?.flatMap { it.inetAddresses.toList() }
+            ?.filterIsInstance<java.net.Inet4Address>()
+            ?.firstOrNull { !it.isLoopbackAddress && it.isSiteLocalAddress }
+            ?.hostAddress
+    } catch (_: Throwable) {
+        null
+    }
+
+    /** A registrar from current settings, or null with [gatewayLastError] set. */
+    private fun gatewayRegistrar(): LiteLlmRegistrar? {
+        if (!settings.gatewayEnabled) return null
+        val url = settings.gatewayUrl.trim()
+        if (url.isBlank()) {
+            gatewayLastError = "gateway address is not set"
+            return null
+        }
+        if (settings.apiKey.isBlank()) {
+            gatewayLastError =
+                "this node has no API key, so the gateway would be given an empty one; set one first"
+            return null
+        }
+        val key = GatewayKeyStore.load(this)
+        if (key == null) {
+            gatewayLastError = "no registration key is stored, or it could not be decrypted"
+            return null
+        }
+        return LiteLlmRegistrar(
+            baseUrl = url,
+            masterKey = key,
+            modelName = gatewayModelName(),
+            servedModel = settings.alias,
+            apiBase = gatewayApiBase(),
+            nodeKey = settings.apiKey,
+        )
+    }
+
+    private fun registerWithGateway(reason: String) {
+        if (!settings.gatewayEnabled) {
+            gatewayRegistered = false
+            gatewayLastError = null
+            return
+        }
+        val registrar = gatewayRegistrar()
+        if (registrar == null) {
+            gatewayRegistered = false
+            return
+        }
+        when (val result = registrar.register()) {
+            is GatewayResult.Ok -> {
+                gatewayRegistered = true
+                gatewayLastError = null
+                gatewayApiBase = gatewayApiBase()
+                Log.i(TAG, "gateway: ${registrar.modelName} registered ($reason)")
+            }
+            is GatewayResult.Failure -> {
+                gatewayRegistered = false
+                gatewayLastError = listOfNotNull(result.message, result.hint).joinToString(" — ")
+                Log.w(TAG, "gateway: registration failed ($reason): ${result.message}")
+            }
+        }
+    }
+
+    /**
+     * A new DHCP lease changes the api_base the gateway holds. Re-register when
+     * it moves rather than leaving an entry pointing at an address nobody has.
+     */
+    private fun reregisterIfAddressChanged() {
+        if (!settings.gatewayEnabled || !gatewayRegistered) return
+        if (gatewayApiBase() == gatewayApiBase) return
+        gatewayExecutor.execute { registerWithGateway("address change") }
     }
 
     override fun settingsJson(): String = settings.asJson()
@@ -1200,6 +1347,8 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
         // documented as a ROM/root capability, not something this code claims.
         val battery = BatteryHealth.snapshot(this)
         batterySnapshot = battery
+        // An IP change invalidates the api_base the gateway is holding.
+        reregisterIfAddressChanged()
         // Track how long the phone has sat at 100% on the charger, for the
         // charge-hygiene warning. Persisted, so a service restart on a phone
         // left plugged in does not quietly restart the clock; reset the instant

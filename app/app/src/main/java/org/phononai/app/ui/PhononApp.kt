@@ -90,6 +90,10 @@ import org.json.JSONObject
 import org.phononai.app.AppState
 import org.phononai.app.BuildConfig
 import org.phononai.app.DeviceReport
+import org.phononai.app.GatewayAddress
+import org.phononai.app.GatewayKeyStore
+import org.phononai.app.GatewayResult
+import org.phononai.app.LiteLlmRegistrar
 import org.phononai.app.DeviceReportResult
 import org.phononai.app.FieldReportResult
 import org.phononai.app.HardwareProfile
@@ -2491,6 +2495,9 @@ private fun SettingsScreen(
         }
         Spacer(Modifier.height(12.dp))
 
+        GatewayCard(context = context, settings = settings, health = health)
+        Spacer(Modifier.height(12.dp))
+
         val activity = context.findActivity()
         if (activity != null) {
             KioskCard(activity)
@@ -3463,4 +3470,150 @@ private fun Context.findActivity(): Activity? {
 
 private fun toast(context: Context, message: String) {
     Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+}
+
+/**
+ * Gateway registration, off by default (#351).
+ *
+ * The key is written straight to the Android Keystore through
+ * [GatewayKeyStore], never through the settings JSON API: a secret that travels
+ * in a request body can end up in a log, and this one authorises writes to a
+ * shared gateway. What reaches the service is only "settings changed".
+ */
+@Composable
+private fun GatewayCard(context: Context, settings: Settings, health: Health?) {
+    val scope = rememberCoroutineScope()
+    var enabled by remember { mutableStateOf(settings.gatewayEnabled) }
+    var url by remember { mutableStateOf(settings.gatewayUrl) }
+    var keyDraft by remember { mutableStateOf("") }
+    var status by remember { mutableStateOf<String?>(null) }
+    var busy by remember { mutableStateOf(false) }
+    val keyStored = remember { GatewayKeyStore.has(context) }
+
+    fun apply() {
+        val trimmed = url.trim()
+        if (enabled) {
+            val violation = GatewayAddress.violation(trimmed)
+            if (violation != null) {
+                status = violation
+                return
+            }
+        }
+        if (keyDraft.isNotEmpty()) {
+            val failure = GatewayKeyStore.store(context, keyDraft)
+            if (failure != null) {
+                status = failure
+                return
+            }
+            keyDraft = ""
+        }
+        settings.gatewayUrl = trimmed
+        settings.gatewayEnabled = enabled
+        AppState.service?.uiGatewayChanged()
+        status = if (enabled) "Saved; registration will be attempted now" else "Saved; registration off"
+    }
+
+    PhononCard {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Gateway", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "Register this phone with a LiteLLM proxy so one URL and one key reach it. " +
+                        "Optional, and off by default.",
+                    color = PhononColors.TextDim,
+                    fontSize = 12.5.sp,
+                    lineHeight = 17.sp,
+                )
+            }
+            PhononSwitch(checked = enabled) {
+                enabled = it
+                apply()
+            }
+        }
+        Spacer(Modifier.height(10.dp))
+        PhononField(
+            value = url,
+            onValueChange = { url = it },
+            label = "Gateway base URL",
+            placeholder = "http://10.0.10.20:4000",
+            keyboardType = KeyboardType.Uri,
+        )
+        Spacer(Modifier.height(8.dp))
+        PhononField(
+            value = keyDraft,
+            onValueChange = { keyDraft = it },
+            label = if (keyStored) "Registration key (stored — leave blank to keep)" else "Registration key",
+            placeholder = if (keyStored) "stored in the Keystore" else "not set",
+            keyboardType = KeyboardType.Password,
+        )
+        Spacer(Modifier.height(8.dp))
+        Text(
+            "This key is not the node's API key: it authorises writes to the gateway, " +
+                "so use a dedicated proxy key where the gateway supports one.",
+            color = PhononColors.TextDim.copy(alpha = 0.85f),
+            fontSize = 11.5.sp,
+            lineHeight = 15.sp,
+        )
+        Spacer(Modifier.height(8.dp))
+        val configured = enabled && url.isNotBlank()
+        Text(
+            when {
+                !configured -> "Not configured"
+                health?.gatewayRegistered == true ->
+                    "Registered as phone-${settings.gatewayNodeId}"
+                !health?.gatewayLastError.isNullOrBlank() ->
+                    "Not registered: ${health?.gatewayLastError}"
+                else -> "Configured; the node has not reported a registration yet"
+            },
+            color = PhononColors.TextDim,
+            fontSize = 12.sp,
+            lineHeight = 16.sp,
+        )
+        Spacer(Modifier.height(8.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            TextButton(
+                enabled = !busy,
+                onClick = {
+                    busy = true
+                    status = "Testing…"
+                    val typed = url.trim()
+                    val key = keyDraft.ifEmpty { GatewayKeyStore.load(context).orEmpty() }
+                    scope.launch {
+                        val result = withContext(Dispatchers.IO) {
+                            val violation = GatewayAddress.violation(typed)
+                            when {
+                                key.isEmpty() ->
+                                    GatewayResult.Failure("no registration key to test")
+                                violation != null -> GatewayResult.Failure(violation)
+                                else -> LiteLlmRegistrar(
+                                    baseUrl = typed,
+                                    masterKey = key,
+                                    modelName = "phone-${settings.gatewayNodeId}",
+                                    servedModel = settings.alias,
+                                    apiBase = "http://127.0.0.1:${settings.port}/v1",
+                                    nodeKey = "",
+                                ).check()
+                            }
+                        }
+                        status = when (result) {
+                            is GatewayResult.Ok -> "The gateway answered and accepted the key"
+                            is GatewayResult.Failure ->
+                                listOfNotNull(result.message, result.hint).joinToString(" — ")
+                        }
+                        busy = false
+                    }
+                },
+            ) {
+                Text("Test", color = PhononColors.Cyan, fontSize = 13.sp)
+            }
+            TextButton(enabled = !busy, onClick = { apply() }) {
+                Text("Save", color = PhononColors.Cyan, fontSize = 13.sp)
+            }
+        }
+        status?.let {
+            Spacer(Modifier.height(6.dp))
+            Text(it, color = PhononColors.TextDim, fontSize = 12.sp, lineHeight = 16.sp)
+        }
+    }
 }
