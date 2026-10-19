@@ -53,6 +53,11 @@ fi
 # -DGGML_CPU_ARM_ARCH and -march are deliberately absent: they are mutually
 # exclusive with ALL_VARIANTS, and the whole point is that no single ISA is
 # baked in. The per-variant -march picks its own target.
+# Reproducibility: the NDK builds with -g, so the absolute source and build
+# paths land in the debug info and the .so files differ between two checkouts.
+# Map them to stable prefixes; verified by building twice in different paths and
+# comparing the APK.
+PREFIX_MAP="-ffile-prefix-map=$BUILD=/build -ffile-prefix-map=$SRC=/src"
 cmake -S "$SRC" -B "$BUILD" \
   -DCMAKE_TOOLCHAIN_FILE="$NDK/build/cmake/android.toolchain.cmake" \
   -DANDROID_ABI=arm64-v8a \
@@ -62,6 +67,8 @@ cmake -S "$SRC" -B "$BUILD" \
   -DLLAMA_CURL=OFF \
   -DGGML_OPENMP=OFF \
   -DGGML_CPU_REPACK=ON \
+  -DCMAKE_C_FLAGS="$PREFIX_MAP" \
+  -DCMAKE_CXX_FLAGS="$PREFIX_MAP" \
   -DGGML_CPU_ALL_VARIANTS=ON \
   -DGGML_BACKEND_DL=ON \
   -DGGML_CPU_KLEIDIAI="${PHONON_NATIVE_KLEIDIAI:-ON}" \
