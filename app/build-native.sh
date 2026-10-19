@@ -57,6 +57,10 @@ fi
 # paths land in the debug info and the .so files differ between two checkouts.
 # Map them to stable prefixes; verified by building twice in different paths and
 # comparing the APK.
+# The engine's build number is normally derived from git. A shallow submodule
+# has no tags, so two machines disagree — it was 1 on one and 11716 on another.
+# Pin it; bump it with the submodule revision, not on its own.
+# The pinned revision 797de63 is b11716.
 PREFIX_MAP="-ffile-prefix-map=$BUILD=/build -ffile-prefix-map=$SRC=/src"
 cmake -S "$SRC" -B "$BUILD" \
   -DCMAKE_TOOLCHAIN_FILE="$NDK/build/cmake/android.toolchain.cmake" \
@@ -65,6 +69,7 @@ cmake -S "$SRC" -B "$BUILD" \
   -DCMAKE_BUILD_TYPE=Release \
   -DBUILD_SHARED_LIBS=ON \
   -DLLAMA_CURL=OFF \
+  -DLLAMA_BUILD_NUMBER="${PHONON_LLAMA_BUILD_NUMBER:-11716}" \
   -DGGML_OPENMP=OFF \
   -DGGML_CPU_REPACK=ON \
   -DCMAKE_C_FLAGS="$PREFIX_MAP" \

@@ -1,0 +1,6 @@
+One more source of drift removed: the engine's build number was derived from
+git, and a shallow submodule has no tags, so two machines disagreed — one
+reported b1, the other b11716. It is now pinned to the revision we ship.
+
+With that, the APK we publish is byte-identical to a rebuild from the same tag
+on a different machine, not just to a second build on the same one.
