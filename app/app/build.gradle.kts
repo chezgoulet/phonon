@@ -160,6 +160,24 @@ fun Project.engineRevFromSubmodule(): String {
     return "unknown"
 }
 
+// Dev harness: run the real gateway registrar against a live LiteLLM.
+tasks.register<JavaExec>("gatewayProbe") {
+    group = "verification"
+    description = "Exercise the gateway registration client against a live gateway."
+    dependsOn("compileDebugUnitTestKotlin")
+    classpath = tasks.named<Test>("testDebugUnitTest").get().classpath
+    mainClass.set("org.phononai.app.GatewayProbe")
+    args = listOf(
+        (project.findProperty("gatewayUrl") as String?) ?: "http://127.0.0.1:4001",
+        (project.findProperty("nodeApiBase") as String?) ?: "http://host.docker.internal:18099/v1",
+    )
+    if (project.hasProperty("modelName")) {
+        systemProperty("modelName", project.findProperty("modelName"))
+    }
+    if (project.hasProperty("keep")) {
+        systemProperty("keep", "true")
+    }
+}
 // Dev harness for the Ollama-compatible surface: serves the real routes on the
 // JVM so the `ollama` Python client can drive them without installing the app.
 // See OllamaShimServer in the test sources and docs/home-assistant.md.

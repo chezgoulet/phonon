@@ -22,6 +22,10 @@ data class Health(
     val pauseReason: String?,
     val batteryLevel: Int?,
     val batteryCharging: Boolean?,
+    /** Gateway registration: state only — never the key, never the URL. */
+    val gatewayConfigured: Boolean,
+    val gatewayRegistered: Boolean,
+    val gatewayLastError: String?,
     /** `limit-80` / `adaptive` / `off` / `unknown`; null before the first sample. */
     val chargeMode: String?,
     /** `secure`, `plateau`, `recalibration` or `none` — how the mode was established. */
@@ -138,6 +142,11 @@ fun parseHealth(raw: String): Health {
         pauseReason = if (j.isNull("pause_reason")) null else j.optString("pause_reason").ifBlank { null },
         batteryLevel = j.optIntOrNull("battery_level"),
         batteryCharging = if (j.has("battery_charging")) j.optBoolean("battery_charging") else null,
+        gatewayConfigured = j.optJSONObject("gateway")?.optBoolean("configured") ?: false,
+        gatewayRegistered = j.optJSONObject("gateway")?.optBoolean("registered") ?: false,
+        gatewayLastError = j.optJSONObject("gateway")?.let { g ->
+            if (g.isNull("last_error")) null else g.optString("last_error").ifBlank { null }
+        },
         chargeMode = j.optJSONObject("charge")?.let {
             if (it.isNull("mode")) null else it.optString("mode").ifBlank { null }
         },
