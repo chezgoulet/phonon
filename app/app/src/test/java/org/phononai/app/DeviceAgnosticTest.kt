@@ -656,5 +656,73 @@ class DeviceAgnosticTest {
             dir.deleteRecursively()
         }
     }
+
+    // --- engine revision and template identity in the device report --------
+
+    @Test
+    fun engineRevisionIsNonBlankAndReadFromTheBuild() {
+        // The value is whatever the pinned llama.cpp submodule's HEAD was at
+        // configure time (or "unknown"); it must never be blank, and it must be
+        // the build's constant rather than anything written into the reporter.
+        assertTrue("engine revision must not be blank", EngineProvenance.engineRev.isNotBlank())
+        assertEquals(BuildConfig.ENGINE_REV, EngineProvenance.engineRev)
+    }
+
+    @Test
+    fun templateIdentityIsJinjaFromTheModelAndReadFromTheBuild() {
+        // The server runs --jinja against the model's own chat template; no
+        // template file is passed. Stated as data so the report can say so.
+        assertEquals(BuildConfig.TEMPLATE_MODE, EngineProvenance.templateMode)
+        assertEquals(BuildConfig.TEMPLATE_SOURCE, EngineProvenance.templateSource)
+        assertEquals("jinja", EngineProvenance.templateMode)
+        assertEquals("model", EngineProvenance.templateSource)
+    }
+
+    @Test
+    fun reportFieldsCarryTheEngineProvenanceFromBuildConfig() {
+        // The exact block the device report and /health embed.
+        val j = EngineProvenance.fields()
+        assertTrue("engine_rev must not be blank", j.getString("engine_rev").isNotBlank())
+        assertEquals(BuildConfig.ENGINE_REV, j.getString("engine_rev"))
+        assertEquals(BuildConfig.TEMPLATE_MODE, j.getString("template_mode"))
+        assertEquals(BuildConfig.TEMPLATE_SOURCE, j.getString("template_source"))
+    }
+
+    @Test
+    fun reporterTakesProvenanceFromTheBuildNotARevisionLiteral() {
+        // DeviceReport.build needs a Context, so its source is guarded instead:
+        // the revision must come from the build (EngineProvenance <- BuildConfig),
+        // never from a literal that could drift from the pinned submodule.
+        val src = sourceFile("src/main/java/org/phononai/app/DeviceReport.kt")
+            ?: error("DeviceReport.kt not found from ${System.getProperty("user.dir")}")
+        val text = src.readText()
+        assertTrue(
+            "the reporter must take the engine revision from the build",
+            text.contains("EngineProvenance"),
+        )
+        // A quoted run of 7-40 lowercase hex characters is exactly what a pinned
+        // commit looks like; none may sit in the reporter.
+        val literal = Regex("\"[0-9a-f]{7,40}\"").find(text)
+        assertNull("hard-coded revision literal in the reporter: ${literal?.value}", literal)
+
+        // /health carries the same fields from the same single source.
+        val service = sourceFile("src/main/java/org/phononai/app/PhononService.kt")
+            ?: error("PhononService.kt not found from ${System.getProperty("user.dir")}")
+        assertTrue(
+            "/health must take the engine revision from the build",
+            service.readText().contains("EngineProvenance"),
+        )
+    }
+
+    /** Walk up from the test working directory to find a source file. */
+    private fun sourceFile(relative: String): java.io.File? {
+        var dir = java.io.File(System.getProperty("user.dir") ?: ".").absoluteFile
+        repeat(4) {
+            val f = java.io.File(dir, relative)
+            if (f.isFile) return f
+            dir = dir.parentFile ?: return null
+        }
+        return null
+    }
 }
 

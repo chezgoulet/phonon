@@ -101,6 +101,12 @@ object DeviceReport {
                 put("version_name", BuildConfig.VERSION_NAME)
                 put("version_code", BuildConfig.VERSION_CODE)
             })
+            // Engine provenance: which llama.cpp this build carries and how
+            // prompts are formatted. Both come from build-time constants via
+            // EngineProvenance, never from a revision written in here.
+            put("engine_rev", EngineProvenance.engineRev)
+            put("template_mode", EngineProvenance.templateMode)
+            put("template_source", EngineProvenance.templateSource)
             put("model", JSONObject().apply {
                 put("file", model.name)
                 put("sha256", sha256(model))
@@ -203,6 +209,11 @@ object DeviceReport {
             appendLine("app:")
             appendLine("  package: ${context.packageName}")
             appendLine("  version: ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
+            appendLine()
+            appendLine("engine:")
+            appendLine("  engine_rev: ${EngineProvenance.engineRev}")
+            appendLine("  template_mode: ${EngineProvenance.templateMode}")
+            appendLine("  template_source: ${EngineProvenance.templateSource}")
             appendLine()
             appendLine("model:")
             appendLine("  file: ${model.name}")

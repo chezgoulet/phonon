@@ -213,6 +213,11 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
         json.put("cpu_i8mm", features.i8mm)
         json.put("cpu_features", features.summary)
         json.put("native_required_features", NativeRequirements.requiredLabel)
+        // Engine provenance, from the same build-time constants the device
+        // report uses: a "tool calls broke" report can be triaged against these.
+        json.put("engine_rev", EngineProvenance.engineRev)
+        json.put("template_mode", EngineProvenance.templateMode)
+        json.put("template_source", EngineProvenance.templateSource)
         val modelFile = File(settings.modelPath)
         val mmprojBytes = settings.catalogEntryForCurrentModel()
             ?.let { entry -> File(modelFile.parentFile, entry.mmprojFileName) }

@@ -30,6 +30,19 @@ android {
         val requiredFeatures: String =
             (project.findProperty("phonon.requiredCpuFeatures") as String?).orEmpty()
         buildConfigField("String", "NATIVE_REQUIRED_CPU_FEATURES", "\"$requiredFeatures\"")
+
+        // Which llama.cpp this build carries. ENGINE_REV is read from the pinned
+        // submodule's HEAD at configure time; a hand-written revision would drift
+        // from the code that was actually compiled the moment the submodule moved.
+        // Absent git or an unchecked-out submodule reports "unknown", not a guess.
+        val engineRev: String = engineRevFromSubmodule()
+        buildConfigField("String", "ENGINE_REV", "\"$engineRev\"")
+        // The server runs llama-server --jinja and lets the model's own chat
+        // template format the prompt; no template file is passed. If a custom
+        // template ever becomes configurable these must carry it rather than
+        // this default. Surfaced as template_mode/template_source.
+        buildConfigField("String", "TEMPLATE_MODE", "\"jinja\"")
+        buildConfigField("String", "TEMPLATE_SOURCE", "\"model\"")
     }
 
     // Signing material comes from the environment so CI can sign without a
@@ -114,4 +127,35 @@ androidComponents {
     onVariants(selector().withBuildType("release")) { variant ->
         variant.packaging.jniLibs.excludes.add("lib/arm64-v8a/libphonon-fadvise.so")
     }
+}
+
+/**
+ * The pinned llama.cpp submodule's HEAD, e.g. "797de63b2f", read at build time.
+ *
+ * The submodule lives at the repo top level while this script sits two levels
+ * down, so it is looked for from the module directory and from the Gradle root.
+ * Returns "unknown" when git is missing or the submodule is not checked out, so
+ * configuring from a source tarball does not fail the build.
+ */
+fun Project.engineRevFromSubmodule(): String {
+    val candidates = listOf(
+        file("../../third_party/llama.cpp"),
+        file("../third_party/llama.cpp"),
+        rootProject.projectDir.parentFile?.resolve("third_party/llama.cpp"),
+    )
+    for (candidate in candidates) {
+        val dir = candidate ?: continue
+        if (!dir.isDirectory) continue
+        val rev = try {
+            val proc = ProcessBuilder(
+                "git", "-C", dir.absolutePath, "rev-parse", "--short=10", "HEAD",
+            ).redirectErrorStream(true).start()
+            val out = proc.inputStream.bufferedReader().readText().trim()
+            if (proc.waitFor() == 0) out else ""
+        } catch (_: Exception) {
+            ""
+        }
+        if (rev.isNotBlank()) return rev
+    }
+    return "unknown"
 }

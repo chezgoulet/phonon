@@ -88,6 +88,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import org.phononai.app.AppState
+import org.phononai.app.BuildConfig
 import org.phononai.app.DeviceReport
 import org.phononai.app.DeviceReportResult
 import org.phononai.app.FieldReportResult
@@ -2057,6 +2058,17 @@ private fun SettingsScreen(
                 color = PhononColors.TextDim,
                 fontSize = 12.sp,
                 lineHeight = 17.sp,
+            )
+            Spacer(Modifier.height(4.dp))
+            // Engine provenance in monospace so a glance at the phone can
+            // triage a report. Both values are build-time constants.
+            Text(
+                "engine ${BuildConfig.ENGINE_REV} · template ${BuildConfig.TEMPLATE_MODE} " +
+                    "(${BuildConfig.TEMPLATE_SOURCE})",
+                color = PhononColors.TextDim,
+                fontSize = 12.sp,
+                lineHeight = 17.sp,
+                fontFamily = FontFamily.Monospace,
             )
             health?.let { h ->
                 Spacer(Modifier.height(4.dp))

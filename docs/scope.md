@@ -137,10 +137,13 @@ obligations — keep it that way by recording every dependency's origin in
   threads), with the tier shown on Serve.
 - **Done (0.3.0):** benchmark mode — 128 tokens, prefill/decode, TTFT, thermal
   state, peak RSS, cold/warm. See [`benchmark.md`](benchmark.md).
-- **Partial (0.3.0):** one-button device report — SoC, RAM, Android version,
-  model hash, settings and benchmark numbers. The llama.cpp build hash and
-  template version are not yet in the report; see
-  [`device-report.md`](device-report.md).
+- **Done (0.3.0):** one-button device report — SoC, RAM, Android version,
+  model hash, settings and benchmark numbers. Engine provenance is now in the
+  report too: `engine_rev` (the pinned llama.cpp submodule's HEAD, read at build
+  time, never a hand-written revision) and the chat-template identity
+  (`template_mode` = `jinja`, `template_source` = `model`). `/health` carries the
+  same three fields from the same build constants, and Settings' Device card
+  shows them. See [`device-report.md`](device-report.md).
 - Template/version pinning surfaced in the UI, so "tool calls broke" reports can
   be triaged immediately
 
