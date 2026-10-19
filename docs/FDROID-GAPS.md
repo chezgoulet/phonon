@@ -41,17 +41,18 @@ the repository.
 3. **The `fdroiddata` metadata file is not written yet.** It needs
    `submodules: true`, a `prebuild` running `./app/build-native.sh`, the NDK
    pin, `versionCode`/`versionName`, and the licence.
-4. **Screenshots should be refreshed** to the current UI (six avatar shapes,
-   five model families) before submission.
-5. **Signing decision.** F-Droid signs with its own key by default. Keeping one
+4. **Signing decision.** F-Droid signs with its own key by default. Keeping one
    signature across GitHub Releases, Obtainium and F-Droid requires reproducible
    builds plus `AllowedAPKSigningKeys`; decide before an install base exists.
-6. **Device-admin policy breadth.** `res/xml/device_admin.xml` requests
-   `force-lock`, `wipe-data`, `expire-password`, `reset-password` while the
-   receiver implements no password/wipe callbacks. Trim the unused policies and
-   keep the kiosk rationale in the description.
-7. **NOTICE should carry the llama.cpp licence text and the pinned commit**, not
-   only the name.
+
+## Closed since this page was written
+
+- **Device-admin policy breadth** — `res/xml/device_admin.xml` now declares an
+  empty `<uses-policies />` (0.1.4). Lock Task needs the Device Owner component,
+  not the legacy policies, and the kiosk rationale is in `docs/kiosk.md`.
+- **Screenshots** — refreshed for the current UI (six avatar shapes, five model
+  families) and regenerated from the app on each release.
+- **NOTICE** — carries the llama.cpp MIT text and the pinned revision.
 
 ## Notes
 

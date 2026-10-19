@@ -11,14 +11,15 @@ This is a ground-up rebuild. The previous Phonon (2026) was a broad project with
 a Go coordinator, an NPU story and an e-waste framing. It is retired. What
 survives is the measurement discipline and a small amount of code.
 
-## Status: v0.1.5
+## Status: v0.1.15
 
 The app packages `llama-server` (built from the pinned llama.cpp submodule at
 compile time), downloads a GGUF into app storage, supervises the server from a
 foreground service and serves an OpenAI-compatible API. On the reference Pixel 7
-with Qwen3.5-2B Q4_K_M at 32K context it measures **8.37 tok/s** for a burst and
-**6.31 tok/s** sustained over fifteen minutes, with no throttle event; the method
-and the numbers are in [`docs/performance.md`](docs/performance.md) and
+with Qwen3.5-2B Q4_K_M at 32K context it measures **14.01 tok/s** for a burst and
+**10.54 tok/s** sustained across thirty-eight generations over fifteen minutes,
+and one agent-shaped turn — a 2.3K prompt plus 128 generated tokens — in **29.0 s**.
+The method and the numbers are in [`docs/performance.md`](docs/performance.md) and
 [`docs/sustained-load.md`](docs/sustained-load.md).
 
 Five model families ship with measured rates: Qwen3.5, Gemma 4, MiniCPM5,
@@ -27,9 +28,11 @@ Kiosk, thermal pause and resume, an on-device benchmark and device-report export
 are implemented; the Device Owner path needs a device with no accounts
 configured and says so when it cannot be used.
 
-Released: **v0.1.5** — see the releases page. Not yet done: a second phone has
-not been measured, reproducible builds are unproven, and the F-Droid metadata is
-not written. Those are tracked in [`docs/FDROID-GAPS.md`](docs/FDROID-GAPS.md).
+Released: **v0.1.15** — see the releases page, where every release carries the
+APK and its `SHA256SUMS`. Not yet done: a second phone has not been measured,
+`watts` needs a USB power meter, reproducible builds are unproven, and the
+F-Droid metadata is not written. Those are tracked in
+[`docs/FDROID-GAPS.md`](docs/FDROID-GAPS.md).
 
 Nothing in this repository claims a speed that has not been measured on the
 device it applies to. Device files carry `null` until someone runs the script.
@@ -64,7 +67,7 @@ Charging optimization, 80% limit) and by thermal-aware scheduling — see
 
 | Device | Codename | Status |
 |---|---|---|
-| Google Pixel 7 | `panther` | owned; measured — 9.20 / 8.84 tok/s burst, 6.31 sustained |
+| Google Pixel 7 | `panther` | owned; measured — 14.01 tok/s burst, 10.54 sustained, 29.0 s agent turn |
 
 Community device support is data, not prose: one manifest per device, with
 measured numbers produced by the repository's own script. See
