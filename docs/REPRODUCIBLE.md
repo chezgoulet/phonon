@@ -5,6 +5,19 @@ nobody can check that the binary we publish matches the source — F-Droid's
 upstream-binary flow is unavailable, and every release is a claim rather than a
 proof.
 
+## Status
+
+Verified. Two builds at `/tmp/repro/one` and `/tmp/repro/two` on a clean GitHub
+runner produced the same APK:
+
+```
+sha256 a767070286eebc9050ec25c29fce21e79447736234f42b1bb5186d35de3a8c12
+commit 5881cf5, NDK 30.0.16138531
+```
+
+`.github/workflows/reproducible.yml` re-runs that comparison on every change to
+the app or the engine submodule, and fails the build if the bytes differ.
+
 ## How to verify
 
 Two clean builds at **different absolute paths**, same commit:

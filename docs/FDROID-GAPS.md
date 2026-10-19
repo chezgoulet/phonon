@@ -32,18 +32,29 @@ the repository.
 ## Open
 
 1. **NDK pin is a release candidate.** `30.0.16138531` is r30-rc1 and produced
-   every measured number. Confirm the F-Droid buildserver's `sdkmanager` can
-   fetch it; if not, move to stable `30.0.16248370` in `ndkVersion`,
-   `ANDROID_NDK_VERSION` and this document together, and re-run the benchmarks
+   every measured number. The buildserver must be able to fetch it; if it
+   cannot, move to stable `30.0.16248370` in `ndkVersion`,
+   `ANDROID_NDK_VERSION` and the metadata together, and re-run the benchmarks
    before publishing figures.
-2. **Reproducible builds are not proven.** Build the APK twice from clean
-   checkouts and compare before asking for the upstream-binary flow.
-3. **The `fdroiddata` metadata file is not written yet.** It needs
-   `submodules: true`, a `prebuild` running `./app/build-native.sh`, the NDK
-   pin, `versionCode`/`versionName`, and the licence.
-4. **Signing decision.** F-Droid signs with its own key by default. Keeping one
-   signature across GitHub Releases, Obtainium and F-Droid requires reproducible
-   builds plus `AllowedAPKSigningKeys`; decide before an install base exists.
+2. **The metadata has not been submitted.** The draft is at
+   [`fdroiddata/com.phononai.app.yml`](fdroiddata/com.phononai.app.yml) and is
+   versioned with the app. Submission is a merge request against `fdroiddata`;
+   nothing else in this repository is blocking it.
+3. **First buildserver run is unproven.** Everything here was built on our own
+   machines and on GitHub runners. F-Droid's buildserver is a different machine
+   with a different toolchain; the first run is the real test of the recipe, not
+   of the app.
+
+## Decided
+
+- **One signature.** Reproducible builds are verified
+  ([`REPRODUCIBLE.md`](REPRODUCIBLE.md)), so the metadata uses `Binaries:` and
+  `AllowedAPKSigningKeys:` and F-Droid publishes the APK we sign. If the
+  buildserver cannot reproduce it, deleting those two lines falls back to
+  F-Droid's own key without changing anything else.
+- **No embedded web UI.** The engine is built with `LLAMA_BUILD_UI=OFF`: the
+  phone serves the API, and the buildserver has no network to fetch the UI
+  assets.
 
 ## Closed since this page was written
 

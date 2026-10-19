@@ -1,0 +1,8 @@
+The build is now reproducible: two clean checkouts, built at different paths,
+produce the same APK byte for byte. That is what lets anyone check that the
+binary matches the source, and what F-Droid needs to publish it.
+
+Getting there removed four sources of drift — absolute build paths in the debug
+info, the linker build-id, and the engine's browser UI, which was fetched and
+gzipped during the build. The engine now ships without that UI; the phone
+serves the API the app exposes, and the build no longer needs the network.
