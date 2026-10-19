@@ -44,13 +44,22 @@ Two sources of nondeterminism, both in the native build:
    checkout path was embedded and every `.so` differed between two checkouts.
    `app/build-native.sh` now passes `-ffile-prefix-map` for the build directory
    and the engine source, mapping them to `/build` and `/src`.
-2. **The linker build-id.** With the paths mapped out, the only remaining
+2. **The engine build number.** `LLAMA_BUILD_NUMBER` is normally derived from
+   git, and a shallow submodule has no tags: one machine reported `b1`, another
+   `b11716`, so `libllama-common.so` differed in four bytes. It is pinned in
+   `build-native.sh` and bumped with the submodule revision.
+3. **The linker build-id.** With the paths mapped out, the only remaining
    difference was the ELF build-id note — and it was not being disabled by
    `CMAKE_SHARED_LINKER_FLAGS`, because the NDK passes `--build-id=sha1` through
    `CMAKE_CXX_FLAGS`, which is the list the variant link lines use. The script
    appends `-Wl,--build-id=none` after it, so the last flag wins.
 
 Nothing on Android consumes a build-id, and the app does not use it.
+
+4. **The engine's browser UI.** llama.cpp fetches and gzips its UI during the
+   build, so `llama-server-impl` differed on every build. It is off
+   (`LLAMA_BUILD_UI=OFF`): the phone serves the API, and F-Droid's buildserver
+   has no network anyway.
 
 Gradle's APK packaging is already deterministic: timestamps are normalised, and
 the only entries that differed between builds were the native libraries.
