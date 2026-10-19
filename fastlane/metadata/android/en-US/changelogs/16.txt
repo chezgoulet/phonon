@@ -1,0 +1,7 @@
+Measurement release: no app behaviour changes.
+
+The reference Pixel 7 now has a full profile on this build: sustained decode
+10.54 tok/s over 38 generations (fifteen minutes), burst 14.01, recovery 14.33,
+and one agent-shaped turn — 2,251 prompt tokens plus 128 generated — in 29.0 s
+with a 2,667 MB peak resident set. The device is listed as supported because it
+now has the sustained run that status requires.
