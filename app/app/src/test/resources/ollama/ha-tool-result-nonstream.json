@@ -1,0 +1,36 @@
+{
+  "model": "qwen3.5-2b:latest",
+  "messages": [
+    {
+      "role": "system",
+      "content": "You are a voice assistant. Answer briefly. Use the tools when they help."
+    },
+    {
+      "role": "user",
+      "content": "Is the kitchen light on?"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "function": {
+            "name": "GetLiveContext",
+            "arguments": {
+              "entity_id": "light.kitchen"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"data\":{\"state\":\"on\"},\"error\":null}"
+    }
+  ],
+  "stream": false,
+  "keep_alive": "3600s",
+  "options": {
+    "num_ctx": 8192
+  }
+}
