@@ -1,0 +1,7 @@
+Bug reports now carry the engine and template they ran on.
+
+The device report and /health name the llama.cpp revision compiled into the
+build — read from the pinned submodule at build time, not typed into a file —
+and the chat-template identity: jinja, using the model's own template, with no
+custom template file in play. Settings shows the same line, so "tool calls broke"
+can be triaged without guessing which engine produced it.
