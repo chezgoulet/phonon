@@ -50,3 +50,23 @@ generations) to 6.16 (last three) — about 6% — while battery temperature ros
 - **Recovery does not restore the burst rate.** Five idle minutes returned
   6.54 tok/s, not 8.37, so the burst number reflects a short, cold, one-off run
   rather than a state the device can be brought back to by idling.
+
+## 0.1.14 — runtime variants and the tuned profile
+
+Re-run on 2026-10-19 with app 0.1.14 (runtime CPU kernel variants, sweep-chosen
+profile: two decode threads unpinned, `-tb 4`), same phone, model and method:
+
+| Regime | n | decode median | decode min–max | prefill median | battery °C |
+|---|---|---|---|---|---|
+| burst | 1 | **14.01** | — | 91.4 | 23.3 |
+| sustained | 38 | **10.54** | 8.94–13.69 | 58.8 | 23.3–33.2 |
+| recovery | 1 | **14.33** | — | 98.4 | 31.7 |
+
+Battery temperature rose 9.9 °C over 874 s and stayed at 33.2 °C at its peak.
+The harness reports a "throttle" at 398 s because its rule compares against 80%
+of the sustained-head baseline; the phone was not hot, and the decline is the
+steady state, not a thermal event. One agent-shaped turn — 2,251 prompt tokens,
+128 generated — took **29.0 s** wall, with a 2,667 MB peak resident set.
+
+These supersede the 6.31 tok/s sustained figure above, which was measured on a
+build without dot-product kernels.
