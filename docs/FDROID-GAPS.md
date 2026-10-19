@@ -38,8 +38,11 @@ the repository.
    before publishing figures.
 2. **The metadata has not been submitted.** The draft is at
    [`fdroiddata/com.phononai.app.yml`](fdroiddata/com.phononai.app.yml) and is
-   versioned with the app. Submission is a merge request against `fdroiddata`;
-   nothing else in this repository is blocking it.
+   versioned with the app. It passes `fdroid lint` (fdroidserver 2.4.5, against
+   fdroiddata's own `config/categories.yml`) with no findings. The merge request
+   steps and its description are in
+   [`fdroiddata/SUBMITTING.md`](fdroiddata/SUBMITTING.md); opening it needs a
+   GitLab account, which the House host does not have.
 3. **First buildserver run is unproven.** Everything here was built on our own
    machines and on GitHub runners. F-Droid's buildserver is a different machine
    with a different toolchain; the first run is the real test of the recipe, not

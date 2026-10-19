@@ -15,7 +15,7 @@ AuthorName: Phonon
 WebSite: https://phononai.org
 SourceCode: https://github.com/chezgoulet/phonon
 IssueTracker: https://github.com/chezgoulet/phonon/issues
-Changelog: https://github.com/chezgoulet/phonon/blob/main/fastlane/metadata/android/en-US/changelogs/%c.txt
+Changelog: https://github.com/chezgoulet/phonon/blob/HEAD/fastlane/metadata/android/en-US/changelogs/%c.txt
 
 AutoName: Phonon
 
