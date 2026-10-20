@@ -1,13 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.Phonon" parent="@android:style/Theme.Material.NoActionBar">
-        <item name="android:windowBackground">@android:color/black</item>
-        <item name="android:colorBackground">@android:color/black</item>
+    <!-- CORE paper ground; the night variant is in values-night. -->
+    <style name="Theme.Phonon" parent="@android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/phonon_ground</item>
+        <item name="android:colorBackground">@color/phonon_ground</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
-        <item name="android:windowLightStatusBar">false</item>
-        <item name="android:windowLightNavigationBar">false</item>
-        <item name="android:colorAccent">#00E5FF</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightNavigationBar">true</item>
+        <item name="android:colorAccent">#C2185B</item>
         <item name="android:windowActionModeOverlay">true</item>
     </style>
 </resources>

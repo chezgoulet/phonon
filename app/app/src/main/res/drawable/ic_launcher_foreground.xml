@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Adaptive-icon foreground: the BENCH mark, no plate (the background layer is
+  the ground), padded into the 66 dp safe zone of the 108 dp canvas. The mark's
+  224-unit box is scaled to 46 dp and centred, so its farthest corner sits
+  inside the 33 dp safe-zone radius.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <group
+        android:scaleX="0.205357"
+        android:scaleY="0.205357"
+        android:translateX="27.76"
+        android:translateY="27.76">
+
+        <path
+            android:pathData="M128,84L128,116"
+            android:strokeColor="#FFF7F0"
+            android:strokeWidth="9" />
+        <path
+            android:pathData="M52,172L52,134L116,134"
+            android:strokeColor="#FFF7F0"
+            android:strokeWidth="9" />
+        <path
+            android:pathData="M204,172L204,122L140,122"
+            android:strokeColor="#FFF7F0"
+            android:strokeWidth="9" />
+
+        <path
+            android:pathData="M98,24h60v60h-60z"
+            android:strokeColor="#FFF7F0"
+            android:strokeWidth="13" />
+        <path
+            android:pathData="M22,172h60v60h-60z"
+            android:strokeColor="#FFF7F0"
+            android:strokeWidth="13" />
+        <path
+            android:pathData="M174,172h60v60h-60z"
+            android:strokeColor="#FFF7F0"
+            android:strokeWidth="13" />
+
+        <path
+            android:fillColor="#FFD166"
+            android:pathData="M116,116h24v24h-24z" />
+    </group>
+</vector>

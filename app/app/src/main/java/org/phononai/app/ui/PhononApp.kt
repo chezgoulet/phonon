@@ -12,6 +12,7 @@ import android.widget.Toast
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -36,8 +37,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
@@ -48,8 +47,6 @@ import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
-import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -65,20 +62,23 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -108,11 +108,14 @@ import org.phononai.app.ModelCatalog
 import org.phononai.app.ModelEntry
 import org.phononai.app.ModelFamily
 import org.phononai.app.OemGuidance
+import org.phononai.app.R
 import org.phononai.app.PerfProfile
 import org.phononai.app.PhononService
 import org.phononai.app.Settings
 import org.phononai.app.SocTuning
 import org.phononai.app.ui.avatar.AvatarView
+import org.phononai.app.ui.theme.CoreType
+import org.phononai.app.ui.theme.LocalPalette
 import org.phononai.app.ui.theme.PhononColors
 import java.io.File
 import kotlin.math.abs
@@ -284,6 +287,9 @@ private fun MainFrame(
             .windowInsetsPadding(WindowInsets.safeDrawing)
             .background(PhononColors.Background),
     ) {
+        // Brand identity, not a reading: four equal bands, no gaps, full-bleed.
+        // The temperature itself is the labelled meter on the Thermal card.
+        if (tab == Tab.Serve) HeatBandStrip()
         Box(Modifier.weight(1f).fillMaxWidth()) { content() }
         Column(Modifier.fillMaxWidth().padding(horizontal = 22.dp)) {
             if (primary != null) {
@@ -302,10 +308,10 @@ private fun PrimaryButton(action: PrimaryAction) {
     val colors = when (action.tone) {
         ActionTone.Cyan -> ButtonDefaults.buttonColors(
             containerColor = PhononColors.Cyan,
-            contentColor = Color(0xFF001318),
+            contentColor = PhononColors.OnCyan,
         )
         ActionTone.Amber -> ButtonDefaults.buttonColors(
-            containerColor = Color(0xFF1A222C),
+            containerColor = PhononColors.SurfaceHigh,
             contentColor = PhononColors.Warn,
         )
         ActionTone.Dim -> ButtonDefaults.buttonColors(
@@ -320,15 +326,15 @@ private fun PrimaryButton(action: PrimaryAction) {
             .height(58.dp)
             .then(
                 if (action.tone == ActionTone.Amber) {
-                    Modifier.border(1.dp, PhononColors.Warn, RoundedCornerShape(18.dp))
+                    Modifier.border(1.dp, PhononColors.Warn, RectangleShape)
                 } else {
                     Modifier
                 },
             ),
-        shape = RoundedCornerShape(18.dp),
+        shape = RectangleShape,
         colors = colors,
     ) {
-        Text(action.label, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+        Text(action.label.uppercase(), style = CoreType.section.copy(fontSize = 16.sp, lineHeight = 19.sp))
     }
 }
 
@@ -338,9 +344,9 @@ private fun TabBar(selected: Tab, onTab: (Tab) -> Unit) {
         Modifier
             .fillMaxWidth()
             .height(56.dp)
-            .clip(RoundedCornerShape(18.dp))
-            .background(Color(0xFF060B10))
-            .border(1.dp, PhononColors.Border, RoundedCornerShape(18.dp)),
+            .clip(RectangleShape)
+            .background(PhononColors.Inset)
+            .border(1.dp, PhononColors.Border, RectangleShape),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceEvenly,
     ) {
@@ -354,10 +360,12 @@ private fun TabBar(selected: Tab, onTab: (Tab) -> Unit) {
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
-                    tab.label,
+                    tab.label.uppercase(),
                     color = if (on) PhononColors.Cyan else PhononColors.TextDim,
-                    fontSize = 12.sp,
-                    fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal,
+                    style = CoreType.micro.copy(
+                        fontSize = 12.sp,
+                        fontWeight = if (on) FontWeight.Medium else FontWeight.Normal,
+                    ),
                 )
             }
         }
@@ -433,6 +441,8 @@ private fun ServeScreen(
             .padding(horizontal = 22.dp),
     ) {
         Spacer(Modifier.height(16.dp))
+        BenchLockup()
+        Spacer(Modifier.height(18.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             // AvatarView draws the particle body at 0.32 × the shorter side.
             // Measured on the Pixel 7: a 140 dp slot gave a 77 dp visible orb,
@@ -448,22 +458,10 @@ private fun ServeScreen(
             )
             Spacer(Modifier.width(18.dp))
             Column(Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(6.dp).clip(CircleShape).background(PhononColors.Cyan))
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        text = "PHONON",
-                        style = MaterialTheme.typography.labelSmall.copy(
-                            color = Color(0xFF00E5FF),
-                            letterSpacing = 2.4.sp,
-                        ),
-                    )
-                }
-                Spacer(Modifier.height(6.dp))
                 Text(
-                    stateWord,
+                    stateWord.uppercase(),
                     color = accent,
-                    style = MaterialTheme.typography.headlineMedium,
+                    style = CoreType.headline,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -505,12 +503,15 @@ private fun ServeScreen(
                     else -> "Throughput"
                 },
                 value = when {
-                    !hasMeasuredRate -> "idle"
+                    !hasMeasuredRate -> "IDLE"
                     generating -> "%.1f".format(animatedTps)
                     else -> "%.1f".format(tps)
                 },
                 unit = if (hasMeasuredRate) "tok/s" else "",
                 valueColor = if (!hasMeasuredRate || !generating) PhononColors.TextDim else PhononColors.Text,
+                // A word is not a measurement: the mono's lowercase reads serif in
+                // the value slot, so the placeholder takes the display face.
+                valueStyle = if (hasMeasuredRate) CoreType.metric else CoreType.metricWord,
                 accent = accent,
             ) {
                 if (hasMeasuredRate) {
@@ -575,29 +576,27 @@ private fun MetricCard(
     unit: String,
     accent: Color,
     valueColor: Color = PhononColors.Text,
+    valueStyle: TextStyle = CoreType.metric,
     extra: @Composable ColumnScope.() -> Unit,
 ) {
     Column(
         modifier
-            .clip(RoundedCornerShape(18.dp))
+            .clip(RectangleShape)
             .background(PhononColors.Surface)
-            .border(1.dp, PhononColors.Border, RoundedCornerShape(18.dp))
+            .border(1.dp, PhononColors.Border, RectangleShape)
             .padding(16.dp),
     ) {
         Text(
             label.uppercase(),
             color = PhononColors.TextDim,
-            fontSize = 11.sp,
-            letterSpacing = 0.9.sp,
+            style = CoreType.micro,
         )
         Spacer(Modifier.height(8.dp))
         Row(verticalAlignment = Alignment.Bottom) {
             Text(
                 value,
                 color = valueColor,
-                fontSize = 26.sp,
-                fontWeight = FontWeight.SemiBold,
-                letterSpacing = (-0.5).sp,
+                style = valueStyle,
             )
             if (unit.isNotBlank()) {
                 Spacer(Modifier.width(4.dp))
@@ -615,7 +614,7 @@ private fun MetricCard(
             Modifier
                 .width(22.dp)
                 .height(2.dp)
-                .background(accent.copy(alpha = 0.35f), RoundedCornerShape(1.dp)),
+                .background(accent.copy(alpha = 0.35f), RectangleShape),
         )
     }
 }
@@ -635,7 +634,7 @@ private fun Sparkline(points: List<Float>, color: Color, modifier: Modifier) {
         drawPath(
             path = path,
             color = color.copy(alpha = 0.9f),
-            style = Stroke(width = 1.4.dp.toPx(), cap = StrokeCap.Round),
+            style = Stroke(width = 1.4.dp.toPx(), cap = StrokeCap.Butt),
         )
     }
 }
@@ -647,9 +646,9 @@ private fun EndpointCard(health: Health?, accent: Color) {
     Row(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(18.dp))
+            .clip(RectangleShape)
             .background(PhononColors.Surface)
-            .border(1.dp, PhononColors.Border, RoundedCornerShape(18.dp))
+            .border(1.dp, PhononColors.Border, RectangleShape)
             .padding(14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -657,14 +656,13 @@ private fun EndpointCard(health: Health?, accent: Color) {
             Text(
                 "OPENAI-COMPATIBLE",
                 color = PhononColors.TextDim,
-                fontSize = 11.sp,
-                letterSpacing = 0.9.sp,
+                style = CoreType.micro,
             )
             Spacer(Modifier.height(6.dp))
             Text(
                 url,
-                color = Color(0xFFD7E3DF),
-                fontFamily = FontFamily.Monospace,
+                color = PhononColors.Text,
+                fontFamily = CoreType.mono,
                 fontSize = 13.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -673,8 +671,8 @@ private fun EndpointCard(health: Health?, accent: Color) {
         Box(
             Modifier
                 .size(36.dp)
-                .clip(RoundedCornerShape(12.dp))
-                .border(1.dp, PhononColors.Border, RoundedCornerShape(12.dp))
+                .clip(RectangleShape)
+                .border(1.dp, PhononColors.Border, RectangleShape)
                 .clickable {
                     val clipboard = context.getSystemService(ClipboardManager::class.java)
                     clipboard.setPrimaryClip(ClipData.newPlainText("Phonon endpoint", url))
@@ -691,19 +689,16 @@ private fun EndpointCard(health: Health?, accent: Color) {
 private fun CopyGlyph(color: Color) {
     Canvas(Modifier.size(18.dp)) {
         val stroke = Stroke(width = 1.3.dp.toPx())
-        val radius = CornerRadius(2.dp.toPx(), 2.dp.toPx())
-        drawRoundRect(
+        drawRect(
             color = color,
             topLeft = Offset(5.dp.toPx(), 5.dp.toPx()),
             size = Size(10.dp.toPx(), 10.dp.toPx()),
-            cornerRadius = radius,
             style = stroke,
         )
-        drawRoundRect(
+        drawRect(
             color = color,
             topLeft = Offset(2.dp.toPx(), 2.dp.toPx()),
             size = Size(10.dp.toPx(), 10.dp.toPx()),
-            cornerRadius = radius,
             style = stroke,
         )
     }
@@ -720,47 +715,32 @@ private fun ThermalCard(
     Column(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(18.dp))
+            .clip(RectangleShape)
             .background(PhononColors.Surface)
-            .border(1.dp, PhononColors.Border, RoundedCornerShape(18.dp))
+            .border(1.dp, PhononColors.Border, RectangleShape)
             .padding(16.dp),
     ) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text(
                 "THERMALS",
                 color = PhononColors.TextDim,
-                fontSize = 11.sp,
-                letterSpacing = 0.9.sp,
+                style = CoreType.micro,
             )
             Text(
                 formatTemp(temp),
                 color = if (paused) PhononColors.Warn else PhononColors.Text,
-                fontSize = 17.sp,
-                fontWeight = FontWeight.SemiBold,
+                style = CoreType.metric.copy(fontSize = 20.sp, lineHeight = 22.sp),
             )
         }
-        Spacer(Modifier.height(12.dp))
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .height(6.dp)
-                .clip(RoundedCornerShape(3.dp))
-                .background(Color(0xFF1A2124)),
-        ) {
-            Box(
-                Modifier
-                    .fillMaxHeight()
-                    .fillMaxWidth(fraction)
-                    .clip(RoundedCornerShape(3.dp))
-                    .background(
-                        if (paused) {
-                            Brush.horizontalGradient(listOf(PhononColors.Warn, PhononColors.Danger))
-                        } else {
-                            Brush.horizontalGradient(listOf(PhononColors.Cyan, PhononColors.Violet))
-                        },
-                    ),
-            )
-        }
+        Spacer(Modifier.height(14.dp))
+        // A meter, not a heat map: one fill colour, a labelled scale, and a
+        // marker where the pause threshold sits. The number above carries the
+        // reading; the bands at the top of the screen carry the identity.
+        ThermalMeter(
+            fraction = fraction,
+            stopC = settings.thermalStopC,
+            paused = paused,
+        )
         Spacer(Modifier.height(10.dp))
         Text(
             if (paused) {
@@ -810,26 +790,17 @@ private fun ChargeCard(health: Health?, context: Context) {
         ChargeMode.OFF -> "NO LIMIT"
         ChargeMode.UNKNOWN -> "UNCONFIRMED"
     }
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(18.dp))
-            .background(PhononColors.Surface)
-            .border(1.dp, PhononColors.Border, RoundedCornerShape(18.dp))
-            .padding(16.dp),
-    ) {
+    PhononCard {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text(
                 "CHARGING",
                 color = PhononColors.TextDim,
-                fontSize = 11.sp,
-                letterSpacing = 0.9.sp,
+                style = CoreType.micro,
             )
             Text(
                 stateWord,
                 color = accent,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.SemiBold,
+                style = CoreType.micro,
             )
         }
         Spacer(Modifier.height(10.dp))
@@ -1004,21 +975,20 @@ private fun BenchmarkCard(
     Column(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(18.dp))
+            .clip(RectangleShape)
             .background(PhononColors.Surface)
-            .border(1.dp, PhononColors.Border, RoundedCornerShape(18.dp))
+            .border(1.dp, PhononColors.Border, RectangleShape)
             .padding(horizontal = 16.dp, vertical = 10.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 "BENCHMARK",
                 color = PhononColors.TextDim,
-                fontSize = 11.sp,
-                letterSpacing = 0.9.sp,
+                style = CoreType.micro,
             )
             Spacer(Modifier.weight(1f))
             if (running) {
-                Text("RUNNING", color = PhononColors.Cyan, fontSize = 10.sp, letterSpacing = 0.9.sp)
+                Text("RUNNING", color = PhononColors.Cyan, style = CoreType.microSmall)
                 Spacer(Modifier.width(8.dp))
             }
             TextButton(onClick = if (running) onCancel else onRun) {
@@ -1041,9 +1011,7 @@ private fun BenchmarkCard(
                     Text(
                         "%.1f".format(last.decodeTps),
                         color = PhononColors.Text,
-                        fontSize = 24.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        letterSpacing = (-0.4).sp,
+                        style = CoreType.metric.copy(fontSize = 24.sp, lineHeight = 26.sp),
                     )
                     Spacer(Modifier.width(4.dp))
                     Text("tok/s decode", color = PhononColors.TextDim, fontSize = 12.sp,
@@ -1103,13 +1071,13 @@ private fun RecentActivity(health: Health?, accent: Color) {
     Row(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
+            .clip(RectangleShape)
             .background(PhononColors.Surface)
-            .border(1.dp, PhononColors.Border, RoundedCornerShape(16.dp))
+            .border(1.dp, PhononColors.Border, RectangleShape)
             .padding(horizontal = 14.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(Modifier.size(5.dp).clip(CircleShape).background(accent.copy(alpha = 0.7f)))
+        Box(Modifier.size(5.dp).background(accent.copy(alpha = 0.7f)))
         Spacer(Modifier.width(8.dp))
         Text(
             "RECENT ACTIVITY",
@@ -1131,10 +1099,17 @@ private fun RecentActivity(health: Health?, accent: Color) {
 @Composable
 private fun Avatar(kind: AvatarKind, amp: Float, reduced: Boolean, shape: String, modifier: Modifier) {
     val driver = remember { AvatarDriver() }
+    // The glow is additive over the frame base, so the base has to stay dark to read
+    // as light in the air: on paper that is an ink tile, on the dark ground it is the
+    // ground itself, where the seam disappears. A tile colour, never a page colour —
+    // AvatarView clips its clear to its own bounds (see setBackdrop).
+    val palette = LocalPalette.current
+    val plate = (if (palette.dark) palette.ground else palette.ink).toArgb()
     AndroidView(
         modifier = modifier,
         factory = { context ->
             AvatarView(context).apply {
+                setBackdrop(plate)
                 setIdleTheme(shape)
                 applyStateShapes(
                     speaking = "waveform",
@@ -1148,6 +1123,7 @@ private fun Avatar(kind: AvatarKind, amp: Float, reduced: Boolean, shape: String
         },
         update = { view ->
             driver.attach(view)
+            view.setBackdrop(plate)
             view.setIdleTheme(shape)
             driver.apply(kind, amp, reduced)
         },
@@ -1238,6 +1214,7 @@ private fun serveAction(health: Health?, kind: AvatarKind, context: Context): Pr
         }
     }
 
+@Composable
 private fun accentFor(kind: AvatarKind): Color = when (kind) {
     AvatarKind.Stopped -> PhononColors.DimCyan
     AvatarKind.Loading -> PhononColors.Violet
@@ -1407,7 +1384,7 @@ private fun ModelsScreen(
             .padding(horizontal = 22.dp),
     ) {
         Spacer(Modifier.height(14.dp))
-        Text("Models", style = MaterialTheme.typography.headlineLarge)
+        Text("MODELS", style = MaterialTheme.typography.headlineLarge)
         Spacer(Modifier.height(6.dp))
         Text(
             "Every family, one server. All decode numbers were measured on this phone; unmeasured entries say so.",
@@ -1419,19 +1396,18 @@ private fun ModelsScreen(
         Column(
             Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(18.dp))
+                .clip(RectangleShape)
                 .background(PhononColors.Surface)
-                .border(1.dp, PhononColors.Border, RoundedCornerShape(18.dp))
+                .border(1.dp, PhononColors.Border, RectangleShape)
                 .padding(16.dp),
         ) {
-            Text("STORAGE USED", color = PhononColors.TextDim, fontSize = 11.sp, letterSpacing = 0.9.sp)
+            Text("STORAGE USED", color = PhononColors.TextDim, style = CoreType.micro)
             Spacer(Modifier.height(8.dp))
             Row(verticalAlignment = Alignment.Bottom) {
                 Text(
                     formatBytes(storage),
                     color = PhononColors.Text,
-                    fontSize = 26.sp,
-                    fontWeight = FontWeight.SemiBold,
+                    style = CoreType.metric,
                 )
                 Spacer(Modifier.width(6.dp))
                 Text(
@@ -1456,10 +1432,9 @@ private fun ModelsScreen(
             val recommended = ModelCatalog.forTier(tier, family)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    family.label,
+                    family.label.uppercase(),
                     color = PhononColors.Text,
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.SemiBold,
+                    style = CoreType.headline.copy(fontSize = 18.sp, lineHeight = 20.sp),
                 )
                 if (family == ModelFamily.QWEN) {
                     Spacer(Modifier.width(8.dp))
@@ -1502,10 +1477,9 @@ private fun ModelsScreen(
         val extras = models.filter { ModelCatalog.byFileName(it.name) == null }
         if (extras.isNotEmpty()) {
             Text(
-                "Other GGUF files on this phone",
+                "OTHER GGUF FILES ON THIS PHONE",
                 color = PhononColors.Text,
-                fontSize = 18.sp,
-                fontWeight = FontWeight.SemiBold,
+                style = CoreType.headline.copy(fontSize = 18.sp, lineHeight = 20.sp),
             )
             Spacer(Modifier.height(4.dp))
             Text(
@@ -1524,7 +1498,7 @@ private fun ModelsScreen(
         }
 
         PhononCard {
-            Text("Download from a URL", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+            Text("DOWNLOAD FROM A URL", style = CoreType.section)
             Spacer(Modifier.height(6.dp))
             Text(
                 "For a file that is not in the catalog. The download resumes a partial file and verifies the declared size.",
@@ -1564,15 +1538,15 @@ private fun ModelsScreen(
                 },
                 enabled = !active && downloadUrl.isNotBlank(),
                 modifier = Modifier.fillMaxWidth().height(50.dp),
-                shape = RoundedCornerShape(14.dp),
+                shape = RectangleShape,
                 colors = ButtonDefaults.buttonColors(
                     containerColor = PhononColors.Cyan,
-                    contentColor = Color(0xFF001318),
+                    contentColor = PhononColors.OnCyan,
                     disabledContainerColor = PhononColors.SurfaceHigh,
                     disabledContentColor = PhononColors.TextDim,
                 ),
             ) {
-                Text(if (active) "Downloading…" else "Download", fontWeight = FontWeight.Bold)
+                Text((if (active) "Downloading…" else "Download").uppercase(), style = CoreType.section)
             }
             if (download != null && (download.active || download.error != null) &&
                 download.dest.let { dest -> ModelCatalog.entries.none { it.fileName == File(dest).name } }
@@ -1695,12 +1669,12 @@ private fun CatalogEntryCard(
     Column(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(18.dp))
+            .clip(RectangleShape)
             .background(if (active) PhononColors.Cyan.copy(alpha = 0.05f) else PhononColors.Surface)
             .border(
                 1.dp,
                 if (active) PhononColors.Cyan.copy(alpha = 0.55f) else PhononColors.Border,
-                RoundedCornerShape(18.dp),
+                RectangleShape,
             )
             .padding(16.dp),
     ) {
@@ -1710,8 +1684,7 @@ private fun CatalogEntryCard(
                     Text(
                         entry.displayName,
                         color = PhononColors.Text,
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.SemiBold,
+                        style = MaterialTheme.typography.titleSmall,
                     )
                     Spacer(Modifier.width(8.dp))
                     Text(entry.quant, color = PhononColors.TextDim, fontSize = 11.sp)
@@ -1721,7 +1694,7 @@ private fun CatalogEntryCard(
                     "alias ${entry.id}",
                     color = PhononColors.TextDim,
                     fontSize = 11.sp,
-                    fontFamily = FontFamily.Monospace,
+                    fontFamily = CoreType.mono,
                 )
             }
             when {
@@ -1737,10 +1710,13 @@ private fun CatalogEntryCard(
         Spacer(Modifier.height(8.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-                if (entry.measured) entry.decodeLabel else "unmeasured",
+                if (entry.measured) entry.decodeLabel else "UNMEASURED",
                 color = if (entry.measured) PhononColors.Text else PhononColors.Warn,
-                fontSize = 12.5.sp,
-                fontWeight = if (entry.measured) FontWeight.SemiBold else FontWeight.Medium,
+                style = CoreType.metric.copy(
+                    fontSize = 13.sp,
+                    lineHeight = 16.sp,
+                    fontWeight = if (entry.measured) FontWeight.Medium else FontWeight.Normal,
+                ),
             )
             if (entry.measured) {
                 Spacer(Modifier.width(6.dp))
@@ -1809,14 +1785,14 @@ private fun CatalogEntryCard(
                 Modifier
                     .fillMaxWidth()
                     .height(5.dp)
-                    .clip(RoundedCornerShape(3.dp))
-                    .background(Color(0xFF1A2124)),
+                    .clip(RectangleShape)
+                    .background(PhononColors.Border),
             ) {
                 Box(
                     Modifier
                         .fillMaxHeight()
                         .fillMaxWidth(fraction)
-                        .background(PhononColors.Cyan, RoundedCornerShape(3.dp)),
+                        .background(PhononColors.Cyan, RectangleShape),
                 )
             }
             Spacer(Modifier.height(8.dp))
@@ -1901,12 +1877,12 @@ private fun InstalledModelCard(context: Context, model: InstalledModel, onChange
     Column(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(18.dp))
+            .clip(RectangleShape)
             .background(PhononColors.Surface)
             .border(
                 1.dp,
                 if (model.active) PhononColors.Cyan.copy(alpha = 0.45f) else PhononColors.Border,
-                RoundedCornerShape(18.dp),
+                RectangleShape,
             )
             .padding(16.dp),
     ) {
@@ -1974,12 +1950,12 @@ private fun InstalledModelCard(context: Context, model: InstalledModel, onChange
 private fun Chip(text: String, color: Color) {
     Box(
         Modifier
-            .clip(RoundedCornerShape(20.dp))
+            .clip(RectangleShape)
             .background(color.copy(alpha = 0.10f))
-            .border(1.dp, color.copy(alpha = 0.40f), RoundedCornerShape(20.dp))
+            .border(1.dp, color.copy(alpha = 0.40f), RectangleShape)
             .padding(horizontal = 10.dp, vertical = 5.dp),
     ) {
-        Text(text, color = color, fontSize = 10.sp, letterSpacing = 0.8.sp, fontWeight = FontWeight.SemiBold)
+        Text(text, color = color, style = CoreType.microSmall)
     }
 }
 
@@ -2069,7 +2045,7 @@ private fun PerformanceCard(
     PhononCard {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text("Performance", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                Text("PERFORMANCE", style = CoreType.section)
                 Spacer(Modifier.height(4.dp))
                 Text(modeLabel, color = PhononColors.Cyan, fontSize = 14.sp)
             }
@@ -2103,7 +2079,7 @@ private fun PerformanceCard(
         Text(
             "${plan.modeLabel} · ${plan.threads} threads · CPUs ${plan.cpuRangeLabel} · prio ${plan.prio}/${plan.prioBatch}",
             color = PhononColors.Text,
-            fontFamily = FontFamily.Monospace,
+            fontFamily = CoreType.mono,
             fontSize = 12.sp,
         )
         if (running && health != null &&
@@ -2230,9 +2206,9 @@ private fun PerformanceCard(
                     color = if (selected) PhononColors.Cyan else PhononColors.TextDim,
                     fontSize = 12.sp,
                     modifier = Modifier
-                        .clip(RoundedCornerShape(14.dp))
+                        .clip(RectangleShape)
                         .border(1.dp, if (selected) PhononColors.Cyan else PhononColors.Border,
-                            RoundedCornerShape(14.dp))
+                            RectangleShape)
                         .clickable {
                             AppState.presenceShape = token
                             settings.presenceShape = token
@@ -2341,7 +2317,7 @@ private fun SettingsScreen(
             .padding(horizontal = 22.dp),
     ) {
         Spacer(Modifier.height(14.dp))
-        Text("Settings", style = MaterialTheme.typography.headlineLarge)
+        Text("SETTINGS", style = MaterialTheme.typography.headlineLarge)
         Spacer(Modifier.height(6.dp))
         Text(
             "Defaults follow the detected RAM tier. Tune them here only when you mean to.",
@@ -2351,7 +2327,7 @@ private fun SettingsScreen(
         Spacer(Modifier.height(22.dp))
 
         PhononCard {
-            Text("Device", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+            Text("DEVICE", style = CoreType.section)
             Spacer(Modifier.height(6.dp))
             Text(
                 device.summary,
@@ -2394,7 +2370,7 @@ private fun SettingsScreen(
                 color = PhononColors.TextDim,
                 fontSize = 12.sp,
                 lineHeight = 17.sp,
-                fontFamily = FontFamily.Monospace,
+                fontFamily = CoreType.mono,
             )
             health?.let { h ->
                 Spacer(Modifier.height(4.dp))
@@ -2539,7 +2515,7 @@ private fun SettingsScreen(
         // Per-SoC tuning. Manual by design: the sweep restarts the server and
         // takes a couple of minutes, so it never runs on its own.
         PhononCard {
-            Text("Tune this phone", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+            Text("TUNE THIS PHONE", style = CoreType.section)
             Spacer(Modifier.height(6.dp))
             val profile = health?.socTuningProfile.orEmpty()
             val hasProfile = profile.isNotBlank() && profile != "none"
@@ -2623,7 +2599,7 @@ private fun SettingsScreen(
         // settings itself; it can only point at the vendor's own screen.
         val oem = remember { OemGuidance.forDevice() }
         PhononCard {
-            Text("Background restrictions", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+            Text("BACKGROUND RESTRICTIONS", style = CoreType.section)
             Spacer(Modifier.height(6.dp))
             Text(
                 "${oem.vendor}: ${oem.steps}",
@@ -2670,7 +2646,7 @@ private fun SettingsScreen(
         Spacer(Modifier.height(12.dp))
 
         PhononCard {
-            Text("Model", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+            Text("MODEL", style = CoreType.section)
             Spacer(Modifier.height(6.dp))
             Text(
                 activeModel?.name ?: "No model installed",
@@ -2699,7 +2675,7 @@ private fun SettingsScreen(
         Spacer(Modifier.height(12.dp))
 
         PhononCard {
-            Text("Thermal policy", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+            Text("THERMAL POLICY", style = CoreType.section)
             Spacer(Modifier.height(6.dp))
             Text(
                 "Pause at ${restartThreshold(draft.thermalStop.toFloatOrNull() ?: 0f)} °C, resume at ${restartThreshold(draft.thermalResume.toFloatOrNull() ?: 0f)} °C",
@@ -2736,7 +2712,7 @@ private fun SettingsScreen(
         PhononCard {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text("Keep warm", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                    Text("KEEP WARM", style = CoreType.section)
                     Spacer(Modifier.height(4.dp))
                     Text(
                         "Send a one-token completion while idle so Android does not evict the model's pages.",
@@ -2771,12 +2747,12 @@ private fun SettingsScreen(
         Spacer(Modifier.height(12.dp))
 
         PhononCard {
-            Text("Endpoint", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+            Text("ENDPOINT", style = CoreType.section)
             Spacer(Modifier.height(6.dp))
             Text(
                 endpointUrl(health, context),
-                color = Color(0xFFD7E3DF),
-                fontFamily = FontFamily.Monospace,
+                color = PhononColors.Text,
+                fontFamily = CoreType.mono,
                 fontSize = 12.5.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -2829,7 +2805,7 @@ private fun SettingsScreen(
         PhononCard {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text("Advanced", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                    Text("ADVANCED", style = CoreType.section)
                     Spacer(Modifier.height(4.dp))
                     Text(
                         "${draft.loadMode} · backend ${draft.backendPort} · keep-warm ${draft.keepWarmInterval}s",
@@ -2964,13 +2940,13 @@ private fun SettingsScreen(
                 if (error == null) toast(context, "Settings saved")
             },
             modifier = Modifier.fillMaxWidth().height(52.dp),
-            shape = RoundedCornerShape(16.dp),
+            shape = RectangleShape,
             colors = ButtonDefaults.buttonColors(
                 containerColor = PhononColors.Cyan,
-                contentColor = Color(0xFF001318),
+                contentColor = PhononColors.OnCyan,
             ),
         ) {
-            Text("Save changes", fontWeight = FontWeight.Bold)
+            Text("SAVE CHANGES", style = CoreType.section)
         }
         Spacer(Modifier.height(10.dp))
         Text(
@@ -3004,7 +2980,7 @@ private fun SettingsScreen(
                         Text(
                             result.text,
                             color = PhononColors.Text,
-                            fontFamily = FontFamily.Monospace,
+                            fontFamily = CoreType.mono,
                             fontSize = 10.sp,
                             lineHeight = 14.sp,
                         )
@@ -3076,7 +3052,7 @@ private fun SettingsScreen(
                         Text(
                             result.yaml,
                             color = PhononColors.Text,
-                            fontFamily = FontFamily.Monospace,
+                            fontFamily = CoreType.mono,
                             fontSize = 10.sp,
                             lineHeight = 14.sp,
                         )
@@ -3139,7 +3115,7 @@ private fun SettingsScreen(
                     Text(
                         key,
                         color = PhononColors.Cyan,
-                        fontFamily = FontFamily.Monospace,
+                        fontFamily = CoreType.mono,
                         fontSize = 12.sp,
                     )
                 }
@@ -3181,7 +3157,7 @@ private fun KioskCard(activity: Activity) {
     }
 
     PhononCard {
-        Text("Kiosk / appliance mode", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+        Text("KIOSK / APPLIANCE MODE", style = CoreType.section)
         Spacer(Modifier.height(6.dp))
         Text(
             "Device Owner policy pins this app and keeps the screen on while serving. It does not touch the HTTP API.",
@@ -3215,13 +3191,13 @@ private fun KioskCard(activity: Activity) {
                             restrictions = Kiosk.restrictionSummary(context)
                         },
                         modifier = Modifier.height(48.dp),
-                        shape = RoundedCornerShape(14.dp),
+                        shape = RectangleShape,
                         colors = ButtonDefaults.buttonColors(
                             containerColor = PhononColors.Cyan,
-                            contentColor = Color(0xFF001318),
+                            contentColor = PhononColors.OnCyan,
                         ),
                     ) {
-                        Text("Enter kiosk", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        Text("ENTER KIOSK", style = CoreType.section)
                     }
                 } else {
                     Button(
@@ -3230,13 +3206,13 @@ private fun KioskCard(activity: Activity) {
                             locked = Kiosk.isLockTaskActive(context)
                         },
                         modifier = Modifier.height(48.dp),
-                        shape = RoundedCornerShape(14.dp),
+                        shape = RectangleShape,
                         colors = ButtonDefaults.buttonColors(
                             containerColor = PhononColors.SurfaceHigh,
                             contentColor = PhononColors.Text,
                         ),
                     ) {
-                        Text("Leave kiosk", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                        Text("LEAVE KIOSK", style = CoreType.section)
                     }
                 }
                 if (!exempt) {
@@ -3269,16 +3245,16 @@ private fun KioskCard(activity: Activity) {
             Row(
                 Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(Color(0xFF060B10))
-                    .border(1.dp, PhononColors.Border, RoundedCornerShape(14.dp))
+                    .clip(RectangleShape)
+                    .background(PhononColors.Inset)
+                    .border(1.dp, PhononColors.Border, RectangleShape)
                     .padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
                     Kiosk.PROVISION_COMMAND,
                     color = PhononColors.Text,
-                    fontFamily = FontFamily.Monospace,
+                    fontFamily = CoreType.mono,
                     fontSize = 10.5.sp,
                     lineHeight = 15.sp,
                     modifier = Modifier.weight(1f),
@@ -3295,14 +3271,14 @@ private fun KioskCard(activity: Activity) {
             Row(
                 Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(14.dp))
+                    .clip(RectangleShape)
                     .background(PhononColors.Warn.copy(alpha = 0.05f))
-                    .border(1.dp, PhononColors.Warn.copy(alpha = 0.32f), RoundedCornerShape(14.dp))
+                    .border(1.dp, PhononColors.Warn.copy(alpha = 0.32f), RectangleShape)
                     .padding(12.dp),
             ) {
                 Text(
                     "The phone must have no accounts and no secondary users. If \"Can provision now\" is no, remove all accounts and extra users, or factory-reset it and skip account sign-in before running the command.",
-                    color = Color(0xFFF3D9A0),
+                    color = PhononColors.Warn,
                     fontSize = 11.5.sp,
                     lineHeight = 17.sp,
                 )
@@ -3342,19 +3318,22 @@ private fun ToggleRow(label: String, checked: Boolean, onChange: (Boolean) -> Un
     }
 }
 
+/** Square switch: a track with a knob that moves end to end. No radii. */
 @Composable
 private fun PhononSwitch(checked: Boolean, onChange: (Boolean) -> Unit) {
-    Switch(
-        checked = checked,
-        onCheckedChange = onChange,
-        colors = SwitchDefaults.colors(
-            checkedThumbColor = Color(0xFF001318),
-            checkedTrackColor = PhononColors.Cyan,
-            uncheckedThumbColor = PhononColors.TextDim,
-            uncheckedTrackColor = PhononColors.SurfaceHigh,
-            uncheckedBorderColor = PhononColors.Border,
-        ),
-    )
+    val track = if (checked) PhononColors.Cyan else PhononColors.SurfaceHigh
+    val knob = if (checked) PhononColors.OnCyan else PhononColors.TextDim
+    Box(
+        Modifier
+            .size(width = 54.dp, height = 28.dp)
+            .background(track)
+            .border(1.dp, if (checked) PhononColors.Cyan else PhononColors.Border, RectangleShape)
+            .clickable { onChange(!checked) }
+            .padding(3.dp),
+        contentAlignment = if (checked) Alignment.CenterEnd else Alignment.CenterStart,
+    ) {
+        Box(Modifier.size(22.dp).background(knob))
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -3430,16 +3409,16 @@ private fun SetupScreen(
     ) {
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
             Spacer(Modifier.height(14.dp))
+            BenchLockup()
+            Spacer(Modifier.height(18.dp))
             Text(
                 "SET UP THIS PHONE",
                 color = PhononColors.Cyan,
-                fontSize = 11.sp,
-                letterSpacing = 2.4.sp,
-                fontWeight = FontWeight.Medium,
+                style = CoreType.micro,
             )
             Spacer(Modifier.height(14.dp))
             Text(
-                "Turn this phone into a model server.",
+                "TURN THIS PHONE\nINTO A MODEL\nSERVER",
                 style = MaterialTheme.typography.displayLarge,
             )
             Spacer(Modifier.height(10.dp))
@@ -3452,7 +3431,7 @@ private fun SetupScreen(
             Spacer(Modifier.height(22.dp))
 
             PhononCard {
-                Text("How will it be reached?", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                Text("HOW WILL IT BE REACHED?", style = CoreType.section)
                 Spacer(Modifier.height(6.dp))
                 Text(
                     "Choose where the endpoint listens. LAN is what agent hosts need.",
@@ -3469,7 +3448,7 @@ private fun SetupScreen(
             Spacer(Modifier.height(12.dp))
 
             PhononCard {
-                Text("Name this node", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                Text("NAME THIS NODE", style = CoreType.section)
                 Spacer(Modifier.height(10.dp))
                 PhononField(
                     value = nodeName,
@@ -3486,7 +3465,7 @@ private fun SetupScreen(
             Spacer(Modifier.height(12.dp))
 
             PhononCard {
-                Text("Choose a model", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                Text("CHOOSE A MODEL", style = CoreType.section)
                 Spacer(Modifier.height(6.dp))
                 Text(
                     "Model families differ in speed and capability by device. The Models screen " +
@@ -3555,14 +3534,14 @@ private fun SetupScreen(
                 Row(
                     Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(16.dp))
+                        .clip(RectangleShape)
                         .background(PhononColors.Warn.copy(alpha = 0.05f))
-                        .border(1.dp, PhononColors.Warn.copy(alpha = 0.32f), RoundedCornerShape(16.dp))
+                        .border(1.dp, PhononColors.Warn.copy(alpha = 0.32f), RectangleShape)
                         .padding(14.dp),
                 ) {
                     Text(
                         "Binding to the LAN requires an API key. Phonon generated one and shows it once — store it with your gateway.",
-                        color = Color(0xFFF3D9A0),
+                        color = PhononColors.Warn,
                         fontSize = 12.5.sp,
                         lineHeight = 18.sp,
                     )
@@ -3571,15 +3550,15 @@ private fun SetupScreen(
                 Column(
                     Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(Color(0xFF060B10))
-                        .border(1.dp, PhononColors.Border, RoundedCornerShape(14.dp))
+                        .clip(RectangleShape)
+                        .background(PhononColors.Inset)
+                        .border(1.dp, PhononColors.Border, RectangleShape)
                         .padding(horizontal = 14.dp, vertical = 12.dp),
                 ) {
                     Text(
                         if (revealKey) generatedKey else "sk-phonon-••••••••••••••••••••",
                         color = PhononColors.Text,
-                        fontFamily = FontFamily.Monospace,
+                        fontFamily = CoreType.mono,
                         fontSize = 12.sp,
                     )
                     Spacer(Modifier.height(6.dp))
@@ -3614,9 +3593,8 @@ private fun SetupScreen(
             PhononCard {
                 val chosenInstalled = chosenModel?.let { ModelCatalog.path(context, it).isFile } == true
                 Text(
-                    if (chosenInstalled) "Model ready" else "No model installed",
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 15.sp,
+                    (if (chosenInstalled) "Model ready" else "No model installed").uppercase(),
+                    style = CoreType.section,
                 )
                 Spacer(Modifier.height(6.dp))
                 Text(
@@ -3673,21 +3651,21 @@ private fun SetupScreen(
                 }
             },
             modifier = Modifier.fillMaxWidth().height(58.dp),
-            shape = RoundedCornerShape(18.dp),
+            shape = RectangleShape,
             colors = ButtonDefaults.buttonColors(
                 containerColor = PhononColors.Cyan,
-                contentColor = Color(0xFF001318),
+                contentColor = PhononColors.OnCyan,
             ),
         ) {
-            Text("Start serving", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            Text("START SERVING", style = CoreType.section.copy(fontSize = 16.sp, lineHeight = 19.sp))
         }
         Spacer(Modifier.height(10.dp))
         Box(
             Modifier
                 .fillMaxWidth()
                 .height(56.dp)
-                .clip(RoundedCornerShape(18.dp))
-                .border(1.dp, PhononColors.Border, RoundedCornerShape(18.dp))
+                .clip(RectangleShape)
+                .border(1.dp, PhononColors.Border, RectangleShape)
                 .clickable(onClick = onDownloadFirst),
             contentAlignment = Alignment.Center,
         ) {
@@ -3701,14 +3679,97 @@ private fun SetupScreen(
 // Shared bits
 // ---------------------------------------------------------------------------
 
+/**
+ * The heat band strip: four equal bands, no gaps, full-bleed, 64 dp. It is
+ * identity, not a data display — temperature gets its own labelled meter.
+ */
+@Composable
+private fun HeatBandStrip() {
+    val bands = PhononColors.Heat
+    Row(Modifier.fillMaxWidth().height(64.dp)) {
+        bands.forEach { band ->
+            Box(Modifier.weight(1f).fillMaxHeight().background(band))
+        }
+    }
+}
+
+/**
+ * The BENCH mark, on its plate. The plate is part of the drawable, so the mark
+ * can never land directly on the heat bands or on a surface of its own colour.
+ */
+@Composable
+private fun BenchMark(size: Dp, modifier: Modifier = Modifier) {
+    Image(
+        painter = painterResource(R.drawable.ic_bench_mark),
+        contentDescription = null,
+        modifier = modifier.size(size),
+        contentScale = ContentScale.Fit,
+    )
+}
+
+/** Mark + wordmark lockup. Below 48 dp the compact mark is used instead. */
+@Composable
+private fun BenchLockup() {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        BenchMark(52.dp)
+        Spacer(Modifier.width(12.dp))
+        Column {
+            Text(
+                "PHONON",
+                style = CoreType.display.copy(fontSize = 26.sp, lineHeight = 26.sp, letterSpacing = 1.4.sp),
+                color = PhononColors.Text,
+            )
+            Spacer(Modifier.height(3.dp))
+            Text("LOCAL INFERENCE", style = CoreType.microSmall, color = PhononColors.TextDim)
+        }
+    }
+}
+
+/**
+ * Temperature meter: square track, one fill colour, a labelled scale and a
+ * marker at the pause threshold. The fill shows position; it does not encode
+ * heat in colour.
+ */
+@Composable
+private fun ThermalMeter(fraction: Float, stopC: Float, paused: Boolean) {
+    // Palette, not ink: ink is white in the dark theme and black on paper, so the
+    // fill read as unthemed in one mode or the other. Primary is the readout
+    // colour in both, warn is the paused state, and the track is the rule.
+    val fill = if (paused) PhononColors.Warn else PhononColors.Cyan
+    val marker = PhononColors.Danger
+    val stopFraction = (stopC / 60f).coerceIn(0.02f, 0.98f)
+    Column {
+        Box(Modifier.fillMaxWidth().height(12.dp)) {
+            Box(Modifier.fillMaxSize().background(PhononColors.Border))
+            Box(
+                Modifier
+                    .fillMaxHeight()
+                    .fillMaxWidth(fraction.coerceIn(0f, 1f))
+                    .background(fill),
+            )
+            Row(Modifier.fillMaxSize()) {
+                Spacer(Modifier.weight(stopFraction))
+                Box(Modifier.width(2.dp).fillMaxHeight().background(marker))
+                Spacer(Modifier.weight((1f - stopFraction).coerceAtLeast(0.01f)))
+            }
+        }
+        Spacer(Modifier.height(5.dp))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text("0 °C", style = CoreType.microSmall, color = PhononColors.TextDim)
+            Text("PAUSE ${restartThreshold(stopC)} °C", style = CoreType.microSmall, color = marker)
+            Text("60 °C", style = CoreType.microSmall, color = PhononColors.TextDim)
+        }
+    }
+}
+
 @Composable
 private fun PhononCard(content: @Composable ColumnScope.() -> Unit) {
     Column(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(20.dp))
+            .clip(RectangleShape)
             .background(PhononColors.Surface)
-            .border(1.dp, PhononColors.Border, RoundedCornerShape(20.dp))
+            .border(1.dp, PhononColors.Border, RectangleShape)
             .padding(16.dp),
         content = content,
     )
@@ -3733,7 +3794,7 @@ private fun PhononField(
         modifier = modifier.fillMaxWidth(),
         singleLine = true,
         keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
-        shape = RoundedCornerShape(14.dp),
+        shape = RectangleShape,
         textStyle = TextStyle(fontSize = 14.sp, color = PhononColors.Text),
         colors = OutlinedTextFieldDefaults.colors(
             focusedBorderColor = PhononColors.Cyan,
@@ -3741,8 +3802,8 @@ private fun PhononField(
             focusedLabelColor = PhononColors.Cyan,
             unfocusedLabelColor = PhononColors.TextDim,
             cursorColor = PhononColors.Cyan,
-            focusedContainerColor = Color(0xFF060B10),
-            unfocusedContainerColor = Color(0xFF060B10),
+            focusedContainerColor = PhononColors.Inset,
+            unfocusedContainerColor = PhononColors.Inset,
         ),
     )
 }
@@ -3757,12 +3818,12 @@ private fun ChoiceChip(
     Box(
         modifier
             .height(46.dp)
-            .clip(RoundedCornerShape(14.dp))
+            .clip(RectangleShape)
             .background(if (selected) PhononColors.Cyan.copy(alpha = 0.08f) else PhononColors.Surface)
             .border(
                 1.dp,
                 if (selected) PhononColors.Cyan else PhononColors.Border,
-                RoundedCornerShape(14.dp),
+                RectangleShape,
             )
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
@@ -3796,7 +3857,7 @@ private fun LogDialog(onDismiss: () -> Unit) {
                         } else {
                             PhononColors.TextDim
                         },
-                        fontFamily = FontFamily.Monospace,
+                        fontFamily = CoreType.mono,
                         fontSize = 10.sp,
                         lineHeight = 14.sp,
                     )
@@ -3884,7 +3945,7 @@ private fun GatewayCard(context: Context, settings: Settings, health: Health?) {
     PhononCard {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text("Gateway", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                Text("GATEWAY", style = CoreType.section)
                 Spacer(Modifier.height(4.dp))
                 Text(
                     "Register this phone with a LiteLLM proxy so one URL and one key reach it. " +

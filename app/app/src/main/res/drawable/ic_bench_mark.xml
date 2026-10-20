@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The BENCH mark: three open squares joined by right-angle traces to a dot at
+  the centre. Drawn on a 256 grid and scaled into a 96 dp plate.
+
+  The plate is part of the asset, not the layout: the mark must never sit
+  directly on the heat bands, and this way it cannot. Plate #08070A and mark
+  #FFF7F0 are fixed rather than themed (19:1 in either theme); only the centre
+  dot carries the primary amber.
+
+  Below 48 dp use ic_bench_mark_compact (three filled squares + dot, no traces).
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="96dp"
+    android:height="96dp"
+    android:viewportWidth="96"
+    android:viewportHeight="96">
+
+    <path
+        android:fillColor="#08070A"
+        android:pathData="M0,0h96v96h-96z" />
+
+    <group
+        android:scaleX="0.28125"
+        android:scaleY="0.28125"
+        android:translateX="12"
+        android:translateY="12">
+
+        <!-- traces: right-angle routes into the hub -->
+        <path
+            android:pathData="M128,84L128,116"
+            android:strokeColor="#FFF7F0"
+            android:strokeWidth="9" />
+        <path
+            android:pathData="M52,172L52,134L116,134"
+            android:strokeColor="#FFF7F0"
+            android:strokeWidth="9" />
+        <path
+            android:pathData="M204,172L204,122L140,122"
+            android:strokeColor="#FFF7F0"
+            android:strokeWidth="9" />
+
+        <!-- fixtures: three open squares -->
+        <path
+            android:pathData="M98,24h60v60h-60z"
+            android:strokeColor="#FFF7F0"
+            android:strokeWidth="13" />
+        <path
+            android:pathData="M22,172h60v60h-60z"
+            android:strokeColor="#FFF7F0"
+            android:strokeWidth="13" />
+        <path
+            android:pathData="M174,172h60v60h-60z"
+            android:strokeColor="#FFF7F0"
+            android:strokeWidth="13" />
+
+        <!-- the lamp at the centre of the bench -->
+        <path
+            android:fillColor="#FFD166"
+            android:pathData="M116,116h24v24h-24z" />
+    </group>
+</vector>

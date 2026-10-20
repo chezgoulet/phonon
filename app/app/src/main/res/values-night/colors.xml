@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- CORE ground, night. -->
+    <color name="phonon_ground">#08070A</color>
+</resources>

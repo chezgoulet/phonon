@@ -292,6 +292,22 @@ class AvatarView @JvmOverloads constructor(
     private var centered = false
     private var vigShader: RadialGradient? = null
 
+    /**
+     * The colour the frame is cleared to before the additive glow is laid on top.
+     * Defaults to black — the surface the glow was designed against — and the host
+     * sets it per palette so the tile never paints a stray field on the page. It is
+     * a tile colour, not a page colour: the fill stays inside this view's bounds.
+     */
+    private var backdrop = Color.BLACK
+
+    /** Set the tile base. Cheap to call every recomposition: no-op when unchanged. */
+    fun setBackdrop(color: Int) {
+        if (backdrop != color) {
+            backdrop = color
+            invalidate()
+        }
+    }
+
     // ---- Wave 1 (video-wave1): per-frame scratch for the new archetypes. Allocated
     // ---- ONCE; the particle loop only reads primitives/arrays, never allocates.
     // ---- A_NUCLEUS: each orbit ring rotates at its own Kepler-ish rate. spin advances
@@ -1796,11 +1812,20 @@ class AvatarView @JvmOverloads constructor(
         // residue accumulates wherever particles travel — a soft lifted plateau
         // tracking particle history (field-verified by panel photos; invisible to
         // screenshots, which capture the intended clean frame). The fix: make every
-        // frame self-contained. One opaque black base (SRC, not ADD) clears the
-         // surface; the additive glow then works exactly as designed ON BLACK —
-         // same intended appearance, no cross-frame accumulation, on any device.
-         // Cost: one full-screen fill per frame, trivial against 100+ sprite blits.
-         canvas.drawColor(Color.BLACK, PorterDuff.Mode.SRC)
+        // frame self-contained. One opaque base (SRC, not ADD) clears the surface;
+        // the additive glow then works exactly as designed ON that base — same
+        // intended appearance, no cross-frame accumulation, on any device.
+        // Cost: one full-screen fill per frame, trivial against 100+ sprite blits.
+        //
+        // The base is the host's colour ([setBackdrop]), not Color.BLACK, and the
+        // fill is clipped to this view's own box. SRC ignores the child geometry
+        // and replaces everything inside the clip, and inside an AndroidView that
+        // clip is the host Compose draw region — an unclipped fill painted an
+        // opaque black page over the content behind the avatar (the light theme
+        // showed it, the dark one hid it) and erased the lockup drawn above it.
+        canvas.save()
+        canvas.clipRect(0f, 0f, width.toFloat(), height.toFloat())
+        canvas.drawColor(backdrop, PorterDuff.Mode.SRC)
 
         // Two sprite references resolved ONCE per frame — the particle loop below does no
         // cache lookup, no colour math and no allocation at all.
@@ -1864,6 +1889,7 @@ class AvatarView @JvmOverloads constructor(
             vigShader = vs; vig.shader = vs
         }
         canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), vig)
+        canvas.restore()
 
         // always animate — at the display rate normally, at 20 fps while a
         // generation is running and the operator left the avatar in reduced mode.
