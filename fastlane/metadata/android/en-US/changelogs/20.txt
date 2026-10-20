@@ -1,0 +1,13 @@
+A new identity, and three things that make the node easier to live with.
+
+- CORE: a thermal-readout look — hard edges, condensed display type, light and dark
+  following the system, the BENCH mark as the logo and the launcher icon.
+- The mark is alive: it draws the bus, runs a packet along the traces and turns its
+  corners; green means serving, amber means paused on heat, red means a fault.
+- Home Assistant: the built-in Ollama integration now finds this node — a conversation
+  agent and Assist, with no extra software to install.
+- Battery: a charging-limit card that opens the system screen, confirms the state, and
+  reports hours spent above 80% this week.
+- Gateway: optional one-switch LiteLLM registration with the key encrypted on the device.
+- Model downloads: memory pressure now warns with the numbers and lets you continue,
+  instead of refusing the download outright.
