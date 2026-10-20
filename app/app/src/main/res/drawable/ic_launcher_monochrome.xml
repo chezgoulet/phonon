@@ -1,49 +1,43 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Monochrome layer for themed icons (Android 13+): the mark as a single-colour
-  silhouette on 108 dp, same padding as the colour foreground. The system tints
-  it; the dot is merged into the silhouette because only one colour exists.
+  The BENCH mark, canonical geometry (118 grid): squares (12,12) (78,12)
+  (78,78) at 28, traces M40,26h38 and M26,40v52h52, dot (59,59) r5.
+  Scaled as one factor into a 46 dp ink box on the 108 dp adaptive canvas,
+  so the whole mark stays inside the 66 dp safe circle (corners at 32.5 dp
+  from centre) and no launcher mask crops a square.
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-
     <group
-        android:scaleX="0.205357"
-        android:scaleY="0.205357"
-        android:translateX="27.76"
-        android:translateY="27.76">
-
+        android:scaleX="0.464646"
+        android:scaleY="0.464646"
+        android:translateX="26.585859"
+        android:translateY="26.585859">
         <path
-            android:pathData="M128,84L128,116"
-            android:strokeColor="#FFFFFF"
-            android:strokeWidth="9" />
+            android:pathData="M40,26L78,26"
+            android:strokeColor="#000000"
+            android:strokeWidth="2.3232" />
         <path
-            android:pathData="M52,172L52,134L116,134"
-            android:strokeColor="#FFFFFF"
-            android:strokeWidth="9" />
+            android:pathData="M26,40L26,92L78,92"
+            android:strokeColor="#000000"
+            android:strokeWidth="2.3232" />
         <path
-            android:pathData="M204,172L204,122L140,122"
-            android:strokeColor="#FFFFFF"
-            android:strokeWidth="9" />
-
+            android:pathData="M12,12h28v28h-28z"
+            android:strokeColor="#000000"
+            android:strokeWidth="2.3232" />
         <path
-            android:pathData="M98,24h60v60h-60z"
-            android:strokeColor="#FFFFFF"
-            android:strokeWidth="13" />
+            android:pathData="M78,12h28v28h-28z"
+            android:strokeColor="#000000"
+            android:strokeWidth="2.3232" />
         <path
-            android:pathData="M22,172h60v60h-60z"
-            android:strokeColor="#FFFFFF"
-            android:strokeWidth="13" />
+            android:pathData="M78,78h28v28h-28z"
+            android:strokeColor="#000000"
+            android:strokeWidth="2.3232" />
         <path
-            android:pathData="M174,172h60v60h-60z"
-            android:strokeColor="#FFFFFF"
-            android:strokeWidth="13" />
-
-        <path
-            android:fillColor="#FFFFFF"
-            android:pathData="M116,116h24v24h-24z" />
+            android:fillColor="#000000"
+            android:pathData="M27.41,25.09a2.32,2.32 0 1,0 0.0023,0z" />
     </group>
 </vector>
