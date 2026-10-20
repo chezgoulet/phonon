@@ -177,6 +177,17 @@ object CoreType {
         lineHeight = 28.sp,
         letterSpacing = (-0.5).sp,
     )
+    /**
+     * A word in the measurement slot ("IDLE"). The display face, not the mono:
+     * Plex Mono's lowercase i and l carry baseline serifs, so a lowercase word at
+     * 26 sp reads as a serif metric next to the digits. Words are set in the face
+     * the rest of the readout shouts in.
+     */
+    val metricWord = display.copy(
+        fontSize = 24.sp,
+        lineHeight = 28.sp,
+        letterSpacing = 0.6.sp,
+    )
     val micro = TextStyle(
         fontFamily = PlexMono,
         fontWeight = FontWeight.Medium,

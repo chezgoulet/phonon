@@ -68,6 +68,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -114,6 +115,7 @@ import org.phononai.app.Settings
 import org.phononai.app.SocTuning
 import org.phononai.app.ui.avatar.AvatarView
 import org.phononai.app.ui.theme.CoreType
+import org.phononai.app.ui.theme.LocalPalette
 import org.phononai.app.ui.theme.PhononColors
 import java.io.File
 import kotlin.math.abs
@@ -501,12 +503,15 @@ private fun ServeScreen(
                     else -> "Throughput"
                 },
                 value = when {
-                    !hasMeasuredRate -> "idle"
+                    !hasMeasuredRate -> "IDLE"
                     generating -> "%.1f".format(animatedTps)
                     else -> "%.1f".format(tps)
                 },
                 unit = if (hasMeasuredRate) "tok/s" else "",
                 valueColor = if (!hasMeasuredRate || !generating) PhononColors.TextDim else PhononColors.Text,
+                // A word is not a measurement: the mono's lowercase reads serif in
+                // the value slot, so the placeholder takes the display face.
+                valueStyle = if (hasMeasuredRate) CoreType.metric else CoreType.metricWord,
                 accent = accent,
             ) {
                 if (hasMeasuredRate) {
@@ -571,6 +576,7 @@ private fun MetricCard(
     unit: String,
     accent: Color,
     valueColor: Color = PhononColors.Text,
+    valueStyle: TextStyle = CoreType.metric,
     extra: @Composable ColumnScope.() -> Unit,
 ) {
     Column(
@@ -590,7 +596,7 @@ private fun MetricCard(
             Text(
                 value,
                 color = valueColor,
-                style = CoreType.metric,
+                style = valueStyle,
             )
             if (unit.isNotBlank()) {
                 Spacer(Modifier.width(4.dp))
@@ -1093,10 +1099,17 @@ private fun RecentActivity(health: Health?, accent: Color) {
 @Composable
 private fun Avatar(kind: AvatarKind, amp: Float, reduced: Boolean, shape: String, modifier: Modifier) {
     val driver = remember { AvatarDriver() }
+    // The glow is additive over the frame base, so the base has to stay dark to read
+    // as light in the air: on paper that is an ink tile, on the dark ground it is the
+    // ground itself, where the seam disappears. A tile colour, never a page colour —
+    // AvatarView clips its clear to its own bounds (see setBackdrop).
+    val palette = LocalPalette.current
+    val plate = (if (palette.dark) palette.ground else palette.ink).toArgb()
     AndroidView(
         modifier = modifier,
         factory = { context ->
             AvatarView(context).apply {
+                setBackdrop(plate)
                 setIdleTheme(shape)
                 applyStateShapes(
                     speaking = "waveform",
@@ -1110,6 +1123,7 @@ private fun Avatar(kind: AvatarKind, amp: Float, reduced: Boolean, shape: String
         },
         update = { view ->
             driver.attach(view)
+            view.setBackdrop(plate)
             view.setIdleTheme(shape)
             driver.apply(kind, amp, reduced)
         },
@@ -3508,7 +3522,10 @@ private fun BenchLockup() {
  */
 @Composable
 private fun ThermalMeter(fraction: Float, stopC: Float, paused: Boolean) {
-    val fill = if (paused) PhononColors.Warn else PhononColors.Text
+    // Palette, not ink: ink is white in the dark theme and black on paper, so the
+    // fill read as unthemed in one mode or the other. Primary is the readout
+    // colour in both, warn is the paused state, and the track is the rule.
+    val fill = if (paused) PhononColors.Warn else PhononColors.Cyan
     val marker = PhononColors.Danger
     val stopFraction = (stopC / 60f).coerceIn(0.02f, 0.98f)
     Column {
