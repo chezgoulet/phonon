@@ -1,7 +1,7 @@
 package org.phononai.app.ui.theme
 
 import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.foundation.shape.RectangleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Shapes
 import androidx.compose.material3.Typography
@@ -16,6 +16,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import org.phononai.app.R
 
@@ -30,6 +31,8 @@ data class Palette(
     val ground: Color,
     val surface: Color,
     val surfaceHigh: Color,
+    /** Sunken panels: tab bar, key boxes, field wells. */
+    val inset: Color,
     val ink: Color,
     val dim: Color,
     val rule: Color,
@@ -49,6 +52,7 @@ val CoreDark = Palette(
     ground = Color(0xFF08070A),
     surface = Color(0xFF121016),
     surfaceHigh = Color(0xFF1B1620),
+    inset = Color(0xFF08070A),
     ink = Color(0xFFFFF7F0),
     dim = Color(0xFFA79AA6),
     rule = Color(0xFF241F2B),
@@ -67,6 +71,8 @@ val CoreLight = Palette(
     ground = Color(0xFFFFF8F2),
     surface = Color(0xFFFFFFFF),
     surfaceHigh = Color(0xFFF6ECE4),
+    // On paper the sunken panel is the darker cream, not the page itself.
+    inset = Color(0xFFF6ECE4),
     ink = Color(0xFF1A1210),
     dim = Color(0xFF6F5F58),
     rule = Color(0xFFEADDD4),
@@ -93,16 +99,12 @@ val LocalPalette = staticCompositionLocalOf { CoreDark }
  */
 object PhononColors {
     val Background: Color @Composable get() = LocalPalette.current.ground
-    val Ground: Color @Composable get() = LocalPalette.current.ground
 
     /** Sunken panel: tab bar, key boxes, field wells. */
-    val Inset: Color @Composable get() = LocalPalette.current.ground
+    val Inset: Color @Composable get() = LocalPalette.current.inset
     val Surface: Color @Composable get() = LocalPalette.current.surface
     val SurfaceHigh: Color @Composable get() = LocalPalette.current.surfaceHigh
     val Border: Color @Composable get() = LocalPalette.current.rule
-
-    /** The only rule colour; named for the token, kept for the call sites. */
-    val Rule: Color @Composable get() = LocalPalette.current.rule
     val Text: Color @Composable get() = LocalPalette.current.ink
     val TextDim: Color @Composable get() = LocalPalette.current.dim
     val Cyan: Color @Composable get() = LocalPalette.current.primary
@@ -115,15 +117,6 @@ object PhononColors {
     /** Stopped state: present but receded. */
     val DimCyan: Color @Composable get() = LocalPalette.current.dim
     val Heat: List<Color> @Composable get() = LocalPalette.current.heat
-
-    /**
-     * The BENCH mark's plate. Fixed rather than theme-derived: the mark is
-     * #FFF7F0 on a #08070A plate in both themes, so it always reads and can
-     * never land directly on the heat bands.
-     */
-    val Plate = Color(0xFF08070A)
-
-    val Mono: FontFamily = CoreType.mono
 }
 
 // ---------------------------------------------------------------------------
@@ -250,12 +243,14 @@ private val CoreTypography = Typography(
 )
 
 /** Square. Every radius in the product is zero. */
+private val Square = RoundedCornerShape(0.dp)
+
 private val PhononShapes = Shapes(
-    extraSmall = RectangleShape,
-    small = RectangleShape,
-    medium = RectangleShape,
-    large = RectangleShape,
-    extraLarge = RectangleShape,
+    extraSmall = Square,
+    small = Square,
+    medium = Square,
+    large = Square,
+    extraLarge = Square,
 )
 
 private fun Palette.scheme() = if (dark) {

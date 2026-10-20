@@ -324,7 +324,7 @@ private fun PrimaryButton(action: PrimaryAction) {
         shape = RectangleShape,
         colors = colors,
     ) {
-        Text(action.label, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+        Text(action.label.uppercase(), style = CoreType.section.copy(fontSize = 16.sp, lineHeight = 19.sp))
     }
 }
 
@@ -350,10 +350,12 @@ private fun TabBar(selected: Tab, onTab: (Tab) -> Unit) {
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
-                    tab.label,
+                    tab.label.uppercase(),
                     color = if (on) PhononColors.Cyan else PhononColors.TextDim,
-                    fontSize = 12.sp,
-                    fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal,
+                    style = CoreType.micro.copy(
+                        fontSize = 12.sp,
+                        fontWeight = if (on) FontWeight.Medium else FontWeight.Normal,
+                    ),
                 )
             }
         }
@@ -1144,10 +1146,9 @@ private fun ModelsScreen(
             val recommended = ModelCatalog.forTier(tier, family)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    family.label,
+                    family.label.uppercase(),
                     color = PhononColors.Text,
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.SemiBold,
+                    style = CoreType.headline.copy(fontSize = 18.sp, lineHeight = 20.sp),
                 )
                 if (family == ModelFamily.QWEN) {
                     Spacer(Modifier.width(8.dp))
@@ -1190,10 +1191,9 @@ private fun ModelsScreen(
         val extras = models.filter { ModelCatalog.byFileName(it.name) == null }
         if (extras.isNotEmpty()) {
             Text(
-                "Other GGUF files on this phone",
+                "OTHER GGUF FILES ON THIS PHONE",
                 color = PhononColors.Text,
-                fontSize = 18.sp,
-                fontWeight = FontWeight.SemiBold,
+                style = CoreType.headline.copy(fontSize = 18.sp, lineHeight = 20.sp),
             )
             Spacer(Modifier.height(4.dp))
             Text(
@@ -1257,7 +1257,7 @@ private fun ModelsScreen(
                     disabledContentColor = PhononColors.TextDim,
                 ),
             ) {
-                Text(if (active) "Downloading…" else "Download", fontWeight = FontWeight.Bold)
+                Text((if (active) "Downloading…" else "Download").uppercase(), style = CoreType.section)
             }
             if (download != null && (download.active || download.error != null) &&
                 download.dest.let { dest -> ModelCatalog.entries.none { it.fileName == File(dest).name } }
@@ -1360,8 +1360,7 @@ private fun CatalogEntryCard(
                     Text(
                         entry.displayName,
                         color = PhononColors.Text,
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.SemiBold,
+                        style = MaterialTheme.typography.titleSmall,
                     )
                     Spacer(Modifier.width(8.dp))
                     Text(entry.quant, color = PhononColors.TextDim, fontSize = 11.sp)
@@ -1389,8 +1388,9 @@ private fun CatalogEntryCard(
             Text(
                 if (entry.measured) entry.decodeLabel else "UNMEASURED",
                 color = if (entry.measured) PhononColors.Text else PhononColors.Warn,
-                style = CoreType.mono.copy(
+                style = CoreType.metric.copy(
                     fontSize = 13.sp,
+                    lineHeight = 16.sp,
                     fontWeight = if (entry.measured) FontWeight.Medium else FontWeight.Normal,
                 ),
             )
@@ -2612,7 +2612,7 @@ private fun SettingsScreen(
                 contentColor = PhononColors.OnCyan,
             ),
         ) {
-            Text("Save changes", fontWeight = FontWeight.Bold)
+            Text("SAVE CHANGES", style = CoreType.section)
         }
         Spacer(Modifier.height(10.dp))
         Text(
@@ -2863,7 +2863,7 @@ private fun KioskCard(activity: Activity) {
                             contentColor = PhononColors.OnCyan,
                         ),
                     ) {
-                        Text("Enter kiosk", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        Text("ENTER KIOSK", style = CoreType.section)
                     }
                 } else {
                     Button(
@@ -2878,7 +2878,7 @@ private fun KioskCard(activity: Activity) {
                             contentColor = PhononColors.Text,
                         ),
                     ) {
-                        Text("Leave kiosk", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                        Text("LEAVE KIOSK", style = CoreType.section)
                     }
                 }
                 if (!exempt) {
@@ -3031,6 +3031,8 @@ private fun SetupScreen(
     ) {
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
             Spacer(Modifier.height(14.dp))
+            BenchLockup()
+            Spacer(Modifier.height(18.dp))
             Text(
                 "SET UP THIS PHONE",
                 color = PhononColors.Cyan,
@@ -3038,7 +3040,7 @@ private fun SetupScreen(
             )
             Spacer(Modifier.height(14.dp))
             Text(
-                "TURN THIS PHONE INTO\nA MODEL SERVER",
+                "TURN THIS PHONE\nINTO A MODEL\nSERVER",
                 style = MaterialTheme.typography.displayLarge,
             )
             Spacer(Modifier.height(10.dp))
@@ -3276,7 +3278,7 @@ private fun SetupScreen(
                 contentColor = PhononColors.OnCyan,
             ),
         ) {
-            Text("Start serving", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            Text("START SERVING", style = CoreType.section.copy(fontSize = 16.sp, lineHeight = 19.sp))
         }
         Spacer(Modifier.height(10.dp))
         Box(
