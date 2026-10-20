@@ -50,6 +50,7 @@ class MarkView @JvmOverloads constructor(
     private var tps = 0f
     private var stateStart = SystemClock.uptimeMillis()
     private var reducedMotion = false
+    private var held = false
 
     /** Null: pick the compact cut from the size. True/false forces it. */
     var compactOverride: Boolean? = null
@@ -84,6 +85,16 @@ class MarkView @JvmOverloads constructor(
         }
         state = next
         tps = rate
+        restart()
+    }
+
+    /**
+     * Draw the static frame for the current state, as reduced motion does.
+     * For the "Animate avatar while generating" setting: off holds the mark.
+     */
+    fun setHeld(on: Boolean) {
+        if (on == held) return
+        held = on
         restart()
     }
 
@@ -139,7 +150,7 @@ class MarkView @JvmOverloads constructor(
         if (side <= 0f) return
         val compact = isCompact()
         val t = SystemClock.uptimeMillis() - stateStart
-        MarkMotion.fill(frame, motion, state, t, tps, compact, reducedMotion)
+        MarkMotion.fill(frame, motion, state, t, tps, compact, reducedMotion || held)
 
         val scale = side / 256f
         canvas.save()
