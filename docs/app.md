@@ -158,7 +158,7 @@ requires `Authorization: Bearer <key>`.
 |---|---|---|
 | GET | `/health` | JSON; 200 only in `ready`, 503 otherwise |
 | GET | `/v1/models` | proxied to llama-server |
-| POST | `/model/download` | `{"url": "..."}`; 202, 409 if already active |
+| POST | `/model/download` | `{"url": "..."}` or `{"id": "<catalog id>", "force": true}`; 202 accepted, 200 with a memory warning, 409 on a hard refusal or an active download |
 | GET | `/model/download` | progress JSON |
 | POST | `/server/start`, `/server/stop` | control |
 | GET | `/settings` | current settings (API key shown only as `api_key_set`) |
@@ -166,6 +166,16 @@ requires `Authorization: Bearer <key>`.
 | POST | `/debug/evict` | debug builds only, test instrument: ask the kernel to drop the model file's clean page cache; 404 in release |
 | GET | `/logs` | ring buffer, text/plain |
 | * | `/v1/*` | raw HTTP proxy to the configured bind address / backend port |
+
+`POST /model/download` separates two memory outcomes. A model that fits the
+hardware but not the memory free at that instant does not start: the response is
+200 with a `warning` field, `"code": "memory_fit"`, and the `required_gb` /
+`available_gb` numbers, and the caller re-POSTs with `"force": true` (or
+`?force=1`) to start it anyway. A model that needs more than 60% of total RAM —
+more than the phone could give an idle process — is refused with 409 and
+`"code": "memory_fit_hard"`, and no flag overrides that. The load gate in
+`ServerManager` is unchanged: it still refuses to start a server that does not
+fit the memory available at load time.
 
 The proxy forwards the method, path, query and body; streams chunked responses
 as they arrive (SSE works); injects `Authorization: Bearer <api-key>` only when

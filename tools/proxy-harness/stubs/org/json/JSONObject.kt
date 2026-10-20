@@ -7,6 +7,13 @@ class JSONObject() {
       m[it.groupValues[1]] = if (it.groupValues[2]=="null") null else it.groupValues[3].ifEmpty { it.groupValues[2] } }
   }
   fun optString(k:String) = (m[k] ?: "").toString()
+  fun optBoolean(k:String, def:Boolean = false): Boolean =
+    when (val v = m[k]) {
+      null -> def
+      is Boolean -> v
+      is String -> v == "true" || v == "1"
+      else -> def
+    }
   fun put(k:String, v:Any?): JSONObject { m[k]=v; return this }
   fun has(k:String) = m.containsKey(k)
   fun isNull(k:String) = m[k]==null

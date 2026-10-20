@@ -28,10 +28,14 @@ interface ApiHandler {
     fun isReady(): Boolean
     fun logs(): String
     fun downloadJson(): String
-    fun startDownload(url: String?): String
+    /**
+     * Start a download. [force] accepts a transient memory warning; the hard
+     * refusal for a model too large for the phone is never overridable.
+     */
+    fun startDownload(url: String?, force: Boolean = false): String
 
     /** Start a catalog download by entry id: the only path that carries a hash. */
-    fun startCatalogDownload(id: String): String
+    fun startCatalogDownload(id: String, force: Boolean = false): String
     fun startServer(): String
     fun stopServer()
     fun settingsJson(): String
@@ -444,8 +448,8 @@ class ApiServer(
 
             req.method == "POST" && req.path == "/model/download" -> {
                 val text = req.body.toString(Charsets.UTF_8)
-                val url = try {
-                    if (text.isBlank()) null else JSONObject(text).optString("url").ifBlank { null }
+                val body = try {
+                    if (text.isBlank()) JSONObject() else JSONObject(text)
                 } catch (t: Throwable) {
                     respond(
                         out, 400, "application/json",
@@ -453,13 +457,23 @@ class ApiServer(
                     )
                     return
                 }
-                val id = try {
-                    if (text.isBlank()) null else JSONObject(text).optString("id").ifBlank { null }
-                } catch (t: Throwable) {
-                    null
+                val url = body.optString("url").ifBlank { null }
+                val id = body.optString("id").ifBlank { null }
+                // Explicit consent only: `?force=1` or {"force":true}. A caller
+                // that ignores a memory warning must have meant to.
+                val force = body.optBoolean("force", false) || queryFlag(req.query, "force")
+                val result = if (id != null) {
+                    api.startCatalogDownload(id, force)
+                } else {
+                    api.startDownload(url, force)
                 }
-                val result = if (id != null) api.startCatalogDownload(id) else api.startDownload(url)
-                val status = if (hasError(result)) 409 else 202
+                // A warning is neither accepted nor failed: 200 with the body so
+                // a client can show it and re-POST with force.
+                val status = when {
+                    hasError(result) -> 409
+                    hasWarning(result) -> 200
+                    else -> 202
+                }
                 respond(out, status, "application/json; charset=utf-8", result.toByteArray())
             }
 
@@ -592,6 +606,21 @@ class ApiServer(
     } catch (t: Throwable) {
         true
     }
+
+    /** A memory warning: nothing was refused and nothing started. */
+    private fun hasWarning(json: String): Boolean = try {
+        val obj = JSONObject(json)
+        obj.has("warning") && !obj.isNull("warning")
+    } catch (t: Throwable) {
+        false
+    }
+
+    /** `?force`, `?force=1` and `?force=true` all mean yes; anything else no. */
+    private fun queryFlag(query: String, key: String): Boolean =
+        query.split('&').any { part ->
+            val kv = part.split('=', limit = 2)
+            kv[0] == key && (kv.size == 1 || kv[1] == "1" || kv[1] == "true")
+        }
 
     private fun proxy(req: Request, out: OutputStream, client: Socket) {
         val socket = Socket()

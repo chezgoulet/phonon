@@ -373,20 +373,29 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
 
     override fun downloadJson(): String = DownloadState.toJson()
 
-    override fun startDownload(url: String?): String = beginDownload(url, null, null)
+    override fun startDownload(url: String?, force: Boolean): String =
+        beginDownload(url, null, null, force)
 
     /**
      * Activity-only: download one catalog entry to its declared filename and,
      * once complete, make it the active model. Not an HTTP route; the existing
      * `/model/download` contract is unchanged.
+     *
+     * [force] accepts a transient memory warning. It cannot override the hard
+     * refusal of a model the phone could never serve.
      */
-    fun uiDownloadModel(entryId: String): String {
+    fun uiDownloadModel(entryId: String, force: Boolean = false): String {
         val entry = ModelCatalog.byId(entryId)
             ?: return JSONObject().put("error", "unknown model: $entryId").toString()
-        return beginDownload(entry.url, entry.fileName, entry.id)
+        return beginDownload(entry.url, entry.fileName, entry.id, force)
     }
 
-    private fun beginDownload(url: String?, fileName: String?, entryId: String?): String {
+    private fun beginDownload(
+        url: String?,
+        fileName: String?,
+        entryId: String?,
+        force: Boolean,
+    ): String {
         // Test-and-set in one synchronized call: two concurrent requests must
         // not both decide the downloader is idle and start a writer each.
 
@@ -403,16 +412,32 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
         if (dest.parentFile != modelsDir) {
             return JSONObject().put("error", "model path escapes the models directory").toString()
         }
-        // Refuse a download that could not be served even after it lands. Only a
-        // catalog entry has a known size; a bare URL is downloaded and the fit is
-        // decided at load time instead.
+        // Memory pressure at this moment is a warning, not a gate: a phone under
+        // transient load must not cost the user a model it can serve later. The
+        // hard gate stays where it belongs, at load time (ServerManager). The
+        // only outright refusal left here is a model that cannot fit even on an
+        // idle phone, which is a fact about the hardware, not about this moment.
+        // Only a catalog entry has a known size; a bare URL is downloaded and
+        // the fit is decided at load time instead.
         entryId?.let { id ->
             ModelCatalog.byId(id)?.let { entry ->
                 val mmproj = if (entry.mmprojSizeBytes > 0) entry.mmprojSizeBytes else 0L
                 val fit = MemoryFit.check(this, entry.sizeBytes, mmproj, entry.contextSize)
-                if (!fit.fits) {
-                    Log.w(TAG, "download refused: ${fit.message}")
-                    return JSONObject().put("error", fit.message).toString()
+                val assessment = MemoryFit.assessDownload(this, fit)
+                when (MemoryFit.outcome(assessment, force)) {
+                    MemoryFit.DownloadOutcome.REFUSED -> {
+                        Log.w(TAG, "download refused: ${assessment.refusalMessage}")
+                        return MemoryFit.refusalJson(assessment)
+                    }
+                    MemoryFit.DownloadOutcome.NEEDS_CONFIRMATION -> {
+                        Log.i(TAG, "download waiting for consent: ${assessment.warningMessage}")
+                        return MemoryFit.warningJson(assessment)
+                    }
+                    MemoryFit.DownloadOutcome.START -> {
+                        if (assessment.decision == MemoryFit.DownloadDecision.WARN) {
+                            Log.w(TAG, "download forced past memory warning: ${assessment.warningMessage}")
+                        }
+                    }
                 }
             }
         }
@@ -477,7 +502,8 @@ class PhononService : Service(), ServerManager.Listener, ApiHandler {
         return DownloadState.toJson()
     }
 
-    override fun startCatalogDownload(id: String): String = uiDownloadModel(id)
+    override fun startCatalogDownload(id: String, force: Boolean): String =
+        uiDownloadModel(id, force)
 
     override fun startServer(): String {
         synchronized(settings.configLock) {

@@ -156,6 +156,24 @@ EOF
 [ "$held" -le 20 ] && pass "slow-head: dripping client closed after ${held}s" \
   || fail "slow-head: dripping client held a worker for ${held}s"
 
+# A memory warning is a 200 with the whole body, not an error. Only `force` -
+# in the query or the JSON body - starts the download, so a caller cannot
+# ignore the warning by accident.
+dl() { curl -s -o "$1" -w '%{http_code}' "${AUTH[@]}" \
+  -H 'Content-Type: application/json' -d "$2" "$URL/model/download$3"; }
+warn_code=$(dl "$BUILD/dl1.json" '{"id":"warn"}' '')
+force_code=$(dl "$BUILD/dl2.json" '{"id":"warn"}' '?force=1')
+body_code=$(dl "$BUILD/dl3.json" '{"id":"warn","force":true}' '')
+plain_code=$(dl "$BUILD/dl4.json" '{"id":"qwen"}' '')
+if [ "$warn_code" = 200 ] && grep -q '"warning"' "$BUILD/dl1.json" \
+   && [ "$force_code" = 202 ] && grep -q '"force":true' "$BUILD/dl2.json" \
+   && [ "$body_code" = 202 ] && grep -q '"force":true' "$BUILD/dl3.json" \
+   && [ "$plain_code" = 202 ] && grep -q '"force":false' "$BUILD/dl4.json"; then
+  pass "download-force: warning -> 200, ?force=1 and body force -> 202, plain -> 202 unforced"
+else
+  fail "download-force: warning=$warn_code force=$force_code body=$body_code plain=$plain_code"
+fi
+
 # --- collect the background cases -------------------------------------------
 echo "waiting for slow-prefill (${PREFILL_S}s) and stalled-reader"
 wait "$slow_pid"
