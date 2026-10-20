@@ -1098,6 +1098,117 @@ private fun jsonHasError(json: String): Boolean = try {
     true
 }
 
+/**
+ * A download-time memory message: the prose stays whole and the numbers are
+ * kept apart so they can be read at a glance. [canForce] is false only for the
+ * hard refusal, which no tap can override.
+ */
+private data class MemoryPrompt(
+    val title: String,
+    val message: String,
+    val requiredGb: String,
+    val availableGb: String,
+    val budgetGb: String?,
+    val canForce: Boolean,
+) {
+    companion object {
+        fun from(obj: JSONObject, canForce: Boolean): MemoryPrompt {
+            fun number(key: String): String? =
+                if (!obj.has(key) || obj.isNull(key)) null else "%.2f".format(obj.optDouble(key))
+            return MemoryPrompt(
+                title = if (canForce) "Memory is tight right now" else "This model cannot run here",
+                message = if (!obj.isNull("warning")) obj.optString("warning") else obj.optString("error"),
+                requiredGb = number("required_gb") ?: "unknown",
+                availableGb = number("available_gb") ?: "unknown",
+                budgetGb = number("budget_gb"),
+                canForce = canForce,
+            )
+        }
+    }
+}
+
+/**
+ * The whole message, wrapped and scrollable. A Toast truncates a long reason
+ * and disappears before it can be read, which is exactly the complaint this
+ * dialog answers.
+ */
+@Composable
+private fun LongTextDialog(title: String, message: String, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            Column(
+                Modifier
+                    .heightIn(max = 420.dp)
+                    .verticalScroll(rememberScrollState()),
+            ) {
+                Text(message, color = PhononColors.TextDim, fontSize = 13.sp, lineHeight = 19.sp)
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Close", color = PhononColors.Cyan) }
+        },
+    )
+}
+
+@Composable
+private fun MemoryNumber(label: String, gb: String) {
+    Row(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+        Text(label, color = PhononColors.TextDim, fontSize = 12.5.sp, modifier = Modifier.weight(1f))
+        Text("$gb GB", color = PhononColors.Text, fontSize = 12.5.sp, fontFamily = FontFamily.Monospace)
+    }
+}
+
+@Composable
+private fun MemoryFitDialog(
+    prompt: MemoryPrompt,
+    onForce: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(prompt.title) },
+        text = {
+            Column(
+                Modifier
+                    .heightIn(max = 420.dp)
+                    .verticalScroll(rememberScrollState()),
+            ) {
+                Text(prompt.message, color = PhononColors.TextDim, fontSize = 13.sp, lineHeight = 19.sp)
+                Spacer(Modifier.height(14.dp))
+                MemoryNumber("Required", prompt.requiredGb)
+                MemoryNumber("Available now", prompt.availableGb)
+                if (prompt.budgetGb != null) {
+                    MemoryNumber("Phone can give at most", prompt.budgetGb)
+                }
+                if (prompt.canForce) {
+                    Spacer(Modifier.height(10.dp))
+                    Text(
+                        "Downloading now does not promise it will run: memory has to free up " +
+                            "before the server starts, and the system may stop it later.",
+                        color = PhononColors.Warn,
+                        fontSize = 12.sp,
+                        lineHeight = 17.sp,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            if (prompt.canForce) {
+                TextButton(onClick = onForce) { Text("Download anyway", color = PhononColors.Cyan) }
+            } else {
+                TextButton(onClick = onDismiss) { Text("Close", color = PhononColors.Cyan) }
+            }
+        },
+        dismissButton = if (prompt.canForce) {
+            { TextButton(onClick = onDismiss) { Text("Cancel") } }
+        } else {
+            null
+        },
+    )
+}
+
 @Composable
 private fun ModelsScreen(
     context: Context,
@@ -1118,6 +1229,15 @@ private fun ModelsScreen(
     }
     val installed = remember(models) { models.map { it.file.name }.toSet() }
     val tier = remember { HardwareProfile.detect(context).tier.id }
+    var urlProblem by remember { mutableStateOf<String?>(null) }
+
+    urlProblem?.let { problem ->
+        LongTextDialog(
+            title = "Download refused",
+            message = problem,
+            onDismiss = { urlProblem = null },
+        )
+    }
 
     Column(
         Modifier
@@ -1271,8 +1391,11 @@ private fun ModelsScreen(
                         else -> {
                             val result = service.startDownload(url)
                             if (jsonHasError(result)) {
-                                toast(context, JSONObject(result).optString("error", "Download failed"))
+                                // Persistent instead of a Toast: the reason names
+                                // bytes and a remedy, and does not fit one line.
+                                urlProblem = JSONObject(result).optString("error", "download failed")
                             } else {
+                                urlProblem = null
                                 toast(context, "Download started")
                             }
                         }
@@ -1302,6 +1425,9 @@ private fun ModelsScreen(
                     },
                     color = if (download.error != null) PhononColors.Danger else PhononColors.TextDim,
                     fontSize = 12.sp,
+                    lineHeight = 17.sp,
+                    softWrap = true,
+                    modifier = Modifier.fillMaxWidth(),
                 )
             }
         }
@@ -1331,24 +1457,56 @@ private fun CatalogEntryCard(
 
     val device = remember { HardwareProfile.detect(context) }
     var confirmDownload by remember { mutableStateOf(false) }
+    var memoryPrompt by remember { mutableStateOf<MemoryPrompt?>(null) }
+    // Persistent, wrapped text: a refused download's reason is several lines
+    // long and a Toast clipped it before the user could read it.
+    var downloadProblem by remember { mutableStateOf<String?>(null) }
     fun tierRank(id: String): Int = when (id) {
         "S" -> 0
         "M" -> 1
         "L" -> 2
         else -> 0
     }
-    fun startDownload() {
+    fun startDownload(force: Boolean) {
         val service = AppState.service
         if (service == null) {
-            toast(context, "Service is starting")
+            downloadProblem = "the service is still starting; try again in a moment"
             return
         }
-        val result = service.uiDownloadModel(entry.id)
-        if (jsonHasError(result)) {
-            toast(context, JSONObject(result).optString("error", "Download failed"))
-        } else {
-            toast(context, "Downloading ${entry.fileName}")
+        val result = service.uiDownloadModel(entry.id, force)
+        val obj = try {
+            JSONObject(result)
+        } catch (t: Throwable) {
+            null
         }
+        when {
+            obj == null -> downloadProblem = result
+            !obj.isNull("warning") -> {
+                downloadProblem = null
+                memoryPrompt = MemoryPrompt.from(obj, canForce = true)
+            }
+            jsonHasError(result) -> {
+                downloadProblem = obj.optString("error", "download failed")
+                if (obj.optString("code").startsWith("memory_fit")) {
+                    memoryPrompt = MemoryPrompt.from(obj, canForce = false)
+                }
+            }
+            else -> {
+                downloadProblem = null
+                toast(context, "Downloading ${entry.fileName}")
+            }
+        }
+    }
+
+    memoryPrompt?.let { prompt ->
+        MemoryFitDialog(
+            prompt = prompt,
+            onForce = {
+                memoryPrompt = null
+                startDownload(force = true)
+            },
+            onDismiss = { memoryPrompt = null },
+        )
     }
 
     if (confirmDownload) {
@@ -1365,7 +1523,7 @@ private fun CatalogEntryCard(
             confirmButton = {
                 TextButton(onClick = {
                     confirmDownload = false
-                    startDownload()
+                    startDownload(force = true)
                 }) { Text("Download anyway", color = PhononColors.Cyan) }
             },
             dismissButton = {
@@ -1510,8 +1668,15 @@ private fun CatalogEntryCard(
                 color = PhononColors.TextDim,
                 fontSize = 12.sp,
             )
-        } else if (downloadError != null) {
-            Text("Failed: $downloadError", color = PhononColors.Danger, fontSize = 12.sp)
+        } else if (downloadError != null || downloadProblem != null) {
+            Text(
+                "Failed: ${downloadError ?: downloadProblem}",
+                color = PhononColors.Danger,
+                fontSize = 12.sp,
+                lineHeight = 17.sp,
+                softWrap = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
         }
 
         if (!active) {
@@ -1542,7 +1707,7 @@ private fun CatalogEntryCard(
                             if (tierRank(entry.ramTier) > tierRank(device.tier.id)) {
                                 confirmDownload = true
                             } else {
-                                startDownload()
+                                startDownload(force = false)
                             }
                         },
                         enabled = !downloading && download?.active != true,
@@ -3048,6 +3213,50 @@ private fun SetupScreen(
     var familyKey by rememberSaveable { mutableStateOf(ModelFamily.QWEN.key) }
     val family = ModelFamily.entries.firstOrNull { it.key == familyKey } ?: ModelFamily.QWEN
     val chosenModel = remember(familyKey, tier) { ModelCatalog.forTier(tier, family) }
+    var memoryPrompt by remember { mutableStateOf<MemoryPrompt?>(null) }
+    var downloadProblem by remember { mutableStateOf<String?>(null) }
+
+    fun startSetupDownload(entryId: String, fileName: String, force: Boolean) {
+        val service = AppState.service
+        if (service == null) {
+            downloadProblem = "the service is still starting; try again in a moment"
+            return
+        }
+        val result = service.uiDownloadModel(entryId, force)
+        val obj = try {
+            JSONObject(result)
+        } catch (t: Throwable) {
+            null
+        }
+        when {
+            obj == null -> downloadProblem = result
+            !obj.isNull("warning") -> {
+                downloadProblem = null
+                memoryPrompt = MemoryPrompt.from(obj, canForce = true)
+            }
+            jsonHasError(result) -> {
+                downloadProblem = obj.optString("error", "download failed")
+                if (obj.optString("code").startsWith("memory_fit")) {
+                    memoryPrompt = MemoryPrompt.from(obj, canForce = false)
+                }
+            }
+            else -> {
+                downloadProblem = null
+                toast(context, "Downloading $fileName")
+            }
+        }
+    }
+
+    memoryPrompt?.let { prompt ->
+        MemoryFitDialog(
+            prompt = prompt,
+            onForce = {
+                memoryPrompt = null
+                chosenModel?.let { startSetupDownload(it.id, it.fileName, force = true) }
+            },
+            onDismiss = { memoryPrompt = null },
+        )
+    }
 
     Column(
         Modifier
@@ -3155,23 +3364,24 @@ private fun SetupScreen(
                     if (!installed) {
                         TextButton(
                             onClick = {
-                                val service = AppState.service
-                                if (service == null) {
-                                    toast(context, "Service is starting")
-                                } else {
-                                    val result = service.uiDownloadModel(entry.id)
-                                    if (jsonHasError(result)) {
-                                        toast(context, JSONObject(result).optString("error", "Download failed"))
-                                    } else {
-                                        toast(context, "Downloading ${entry.fileName}")
-                                    }
-                                }
+                                startSetupDownload(entry.id, entry.fileName, force = false)
                             },
                         ) {
                             Text("Download ${entry.displayName}", color = PhononColors.Cyan, fontSize = 13.sp)
                         }
                     } else {
                         Text("Installed on this phone.", color = PhononColors.Cyan, fontSize = 12.sp)
+                    }
+                    if (downloadProblem != null) {
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            "Failed: $downloadProblem",
+                            color = PhononColors.Danger,
+                            fontSize = 12.sp,
+                            lineHeight = 17.sp,
+                            softWrap = true,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
                     }
                 }
             }

@@ -31,8 +31,17 @@ class StubHandler : ApiHandler {
     override fun isReady() = true
     override fun logs() = ""
     override fun downloadJson() = "{}"
-    override fun startDownload(url: String?) = "{}"
-    override fun startCatalogDownload(id: String) = "{}"
+    // Echoes what the route decided, so the harness can assert that `force`
+    // survives parsing. `warn` stands in for a catalog entry under pressure.
+    override fun startDownload(url: String?, force: Boolean) = downloadResult(url, force)
+    override fun startCatalogDownload(id: String, force: Boolean) = downloadResult(id, force)
+    private fun downloadResult(name: String?, force: Boolean): String {
+        if (name == "warn" && !force) {
+            return """{"warning":"needs more memory than is free right now","code":"memory_fit","required_gb":3.4,"available_gb":2.1}"""
+        }
+        val label = name ?: ""
+        return "{\"force\":$force,\"name\":\"$label\"}"
+    }
     override fun startServer() = "{}"
     override fun stopServer() {}
     override fun settingsJson() = "{}"

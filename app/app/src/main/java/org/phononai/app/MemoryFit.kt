@@ -5,6 +5,7 @@ import android.app.ApplicationExitInfo
 import android.content.Context
 import android.os.Build
 import android.util.Log
+import org.json.JSONObject
 
 /**
  * Whether the model about to be loaded can actually fit in the memory the phone
@@ -83,6 +84,129 @@ object MemoryFit {
         val fits = avail <= 0 || anonymous <= avail
         return Verdict(fits, anonymous, avail, kv, modelBytes, total)
     }
+
+    /**
+     * Share of total RAM a model may claim before a download is refused
+     * outright: what the phone could give an idle process. Above this the model
+     * cannot be served here at all, however much memory happens to be free at
+     * this instant, so downloading it would only waste the user's data.
+     */
+    const val TOTAL_MEMORY_BUDGET_PERCENT = 60L
+
+    enum class DownloadDecision { PROCEED, WARN, REFUSE }
+
+    /** What the download route should do with an assessment. */
+    enum class DownloadOutcome { START, NEEDS_CONFIRMATION, REFUSED }
+
+    /**
+     * A download-time verdict, deliberately separate from [Verdict]: the load
+     * gate asks "can this run now" and refuses; a download asks "will this ever
+     * run here" and only warns when the answer depends on transient pressure.
+     */
+    data class DownloadAssessment(
+        val decision: DownloadDecision,
+        val requiredBytes: Long,
+        val availableBytes: Long,
+        val budgetBytes: Long,
+        val totalBytes: Long,
+    ) {
+        val requiredGb: String get() = gb(requiredBytes)
+        val availableGb: String get() = gb(availableBytes)
+        val budgetGb: String get() = gb(budgetBytes)
+        val totalGb: String get() = gb(totalBytes)
+
+        /**
+         * Full text on purpose: the UI shows this verbatim in a scrollable
+         * dialog, and the API returns it whole. Never abbreviate it here.
+         */
+        val warningMessage: String
+            get() = "this model needs about $requiredGb GB of memory that cannot be reclaimed, " +
+                "but only $availableGb GB is available right now. The phone may free memory " +
+                "later, so the download is allowed - but starting the server may fail while " +
+                "memory is tight, and the system may stop it while it is serving."
+
+        val refusalMessage: String
+            get() = "this model needs about $requiredGb GB of memory that cannot be reclaimed, " +
+                "but this phone can provide at most $budgetGb GB ($TOTAL_MEMORY_BUDGET_PERCENT% of " +
+                "its $totalGb GB of RAM) even when nothing else is running. It cannot be served " +
+                "on this device; choose a smaller model or a shorter context."
+    }
+
+    /** The device's physical RAM; an unreadable value is reported as 0, not guessed. */
+    fun totalBytes(context: Context): Long = try {
+        val manager = context.getSystemService(ActivityManager::class.java)
+        val info = ActivityManager.MemoryInfo()
+        manager.getMemoryInfo(info)
+        info.totalMem
+    } catch (_: Throwable) {
+        0L
+    }
+
+    fun budgetBytes(totalBytes: Long): Long =
+        if (totalBytes <= 0L) 0L else (totalBytes * TOTAL_MEMORY_BUDGET_PERCENT) / 100L
+
+    /**
+     * Classify a download against current availability and the device's total
+     * memory. Pure, so the rule is testable without an Android runtime.
+     *
+     * - REFUSE: required exceeds what the phone could give while idle. Only
+     *   case where the download is refused outright.
+     * - WARN: it fits the hardware but not the memory free right now; the
+     *   caller must confirm (or pass force) before anything is downloaded.
+     * - PROCEED: it fits now.
+     *
+     * An unknown availability (0) is not evidence of pressure and never warns.
+     */
+    fun assessDownload(requiredBytes: Long, availableBytes: Long, totalBytes: Long): DownloadAssessment {
+        val budget = budgetBytes(totalBytes)
+        val decision = when {
+            budget > 0L && requiredBytes > budget -> DownloadDecision.REFUSE
+            availableBytes > 0L && requiredBytes > availableBytes -> DownloadDecision.WARN
+            else -> DownloadDecision.PROCEED
+        }
+        return DownloadAssessment(decision, requiredBytes, availableBytes, budget, totalBytes)
+    }
+
+    fun assessDownload(context: Context, verdict: Verdict): DownloadAssessment =
+        assessDownload(verdict.requiredBytes, verdict.availBytes, totalBytes(context))
+
+    /**
+     * The route's rule, in one place so "force" cannot drift from the service:
+     * a hard refusal is never overridable, a warning needs an explicit force.
+     */
+    fun outcome(assessment: DownloadAssessment, force: Boolean): DownloadOutcome = when {
+        assessment.decision == DownloadDecision.REFUSE -> DownloadOutcome.REFUSED
+        assessment.decision == DownloadDecision.WARN && !force -> DownloadOutcome.NEEDS_CONFIRMATION
+        else -> DownloadOutcome.START
+    }
+
+    /** Two decimals as a JSON number, locale-independent. */
+    private fun gbNumber(bytes: Long): Double = Math.round(bytes / 10_000_000.0) / 100.0
+
+    /**
+     * The warning body. Deliberately has no `error` key: the download did not
+     * fail, it is waiting for the client to confirm. The numbers ride along so
+     * a client can render them without parsing the prose.
+     */
+    fun warningJson(assessment: DownloadAssessment): String = JSONObject().apply {
+        put("warning", assessment.warningMessage)
+        put("code", "memory_fit")
+        put("requires_confirmation", true)
+        put("required_gb", gbNumber(assessment.requiredBytes))
+        put("available_gb", gbNumber(assessment.availableBytes))
+        put("budget_gb", gbNumber(assessment.budgetBytes))
+        put("total_gb", gbNumber(assessment.totalBytes))
+    }.toString()
+
+    /** The one memory refusal: it cannot fit even on an idle phone. */
+    fun refusalJson(assessment: DownloadAssessment): String = JSONObject().apply {
+        put("error", assessment.refusalMessage)
+        put("code", "memory_fit_hard")
+        put("required_gb", gbNumber(assessment.requiredBytes))
+        put("available_gb", gbNumber(assessment.availableBytes))
+        put("budget_gb", gbNumber(assessment.budgetBytes))
+        put("total_gb", gbNumber(assessment.totalBytes))
+    }.toString()
 
     fun availBytes(context: Context): Long = try {
         val manager = context.getSystemService(ActivityManager::class.java)
