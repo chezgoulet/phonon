@@ -784,26 +784,17 @@ private fun ChargeCard(health: Health?, context: Context) {
         ChargeMode.OFF -> "NO LIMIT"
         ChargeMode.UNKNOWN -> "UNCONFIRMED"
     }
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(18.dp))
-            .background(PhononColors.Surface)
-            .border(1.dp, PhononColors.Border, RoundedCornerShape(18.dp))
-            .padding(16.dp),
-    ) {
+    PhononCard {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text(
                 "CHARGING",
                 color = PhononColors.TextDim,
-                fontSize = 11.sp,
-                letterSpacing = 0.9.sp,
+                style = CoreType.micro,
             )
             Text(
                 stateWord,
                 color = accent,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.SemiBold,
+                style = CoreType.micro,
             )
         }
         Spacer(Modifier.height(10.dp))
@@ -3727,7 +3718,7 @@ private fun GatewayCard(context: Context, settings: Settings, health: Health?) {
     PhononCard {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text("Gateway", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                Text("GATEWAY", style = CoreType.section)
                 Spacer(Modifier.height(4.dp))
                 Text(
                     "Register this phone with a LiteLLM proxy so one URL and one key reach it. " +
