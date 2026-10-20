@@ -114,6 +114,10 @@ import org.phononai.app.Settings
 import org.phononai.app.SocTuning
 import org.phononai.app.ui.avatar.AvatarView
 import org.phononai.app.ui.theme.CoreType
+import androidx.compose.ui.graphics.toArgb
+import org.phononai.app.ui.avatar.MarkPalette
+import org.phononai.app.ui.avatar.MarkState
+import org.phononai.app.ui.avatar.MarkView
 import org.phononai.app.ui.theme.PhononColors
 import java.io.File
 import kotlin.math.abs
@@ -287,7 +291,6 @@ private fun MainFrame(
     ) {
         // Brand identity, not a reading: four equal bands, no gaps, full-bleed.
         // The temperature itself is the labelled meter on the Thermal card.
-        if (tab == Tab.Serve) HeatBandStrip()
         Box(Modifier.weight(1f).fillMaxWidth()) { content() }
         Column(Modifier.fillMaxWidth().padding(horizontal = 22.dp)) {
             if (primary != null) {
@@ -449,9 +452,8 @@ private fun ServeScreen(
             // height; the orb stays legible at this size.
             Avatar(
                 kind = kind,
-                amp = (tps / 20f).coerceIn(0f, 1f),
-                reduced = reducedAvatar,
-                shape = AppState.presenceShape,
+                tps = tps,
+                animate = settings.animateAvatarWhileGenerating,
                 modifier = Modifier.size(156.dp),
             )
             Spacer(Modifier.width(18.dp))
@@ -1091,29 +1093,43 @@ private fun RecentActivity(health: Health?, accent: Color) {
 }
 
 @Composable
-private fun Avatar(kind: AvatarKind, amp: Float, reduced: Boolean, shape: String, modifier: Modifier) {
-    val driver = remember { AvatarDriver() }
+private fun Avatar(kind: AvatarKind, tps: Float, animate: Boolean, modifier: Modifier) {
+    // The mark is the identity: the avatar is the logo behaving, not a cloud.
+    val palette = MarkPalette(
+        ink = PhononColors.Text.toArgb(),
+        dim = PhononColors.TextDim.toArgb(),
+        rule = PhononColors.Border.toArgb(),
+        primary = PhononColors.Cyan.toArgb(),
+        accent = PhononColors.Violet.toArgb(),
+        danger = PhononColors.Danger.toArgb(),
+        ok = PhononColors.Ok.toArgb(),
+        heat = PhononColors.Heat.map { it.toArgb() }.toIntArray(),
+    )
+    val state = kind.markState()
     AndroidView(
         modifier = modifier,
         factory = { context ->
-            AvatarView(context).apply {
-                setIdleTheme(shape)
-                applyStateShapes(
-                    speaking = "waveform",
-                    listening = "iris",
-                    thinking = "bloom",
-                )
-                setVisualCategory("lumen")
-                driver.attach(this)
-                driver.apply(kind, amp, reduced)
+            MarkView(context).apply {
+                setPalette(palette)
+                setHeld(!animate && state == MarkState.Generating)
+                setState(state, tps)
             }
         },
         update = { view ->
-            driver.attach(view)
-            view.setIdleTheme(shape)
-            driver.apply(kind, amp, reduced)
+            view.setPalette(palette)
+            view.setHeld(!animate && state == MarkState.Generating)
+            view.setState(state, tps)
         },
     )
+}
+
+private fun AvatarKind.markState(): MarkState = when (this) {
+    AvatarKind.Stopped -> MarkState.Stopped
+    AvatarKind.Loading -> MarkState.Loading
+    AvatarKind.Ready -> MarkState.Ready
+    AvatarKind.Generating -> MarkState.Generating
+    AvatarKind.Paused -> MarkState.Paused
+    AvatarKind.Error -> MarkState.Error
 }
 
 private class AvatarDriver {
@@ -1204,7 +1220,7 @@ private fun serveAction(health: Health?, kind: AvatarKind, context: Context): Pr
 private fun accentFor(kind: AvatarKind): Color = when (kind) {
     AvatarKind.Stopped -> PhononColors.DimCyan
     AvatarKind.Loading -> PhononColors.Violet
-    AvatarKind.Ready -> PhononColors.Cyan
+    AvatarKind.Ready -> PhononColors.Ok
     AvatarKind.Generating -> PhononColors.Violet
     AvatarKind.Paused -> PhononColors.Warn
     AvatarKind.Error -> PhononColors.Danger
@@ -3487,11 +3503,9 @@ private fun BenchMark(size: Dp, modifier: Modifier = Modifier) {
 @Composable
 private fun BenchLockup() {
     Row(verticalAlignment = Alignment.CenterVertically) {
-        BenchMark(52.dp)
-        Spacer(Modifier.width(12.dp))
         Column {
             Text(
-                "PHONON",
+                "PHONON AI",
                 style = CoreType.display.copy(fontSize = 26.sp, lineHeight = 26.sp, letterSpacing = 1.4.sp),
                 color = PhononColors.Text,
             )

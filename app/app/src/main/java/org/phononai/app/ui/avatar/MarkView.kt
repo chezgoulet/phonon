@@ -199,6 +199,14 @@ class MarkView @JvmOverloads constructor(
                 line(canvas, i, 0f, drawn)
             }
         }
+        if (frame.packetTrack >= 0) {
+            val seg = MarkMotion.TRACES[frame.packetTrack]
+            val x = seg[0] + (seg[2] - seg[0]) * frame.packetPos
+            val y = seg[1] + (seg[3] - seg[1]) * frame.packetPos
+            fill.color = p.color(frame.packetRole)
+            val h = MarkMotion.PACKET_HALF
+            canvas.drawRect(x - h, y - h, x + h, y + h, fill)
+        }
         val half = MarkMotion.SQUARE_STROKE / 2f
         for (i in 0 until 3) {
             val sq = MarkMotion.SQUARES[i]

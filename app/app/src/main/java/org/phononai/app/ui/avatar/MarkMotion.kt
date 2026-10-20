@@ -32,6 +32,8 @@ object Role {
     const val ACCENT = 4
     const val DANGER = 5
     const val HEAT0 = 6 // HEAT0..HEAT0 + 3: the four bands, cold to hot
+    /** Running well: the only green in the mark. */
+    const val OK = 10
 }
 
 /** The CORE colours the mark may use, as ARGB ints. Supplied by the caller. */
@@ -42,6 +44,8 @@ class MarkPalette(
     val primary: Int,
     val accent: Int,
     val danger: Int,
+    /** Good/running green. */
+    val ok: Int,
     /** Cold to hot, four bands. Only ever drawn as the thin edge strip. */
     val heat: IntArray,
 ) {
@@ -57,6 +61,7 @@ class MarkPalette(
         Role.ACCENT -> accent
         Role.DANGER -> danger
         in Role.HEAT0..Role.HEAT0 + 3 -> heat[role - Role.HEAT0]
+        Role.OK -> ok
         else -> 0
     }
 }
@@ -85,6 +90,11 @@ class MarkFrame {
     var dotRole = Role.PRIMARY
     /** Undrawn parts of the mark are drawn first in this role (a ghost), or NONE. */
     var ghost = Role.NONE
+    /** A packet travelling the bus: trace index (-1 none), fraction along it. */
+    var packetTrack = -1
+    var packetPos = 0f
+    var packetRole = Role.OK
+
     /** Heat strip: -1 hidden, else how many of the four bands are lit. */
     var band = -1
     /** Milliseconds this frame stays correct, or [MarkMotion.NEVER]. */
@@ -148,6 +158,13 @@ object MarkMotion {
     const val BAND_LEFT = 15.5f
     const val BAND_RIGHT = 240.5f
     const val BAND_GAP = 4f
+
+    /** Packet: half-size on the 256 grid, small enough to stay inside the trace. */
+    const val PACKET_HALF = 7f
+
+    /** Segment lengths of the real path, in grid units (308 in total). */
+    private val SEG_LEN = floatArrayOf(82.4f, 112.8f, 112.8f)
+    private const val PATH_LEN = 308f
 
     /** Below this size (dp) the compact cut is drawn: no traces, filled squares. */
     const val COMPACT_DP = 48f
@@ -235,6 +252,9 @@ object MarkMotion {
         f.dotScale = 1f
         f.dotRole = Role.PRIMARY
         f.ghost = Role.NONE
+        f.packetTrack = -1
+        f.packetPos = 0f
+        f.packetRole = Role.OK
         f.band = -1
         f.holdMs = NEVER
     }
@@ -250,6 +270,25 @@ object MarkMotion {
 
     // --- BUS: the traces are the subject --------------------------------------
 
+    /**
+     * Place a packet at [u] of the bus path (0..1). The path is axis-aligned, so
+     * the packet can only ever move along one axis at a time and turns the
+     * corners rather than cutting them.
+     */
+    private fun packetOnPath(f: MarkFrame, u: Float, role: Int) {
+        var d = u.coerceIn(0f, 0.999f) * PATH_LEN
+        for (i in 0 until 3) {
+            if (d <= SEG_LEN[i] || i == 2) {
+                f.packetTrack = i
+                f.packetPos = (d / SEG_LEN[i]).coerceIn(0f, 1f)
+                f.packetRole = role
+                return
+            }
+            d -= SEG_LEN[i]
+        }
+    }
+
+
     private fun bus(f: MarkFrame, state: MarkState, t: Long, tps: Float, still: Boolean) {
         when (state) {
             MarkState.Stopped -> allRoles(f, Role.DIM)
@@ -261,17 +300,28 @@ object MarkMotion {
                     f.holdMs = rest(t, PROBE_STEP_MS)
                 }
             }
-            MarkState.Ready -> if (!still) {
-                f.dotScale = PULSE[((t / PULSE_STEP_MS) % PULSE.size).toInt()]
-                f.holdMs = rest(t, PULSE_STEP_MS)
+            MarkState.Ready -> {
+                f.dotRole = Role.OK
+                if (still) {
+                    f.dotScale = 1f
+                } else {
+                    // One lap in eight 300 ms hops; the corners are turns, not arcs.
+                    val step = (t / PULSE_STEP_MS).toInt()
+                    packetOnPath(f, (step % 8) / 8f, Role.OK)
+                    f.dotScale = PULSE[step % PULSE.size]
+                    f.holdMs = rest(t, PULSE_STEP_MS)
+                }
             }
             MarkState.Generating -> {
+                f.dotRole = Role.OK
                 if (still) {
-                    f.traceRole.fill(Role.PRIMARY)
+                    packetOnPath(f, 0.5f, Role.OK)
                 } else {
                     val beat = busBeatMs(tps)
-                    f.traceRole.fill(Role.DIM)
-                    f.traceRole[((t / beat) % 5).toInt()] = Role.PRIMARY
+                    // The packet runs the path a beat per hop; the squares tick
+                    // in sequence as tokens land.
+                    packetOnPath(f, ((t / beat) % 8) / 8f, Role.OK)
+                    f.squareFill[((t / beat) % 3).toInt()] = Role.OK
                     f.holdMs = rest(t, beat)
                 }
             }
@@ -321,13 +371,15 @@ object MarkMotion {
             }
             MarkState.Ready -> {
                 // Settle: the lamp lands a size large and steps down, once.
+                f.dotRole = Role.OK
                 val step = if (still) 2 else (t / STEP_MS).toInt()
                 f.dotScale = SETTLE[min(step, 2)]
                 if (step < 2) f.holdMs = rest(t, STEP_MS)
             }
             MarkState.Generating -> {
                 val filled = if (still) 3 else ((t / buildBeatMs(tps)) % 4).toInt()
-                for (k in 0 until filled) f.squareFill[FILL_ORDER[k]] = Role.PRIMARY
+                for (k in 0 until filled) f.squareFill[FILL_ORDER[k]] = Role.OK
+                f.dotRole = Role.OK
                 if (!still) f.holdMs = rest(t, buildBeatMs(tps))
             }
             MarkState.Paused -> {
@@ -379,8 +431,9 @@ object MarkMotion {
                 f.dotRole = Role.ACCENT
                 if (!still) f.holdMs = rest(t, HEAT_RAMP_STEP_MS)
             }
-            MarkState.Ready -> Unit
+            MarkState.Ready -> f.dotRole = Role.OK
             MarkState.Generating -> if (!still) {
+                f.dotRole = Role.OK
                 val beat = heatBeatMs(tps)
                 if ((t / beat) % 2 == 1L) f.dotScale = HEAT_DOT[level - 1]
                 f.holdMs = rest(t, beat)

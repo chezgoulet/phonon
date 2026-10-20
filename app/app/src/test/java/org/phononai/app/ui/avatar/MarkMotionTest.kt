@@ -79,8 +79,10 @@ class MarkMotionTest {
         assertEquals(200L, beat)
         for (k in 0 until 10) {
             val fr = frame(MotionStyle.BUS, MarkState.Generating, k * beat + 5, tps = 20f)
-            val lit = (0 until 5).filter { fr.traceRole[it] == Role.PRIMARY }
-            assertEquals(listOf(k % 5), lit)
+            // One packet on the path, in the running green, never off it.
+            assertEquals(Role.OK, fr.packetRole)
+            assertTrue(fr.packetTrack in 0..2)
+            assertTrue(fr.packetPos in 0f..1f)
             assertEquals(beat - 5, fr.holdMs)
         }
         // Clamped at both ends, with a fallback before the first rate arrives.
@@ -151,18 +153,19 @@ class MarkMotionTest {
             assertEquals(-1, fr.band)
         }
         val beat = MarkMotion.busBeatMs(12f)
-        for (k in 0 until 5) {
+        for (k in 0 until 6) {
             val fr = frame(MotionStyle.BUS, MarkState.Generating, k * beat + 1, compact = true)
-            assertEquals(1, fr.squareFill.count { it == Role.PRIMARY })
-            assertEquals(MarkMotion.TRACE_OWNER[k], fr.squareFill.indexOf(Role.PRIMARY))
+            // One square ticks per beat, in sequence, in the running green.
+            assertEquals(1, fr.squareFill.count { it == Role.OK })
+            assertEquals(k % 3, fr.squareFill.indexOf(Role.OK))
         }
     }
 
     @Test
     fun `palette resolves every role`() {
-        val p = MarkPalette(1, 2, 3, 4, 5, 6, intArrayOf(7, 8, 9, 10))
+        val p = MarkPalette(1, 2, 3, 4, 5, 6, 11, intArrayOf(7, 8, 9, 10))
         val roles = listOf(Role.INK, Role.DIM, Role.RULE, Role.PRIMARY, Role.ACCENT, Role.DANGER) +
-            (Role.HEAT0..Role.HEAT0 + 3)
-        assertEquals((1..10).toList(), roles.map { p.color(it) })
+            (Role.HEAT0..Role.HEAT0 + 3) + Role.OK
+        assertEquals((1..11).toList(), roles.map { p.color(it) })
     }
 }
