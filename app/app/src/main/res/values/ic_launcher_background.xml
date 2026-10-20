@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="ic_launcher_background">#000000</color>
+    <!-- CORE ground. The icon is ground + mark, in both themes. -->
+    <color name="ic_launcher_background">#08070A</color>
 </resources>
