@@ -42,6 +42,17 @@ class StubHandler : ApiHandler {
     override fun requestFinished(path: String) {}
     override fun isRestarting() = false
     override fun refuseUnsafeExposure(message: String) {}
+    override fun servedModel() = OllamaCompat.ServedModel(
+        name = "stub-model",
+        digest = "sha256:" + "0".repeat(64),
+        sizeBytes = 1L,
+        family = "stub",
+        parameterSize = "0B",
+        quantization = "Q0",
+        contextLength = 1024,
+        modifiedAt = "2026-01-01T00:00:00Z",
+        displayName = "Stub",
+    )
 }
 
 fun main() {

@@ -97,3 +97,54 @@ Whether a permanently-plugged phone at 80% is meaningfully better off being
 cycled between 40% and 80% is **not established**. It depends on the cell, the
 temperature and the duty cycle. Measure both if the ROM makes cycling possible;
 until then, do not encode an assumption into the product.
+
+## What the app can now establish (0.1.19)
+
+The Serve screen carries a charging card and `/health` a `charge` block:
+
+```json
+"charge": {
+  "mode": "limit-80",          // limit-80 | adaptive | off | unknown
+  "source": "secure",          // secure | plateau | recalibration | none
+  "confirmed": true,
+  "hours_above_80": 12,
+  "can_toggle": false,
+  "detail": "read from Settings.Secure"
+}
+```
+
+**Reading the setting.** `Settings.Secure.charge_optimization_mode` is 1 for
+"Limit to 80%" and 0 for off on Pixel. Verified on the reference Pixel 7
+(Android 15): the key exists, `settings put secure charge_optimization_mode 1`
+persists and reads back, and the device's only charge-related secure key is
+that one. `adaptive_charging_enabled` **does not exist** on this build — the
+code reads it as absent and does not write it, rather than inventing a value.
+
+**Writing the setting.** Only with `WRITE_SECURE_SETTINGS`, which an ordinary
+install never holds: it is granted by `adb shell pm grant` or by a kiosk/device
+owner install. Without it the card shows the OEM screen and an explanation —
+never a switch that writes nothing. With it, the switch writes the key and the
+platform's own state is what the card reflects on the next `/health` poll.
+
+**Inferring it.** Without the permission, the app will not claim the limit is
+on from a single reading. It needs: plugged in, flat inside 80 ± 1, for at
+least 20 minutes, with at least four observations. That is reported as
+`source: "plateau"`, `confirmed: true`. Anything less is `unknown`.
+
+**Recalibration.** Pixel charges to 100% periodically to recalibrate capacity
+even with the limit on. A 100% charge within 12 hours of a confirmed plateau is
+reported as `mode: limit-80`, `source: "recalibration"`, `confirmed: false` —
+not as the limit having been turned off, and it does not re-alarm.
+
+**Hours above 80%.** The service records one state-of-charge sample an hour into
+a persisted seven-day ring and reports the hours spent above 80% in the window.
+Each sample counts for at most one hour, so a gap in sampling under-reports
+rather than inventing time. The number is in `/health` and in the device report
+under `charge.hours_above_80`.
+
+### What is still the platform's job
+
+Nothing here starts or stops the charger. The app writes a setting the platform
+already implements and reads back what the platform says; on a device that does
+not expose the key, the only honest answer is `unknown` plus a link to the OEM
+screen.

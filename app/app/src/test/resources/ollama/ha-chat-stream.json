@@ -1,0 +1,39 @@
+{
+  "model": "qwen3.5-2b:latest",
+  "messages": [
+    {
+      "role": "system",
+      "content": "You are a voice assistant. Answer briefly. Use the tools when they help."
+    },
+    {
+      "role": "user",
+      "content": "Turn on the kitchen light"
+    }
+  ],
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "GetLiveContext",
+        "description": "Get the current state of an entity in Home Assistant.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "entity_id": {
+              "type": "string",
+              "description": "The entity id, e.g. light.kitchen"
+            }
+          },
+          "required": ["entity_id"]
+        }
+      }
+    }
+  ],
+  "stream": true,
+  "keep_alive": -1,
+  "options": {
+    "num_ctx": 8192,
+    "temperature": 0.2
+  },
+  "think": true
+}

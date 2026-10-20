@@ -40,6 +40,14 @@ interface ApiHandler {
     fun requestStarted(path: String)
     fun requestFinished(path: String)
 
+    /**
+     * The one model this node serves, described for the Ollama-compatible
+     * surface (`/api/tags`, `/api/show`, and the name echoed by `/api/chat`).
+     * Read from the same settings the engine is launched with, so a model
+     * switch moves the advertised name with it.
+     */
+    fun servedModel(): OllamaCompat.ServedModel
+
     /** A serialized reload is in flight; control endpoints answer 503. */
     fun isRestarting(): Boolean
 
@@ -482,6 +490,26 @@ class ApiServer(
             req.method == "POST" && req.path == "/debug/evict" && BuildConfig.DEBUG -> {
                 val (status, body) = evictModelCache()
                 respond(out, status, "application/json; charset=utf-8", body.toByteArray())
+            }
+
+            // --- Ollama-compatible surface, for Home Assistant's built-in
+            // `ollama` integration. The routes live in OllamaApi, which has no
+            // Android dependency so the same code can be exercised off-device.
+            req.path.startsWith("/api/") -> {
+                val ollama = OllamaApi(
+                    backendHost = settings.backendHost(),
+                    backendPort = settings.backendPort,
+                    servedModel = { api.servedModel() },
+                    ready = { api.isReady() },
+                    onRequestStarted = { api.requestStarted(it) },
+                    onRequestFinished = { api.requestFinished(it) },
+                )
+                if (!ollama.handle(req.method, req.path, req.body, out)) {
+                    respond(
+                        out, 404, "application/json; charset=utf-8",
+                        OllamaCompat.errorJson("not found: ${req.path}").toByteArray(),
+                    )
+                }
             }
 
             req.path == "/v1" || req.path.startsWith("/v1/") -> {
