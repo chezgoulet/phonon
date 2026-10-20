@@ -641,30 +641,43 @@ class ServerManager(
     }
 
     private fun killLocked() {
-        val p = process ?: return
+        val p = process
         process = null
         pid = -1
         spawnAtMs = 0
-        try {
-            p.destroy()
-        } catch (_: Throwable) {
-        }
-        val exited = try {
-            p.waitFor(4, TimeUnit.SECONDS)
-        } catch (_: InterruptedException) {
-            false
-        }
-        if (!exited) {
+        if (p != null) {
             try {
-                p.destroyForcibly()
+                p.destroy()
             } catch (_: Throwable) {
             }
-            try {
-                p.waitFor(2, TimeUnit.SECONDS)
+            val exited = try {
+                p.waitFor(4, TimeUnit.SECONDS)
             } catch (_: InterruptedException) {
+                false
+            }
+            if (!exited) {
+                try {
+                    p.destroyForcibly()
+                } catch (_: Throwable) {
+                }
+                try {
+                    p.waitFor(2, TimeUnit.SECONDS)
+                } catch (_: InterruptedException) {
+                }
+            }
+            ringLog.append("stopped pid=${processPid(p)}")
+        }
+        // A server started by a previous app process survives an in-place update:
+        // Android kills the app, not its child, and the child keeps the backend
+        // port. The next child then fails to bind and the UI sits on STARTING with
+        // no error anyone can act on. Same uid, so these pids are ours to kill.
+        for (orphan in findServerPids()) {
+            try {
+                android.os.Process.sendSignal(orphan, 9)
+                ringLog.append("reaped orphan pid=$orphan")
+            } catch (_: Throwable) {
             }
         }
-        ringLog.append("stopped pid=${processPid(p)}")
     }
 
     private fun setState(s: ServerState) {

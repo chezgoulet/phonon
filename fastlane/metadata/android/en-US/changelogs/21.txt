@@ -1,0 +1,4 @@
+Fixes an update-path hang. A server started by the previous build survives the
+update, keeps the backend port, and the new process could not start its own —
+the screen sat on STARTING indefinitely. The supervisor now reaps a server it
+did not start before launching.
