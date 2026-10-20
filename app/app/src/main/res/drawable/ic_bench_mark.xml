@@ -1,14 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  The BENCH mark: three open squares joined by right-angle traces to a dot at
-  the centre. Drawn on a 256 grid and scaled into a 96 dp plate.
-
-  The plate is part of the asset, not the layout: the mark must never sit
-  directly on the heat bands, and this way it cannot. Plate #08070A and mark
-  #FFF7F0 are fixed rather than themed (19:1 in either theme); only the centre
-  dot carries the primary amber.
-
-  Below 48 dp use ic_bench_mark_compact (three filled squares + dot, no traces).
+  The BENCH mark, canonical geometry from the site header, drawn on a 256 grid
+  and scaled into a 96 dp plate: squares (12,12) (78,12) (78,78) at 28,
+  traces M40,26h38 and M26,40v52h52, dot (59,59) r5, stroke 5 on the 118 grid.
+  The plate is part of the asset: the mark never sits on the heat bands.
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="96dp"
@@ -26,37 +21,30 @@
         android:translateX="12"
         android:translateY="12">
 
-        <!-- traces: right-angle routes into the hub -->
         <path
-            android:pathData="M128,84L128,116"
+            android:pathData="M86.8,56.4L169.2,56.4"
             android:strokeColor="#FFF7F0"
-            android:strokeWidth="9" />
+            android:strokeWidth="10.85" />
         <path
-            android:pathData="M52,172L52,134L116,134"
+            android:pathData="M56.4,86.8L56.4,199.6L169.2,199.6"
             android:strokeColor="#FFF7F0"
-            android:strokeWidth="9" />
-        <path
-            android:pathData="M204,172L204,122L140,122"
-            android:strokeColor="#FFF7F0"
-            android:strokeWidth="9" />
+            android:strokeWidth="10.85" />
 
-        <!-- fixtures: three open squares -->
         <path
-            android:pathData="M98,24h60v60h-60z"
+            android:pathData="M26,26h60.8v60.8h-60.8z"
             android:strokeColor="#FFF7F0"
-            android:strokeWidth="13" />
+            android:strokeWidth="10.85" />
         <path
-            android:pathData="M22,172h60v60h-60z"
+            android:pathData="M169.2,26h60.8v60.8h-60.8z"
             android:strokeColor="#FFF7F0"
-            android:strokeWidth="13" />
+            android:strokeWidth="10.85" />
         <path
-            android:pathData="M174,172h60v60h-60z"
+            android:pathData="M169.2,169.2h60.8v60.8h-60.8z"
             android:strokeColor="#FFF7F0"
-            android:strokeWidth="13" />
+            android:strokeWidth="10.85" />
 
-        <!-- the lamp at the centre of the bench -->
         <path
             android:fillColor="#FFD166"
-            android:pathData="M116,116h24v24h-24z" />
+            android:pathData="M128,117.15a10.85,10.85 0 1,0 0.01,0z" />
     </group>
 </vector>

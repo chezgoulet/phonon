@@ -66,6 +66,9 @@ android {
                 signingConfig = signingConfigs.getByName("release")
             }
         }
+        debug {
+            applicationIdSuffix = ".test"
+        }
     }
 
     // Debug test instrument: libc posix_fadvise(2) shim used by /debug/evict.
