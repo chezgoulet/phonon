@@ -1,0 +1,1 @@
+Fixes the launcher icon. 0.2.1 shipped a different mark — three squares in the wrong arrangement with a square node — while the app itself drew the BENCH mark. The icon is now generated from the same coordinates as the logo: open square, round lamp, on the CORE ground.
