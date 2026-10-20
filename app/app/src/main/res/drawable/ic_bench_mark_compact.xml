@@ -1,8 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Compact BENCH mark for <= 48 dp: three filled squares and the centre dot, no
-  traces. Same geometry, same plate; the wires are the first thing to go at
-  launcher sizes and a 1.5 px trace reads as dirt.
+  Compact BENCH mark for <= 48 dp: the three squares filled, same positions as
+  the full mark (top-left, top-right, bottom-right), plus the centre dot.
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="48dp"
@@ -21,15 +20,15 @@
         android:translateY="12">
         <path
             android:fillColor="#FFF7F0"
-            android:pathData="M98,24h60v60h-60z" />
+            android:pathData="M26,26h60.8v60.8h-60.8z" />
         <path
             android:fillColor="#FFF7F0"
-            android:pathData="M22,172h60v60h-60z" />
+            android:pathData="M169.2,26h60.8v60.8h-60.8z" />
         <path
             android:fillColor="#FFF7F0"
-            android:pathData="M174,172h60v60h-60z" />
+            android:pathData="M169.2,169.2h60.8v60.8h-60.8z" />
         <path
             android:fillColor="#FFD166"
-            android:pathData="M116,116h24v24h-24z" />
+            android:pathData="M128,117.15a10.85,10.85 0 1,0 0.01,0z" />
     </group>
 </vector>
