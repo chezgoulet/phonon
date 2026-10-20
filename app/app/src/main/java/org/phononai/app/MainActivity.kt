@@ -35,9 +35,11 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Follow the system light/dark setting: the bars take the icon
+        // appearance from the same signal the Compose theme reads.
         enableEdgeToEdge(
-            statusBarStyle = SystemBarStyle.dark(Color.BLACK),
-            navigationBarStyle = SystemBarStyle.dark(Color.BLACK),
+            statusBarStyle = SystemBarStyle.auto(Color.TRANSPARENT, Color.TRANSPARENT) { isNight(it) },
+            navigationBarStyle = SystemBarStyle.auto(Color.TRANSPARENT, Color.TRANSPARENT) { isNight(it) },
         )
         setContent {
             PhononTheme {
@@ -86,5 +88,9 @@ class MainActivity : ComponentActivity() {
 
     private companion object {
         const val SCREEN_ON_POLL_MS = 1_000L
+
+        fun isNight(resources: android.content.res.Resources): Boolean =
+            (resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
+                android.content.res.Configuration.UI_MODE_NIGHT_YES
     }
 }

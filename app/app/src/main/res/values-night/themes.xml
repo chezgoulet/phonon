@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.Phonon" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/phonon_ground</item>
+        <item name="android:colorBackground">@color/phonon_ground</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+        <item name="android:colorAccent">#FFD166</item>
+        <item name="android:windowActionModeOverlay">true</item>
+    </style>
+</resources>
