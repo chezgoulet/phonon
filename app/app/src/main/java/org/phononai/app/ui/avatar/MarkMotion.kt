@@ -121,6 +121,14 @@ object MarkMotion {
     )
     const val TRACE_STROKE = 9f
 
+    /**
+     * Trace ends that sit on a right-angle corner. Traces use butt caps (as in
+     * the drawable), so these ends are pushed out by half the stroke to close
+     * the corner; the ends at the squares and the hub stay flush.
+     */
+    val TRACE_CORNER_START = booleanArrayOf(false, true, false, false, true)
+    val TRACE_CORNER_END = booleanArrayOf(true, false, false, true, false)
+
     /** Which square each trace segment belongs to (for the compact cut). */
     val TRACE_OWNER = intArrayOf(1, 1, 0, 2, 2)
 
@@ -155,7 +163,7 @@ object MarkMotion {
     const val BUILD_CYCLE_MS = BUILD_STROKES * BUILD_STROKE_MS + BUILD_HOLD_MS
 
     /** HEAT: four discrete levels. */
-    val HEAT_DOT = floatArrayOf(0.67f, 1f, 1.33f, 1.67f)
+    val HEAT_DOT = floatArrayOf(1f, 1.25f, 1.5f, 1.75f)
     val HEAT_TRACE = floatArrayOf(0.67f, 1f, 1.5f, 2f)
     const val HEAT_RAMP_STEP_MS = 500L
 
@@ -278,7 +286,7 @@ object MarkMotion {
         }
     }
 
-    private val SNAP = floatArrayOf(0.25f, 0.45f, 0.6f)
+    private val SNAP = floatArrayOf(0.2f, 0.35f, 0.45f)
 
     // --- BUILD: the mark draws itself -----------------------------------------
 

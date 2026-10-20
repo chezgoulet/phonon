@@ -92,7 +92,7 @@ class MarkMotionTest {
     @Test
     fun `bus error snaps the path and holds`() {
         val fr = frame(MotionStyle.BUS, MarkState.Error, 1000L)
-        assertTrue(fr.traceGap.all { it > 0.5f })
+        assertTrue(fr.traceGap.all { it > 0.4f })
         assertTrue(fr.traceRole.all { it == Role.DANGER })
     }
 

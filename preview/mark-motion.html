@@ -1,0 +1,402 @@
+<!doctype html>
+<!--
+  Mark motion contact sheet: three motion styles x six avatar states.
+
+  A line-for-line port of app/.../ui/avatar/MarkMotion.kt (the rules) and
+  MarkView.kt (the drawing), so what moves here is what the phone will draw.
+  Self-contained: no network, no fonts fetched. Open it directly, or add
+  #light for the CORE light palette. Each cell shows the live mark at Serve
+  size (156 px), the compact cut at header size (26 px), and a filmstrip of
+  six frames one step apart, so the motion can be read from a still.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>BENCH mark motion — contact sheet</title>
+<style>
+  :root { --ground:#08070A; --surface:#121016; --ink:#FFF7F0; --dim:#A79AA6; --rule:#241F2B; }
+  :root.light { --ground:#FFF8F2; --surface:#FFFFFF; --ink:#1A1210; --dim:#6F5F58; --rule:#EADDD4; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--ground); color: var(--ink);
+         font: 12px/1.35 ui-monospace, "DejaVu Sans Mono", Menlo, monospace; }
+  header { display: flex; align-items: baseline; gap: 18px; padding: 14px 20px 8px; }
+  h1 { margin: 0; font: 900 20px/1 "Archivo Black", "Arial Black", Impact, sans-serif; letter-spacing: 1px; }
+  header .note { color: var(--dim); }
+  header label { margin-left: auto; color: var(--dim); }
+  .sheet { display: grid; grid-template-columns: 70px repeat(6, 1fr); gap: 6px; padding: 0 14px 14px; }
+  .colhead, .rowhead { color: var(--dim); text-transform: uppercase; letter-spacing: 1px; }
+  .colhead { padding: 2px 4px; }
+  .rowhead { writing-mode: vertical-rl; transform: rotate(180deg); text-align: center;
+             font: 900 16px/1 "Archivo Black", "Arial Black", Impact, sans-serif; color: var(--ink); }
+  .cell { background: var(--surface); border: 1px solid var(--rule); padding: 8px; min-width: 0; }
+  .cell .label { font-weight: bold; text-transform: uppercase; letter-spacing: 1px; white-space: nowrap; }
+  .cell .timing { color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .live { display: flex; align-items: flex-end; gap: 10px; margin: 6px 0; }
+  .live .compact { display: flex; flex-direction: column; align-items: center; gap: 2px; color: var(--dim); }
+  .strip { display: flex; gap: 2px; }
+  .strip figure { margin: 0; text-align: center; color: var(--dim); font-size: 10px; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<header>
+  <h1>BENCH MARK · MOTION</h1>
+  <span class="note" id="note"></span>
+  <label>decode <input id="tps" type="range" min="0" max="40" step="1" value="14"> <span id="tpsv"></span> tok/s</label>
+</header>
+<div class="sheet" id="sheet"></div>
+<script>
+"use strict";
+const light = location.hash === "#light";
+if (light) document.documentElement.classList.add("light");
+
+// --- CORE palettes (PhononTheme.kt) -----------------------------------------
+const PALETTES = {
+  dark:  { ink:"#FFF7F0", dim:"#A79AA6", rule:"#241F2B", primary:"#FFD166", accent:"#C2185B", danger:"#FF5A5F",
+           heat:["#3B1F6E","#C2185B","#FF6B00","#FFD166"] },
+  light: { ink:"#1A1210", dim:"#6F5F58", rule:"#EADDD4", primary:"#C2185B", accent:"#EF6C00", danger:"#B3122E",
+           heat:["#6C4AE8","#D81B60","#EF6C00","#FFC043"] },
+};
+const P = light ? PALETTES.light : PALETTES.dark;
+
+// --- MarkMotion.kt ------------------------------------------------------------
+const Role = { NONE:-1, INK:0, DIM:1, RULE:2, PRIMARY:3, ACCENT:4, DANGER:5, HEAT0:6 };
+function color(role) {
+  switch (role) {
+    case Role.INK: return P.ink; case Role.DIM: return P.dim; case Role.RULE: return P.rule;
+    case Role.PRIMARY: return P.primary; case Role.ACCENT: return P.accent; case Role.DANGER: return P.danger;
+    default: return role >= Role.HEAT0 && role <= Role.HEAT0 + 3 ? P.heat[role - Role.HEAT0] : "transparent";
+  }
+}
+const STYLES = ["BUS", "BUILD", "HEAT"];
+const STATES = ["Stopped", "Loading", "Ready", "Generating", "Paused", "Error"];
+const NEVER = -1, FRAME_MS = 33, STEP_MS = 66;
+const SQUARES = [[98,24,158,84],[22,172,82,232],[174,172,234,232]];
+const SQUARE_STROKE = 13;
+const TRACES = [[52,172,52,134],[52,134,116,134],[128,116,128,84],[140,122,204,122],[204,122,204,172]];
+const TRACE_STROKE = 9;
+const TRACE_OWNER = [1,1,0,2,2];
+const TRACE_CORNER_START = [false,true,false,false,true], TRACE_CORNER_END = [true,false,false,true,false];
+const DOT_CX = 128, DOT_CY = 128, DOT_HALF = 12;
+const BAND_TOP = 246, BAND_HEIGHT = 4, BAND_LEFT = 15.5, BAND_RIGHT = 240.5, BAND_GAP = 4;
+const PULSE_STEP_MS = 300, PULSE = [1,1,1,1.1,1.2,1.3,1.2,1.1];
+const PROBE_STEP_MS = 300;
+const BUILD_STROKES = 18, BUILD_STROKE_MS = 198, BUILD_HOLD_MS = 792;
+const BUILD_CYCLE_MS = BUILD_STROKES * BUILD_STROKE_MS + BUILD_HOLD_MS;
+const HEAT_DOT = [1,1.25,1.5,1.75], HEAT_TRACE = [0.67,1,1.5,2], HEAT_RAMP_STEP_MS = 500, HEAT_HOT_TPS = 10;
+const SNAP = [0.2,0.35,0.45], SETTLE = [1.25,1.12,1], FILL_ORDER = [1,0,2];
+
+const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+const beatMs = (tps, tokens, lo, hi, fb) => tps <= 0 ? fb : clamp(Math.trunc(tokens * 1000 / tps), lo, hi);
+const busBeatMs = tps => beatMs(tps, 4, 133, 800, 400);
+const buildBeatMs = tps => beatMs(tps, 6, 200, 1200, 500);
+const heatBeatMs = tps => beatMs(tps, 4, 133, 800, 400);
+const rest = (t, step) => step - t % step;
+const idiv = (a, b) => Math.floor(a / b);
+
+function newFrame() {
+  return { squareEdges:[4,4,4], squareRole:[0,0,0], squareFill:[-1,-1,-1], traceDrawn:[1,1,1,1,1],
+           traceRole:[0,0,0,0,0], traceGap:[0,0,0,0,0], traceWeight:1, dotScale:1, dotRole:Role.PRIMARY,
+           ghost:Role.NONE, band:-1, holdMs:NEVER };
+}
+function allRoles(f, r) { f.squareRole.fill(r); f.traceRole.fill(r); f.dotRole = r; }
+
+function bus(f, state, t, tps, still) {
+  switch (state) {
+    case "Stopped": allRoles(f, Role.DIM); break;
+    case "Loading":
+      f.traceRole.fill(Role.DIM); f.dotRole = Role.ACCENT;
+      if (!still) { f.traceRole[idiv(t, PROBE_STEP_MS) % 5] = Role.ACCENT; f.holdMs = rest(t, PROBE_STEP_MS); }
+      break;
+    case "Ready":
+      if (!still) { f.dotScale = PULSE[idiv(t, PULSE_STEP_MS) % PULSE.length]; f.holdMs = rest(t, PULSE_STEP_MS); }
+      break;
+    case "Generating":
+      if (still) f.traceRole.fill(Role.PRIMARY);
+      else { const b = busBeatMs(tps); f.traceRole.fill(Role.DIM); f.traceRole[idiv(t, b) % 5] = Role.PRIMARY; f.holdMs = rest(t, b); }
+      break;
+    case "Paused": f.squareRole.fill(Role.DIM); f.traceRole.fill(Role.DIM); f.dotRole = Role.ACCENT; break;
+    case "Error": {
+      f.traceRole.fill(Role.DANGER); f.dotRole = Role.DANGER;
+      const step = still ? 2 : idiv(t, STEP_MS);
+      f.traceGap.fill(SNAP[Math.min(step, 2)]);
+      if (step < 2) f.holdMs = rest(t, STEP_MS);
+    }
+  }
+}
+
+function sketch(f, strokes) {
+  for (let i = 0; i < 3; i++) f.squareEdges[i] = clamp(strokes - i * 4, 0, 4);
+  for (let i = 0; i < 5; i++) f.traceDrawn[i] = clamp(strokes - 12 - i, 0, 1);
+  f.dotScale = clamp(strokes - 17, 0, 1);
+  f.ghost = Role.RULE;
+}
+
+function build(f, state, t, tps, still) {
+  switch (state) {
+    case "Stopped": allRoles(f, Role.DIM); break;
+    case "Loading":
+      f.dotRole = Role.ACCENT;
+      if (still) { sketch(f, BUILD_STROKES / 2); f.dotScale = 1; }
+      else {
+        const c = t % BUILD_CYCLE_MS, stepped = idiv(c, STEP_MS) * STEP_MS;
+        sketch(f, Math.min(BUILD_STROKES, (stepped + STEP_MS) / BUILD_STROKE_MS));
+        f.holdMs = rest(t, STEP_MS);
+      }
+      break;
+    case "Ready": {
+      const step = still ? 2 : idiv(t, STEP_MS);
+      f.dotScale = SETTLE[Math.min(step, 2)];
+      if (step < 2) f.holdMs = rest(t, STEP_MS);
+      break;
+    }
+    case "Generating": {
+      const filled = still ? 3 : idiv(t, buildBeatMs(tps)) % 4;
+      for (let k = 0; k < filled; k++) f.squareFill[FILL_ORDER[k]] = Role.PRIMARY;
+      if (!still) f.holdMs = rest(t, buildBeatMs(tps));
+      break;
+    }
+    case "Paused":
+      sketch(f, BUILD_STROKES / 2); f.squareRole.fill(Role.DIM); f.traceRole.fill(Role.DIM);
+      f.dotScale = 1; f.dotRole = Role.ACCENT; break;
+    case "Error":
+      f.squareEdges.fill(3); f.traceDrawn.fill(0); f.squareRole.fill(Role.DANGER);
+      f.dotRole = Role.DANGER; f.ghost = Role.RULE; break;
+  }
+}
+
+function heatLevel(state, t, tps, still) {
+  switch (state) {
+    case "Stopped": case "Error": return 0;
+    case "Loading": return still ? 2 : idiv(t, HEAT_RAMP_STEP_MS) % 4;
+    case "Ready": return 1;
+    case "Generating": return tps >= HEAT_HOT_TPS ? 3 : 2;
+    case "Paused": return 3;
+  }
+}
+
+function heat(f, state, t, tps, still) {
+  const level = heatLevel(state, t, tps, still);
+  f.traceWeight = HEAT_TRACE[level]; f.dotScale = HEAT_DOT[level]; f.band = level + 1;
+  switch (state) {
+    case "Stopped": allRoles(f, Role.DIM); f.band = 0; break;
+    case "Loading": f.dotRole = Role.ACCENT; if (!still) f.holdMs = rest(t, HEAT_RAMP_STEP_MS); break;
+    case "Ready": break;
+    case "Generating":
+      if (!still) { const b = heatBeatMs(tps); if (idiv(t, b) % 2 === 1) f.dotScale = HEAT_DOT[level - 1]; f.holdMs = rest(t, b); }
+      break;
+    case "Paused": f.squareRole.fill(Role.DIM); f.traceRole.fill(Role.DIM); f.dotRole = Role.ACCENT; break;
+    case "Error": f.traceRole.fill(Role.DANGER); f.dotRole = Role.DANGER; f.band = 0; break;
+  }
+}
+
+function toCompact(f) {
+  for (let i = 0; i < 3; i++) {
+    if (f.squareFill[i] === Role.NONE) f.squareFill[i] = f.squareRole[i];
+    f.squareEdges[i] = f.squareEdges[i] >= 3 ? 4 : 0;
+  }
+  for (let s = 0; s < 5; s++) {
+    const r = f.traceRole[s];
+    if (r === Role.PRIMARY || r === Role.ACCENT || r === Role.DANGER) f.squareFill[TRACE_OWNER[s]] = r;
+  }
+  f.traceDrawn.fill(0); f.band = -1;
+}
+
+function fill(style, state, t, tps, compact, still) {
+  const f = newFrame(), time = Math.max(0, t);
+  ({ BUS: bus, BUILD: build, HEAT: heat })[style](f, state, time, tps, still);
+  if (compact) toCompact(f);
+  if (still || state === "Stopped") f.holdMs = NEVER;
+  if (f.holdMs !== NEVER) f.holdMs = Math.max(FRAME_MS, f.holdMs);
+  return f;
+}
+
+// --- MarkView.kt: drawing ------------------------------------------------------
+function draw(ctx, side, f, compact) {
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, side, side);
+  const s = side / 256;
+  ctx.setTransform(s, 0, 0, s, 0, 0);
+  ctx.lineCap = "square"; ctx.lineJoin = "miter";
+  const line = (x0, y0, x1, y1) => { ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke(); };
+  // Traces: butt caps; a whole end on a corner is pushed out to close it.
+  const part = (i, a, b) => { if (b <= a) return; const g = TRACES[i], dx = g[2]-g[0], dy = g[3]-g[1];
+    const ext = ctx.lineWidth / 2 / Math.max(Math.abs(dx), Math.abs(dy));
+    if (a === 0 && TRACE_CORNER_START[i]) a = -ext;
+    if (b === 1 && TRACE_CORNER_END[i]) b = 1 + ext;
+    line(g[0]+dx*a, g[1]+dy*a, g[0]+dx*b, g[1]+dy*b); };
+  const rect = sq => ctx.strokeRect(sq[0], sq[1], sq[2] - sq[0], sq[3] - sq[1]);
+  if (f.ghost !== Role.NONE) {
+    if (compact) { ctx.fillStyle = color(f.ghost); for (const q of SQUARES) ctx.fillRect(q[0], q[1], q[2]-q[0], q[3]-q[1]); }
+    else {
+      ctx.strokeStyle = color(f.ghost);
+      ctx.lineWidth = TRACE_STROKE * f.traceWeight; ctx.lineCap = "butt";
+      for (let i = 0; i < 5; i++) part(i, 0, 1);
+      ctx.lineCap = "square"; ctx.lineWidth = SQUARE_STROKE; for (const q of SQUARES) rect(q);
+    }
+  }
+  if (compact) {
+    for (let i = 0; i < 3; i++) {
+      if (f.squareEdges[i] < 4) continue;
+      const q = SQUARES[i]; ctx.fillStyle = color(f.squareFill[i]); ctx.fillRect(q[0], q[1], q[2]-q[0], q[3]-q[1]);
+    }
+  } else {
+    ctx.lineWidth = TRACE_STROKE * f.traceWeight; ctx.lineCap = "butt";
+    for (let i = 0; i < 5; i++) {
+      const d = f.traceDrawn[i]; if (d <= 0) continue;
+      ctx.strokeStyle = color(f.traceRole[i]);
+      const gap = f.traceGap[i];
+      if (gap > 0) { const a = (1 - gap) / 2; part(i, 0, a); part(i, 1 - a, 1); } else part(i, 0, d);
+    }
+    ctx.lineCap = "square";
+    const half = SQUARE_STROKE / 2;
+    for (let i = 0; i < 3; i++) {
+      const q = SQUARES[i];
+      if (f.squareFill[i] !== Role.NONE) {
+        ctx.fillStyle = color(f.squareFill[i]);
+        ctx.fillRect(q[0]-half, q[1]-half, q[2]-q[0]+2*half, q[3]-q[1]+2*half); continue;
+      }
+      const e = f.squareEdges[i]; if (e <= 0) continue;
+      ctx.strokeStyle = color(f.squareRole[i]); ctx.lineWidth = SQUARE_STROKE;
+      if (e >= 4) { rect(q); continue; }
+      const [l, t, r, b] = q;
+      for (let k = 0; k < 4; k++) {
+        const p = clamp(e - k, 0, 1); if (p <= 0) break;
+        if (k === 0) line(l, t, l + (r-l)*p, t);
+        else if (k === 1) line(r, t, r, t + (b-t)*p);
+        else if (k === 2) line(r, b, r - (r-l)*p, b);
+        else line(l, b, l, b - (b-t)*p);
+      }
+    }
+  }
+  if (f.dotScale > 0) {
+    const h = DOT_HALF * f.dotScale; ctx.fillStyle = color(f.dotRole);
+    ctx.fillRect(DOT_CX - h, DOT_CY - h, 2*h, 2*h);
+  }
+  if (f.band >= 0) {
+    const w = (BAND_RIGHT - BAND_LEFT - 3*BAND_GAP) / 4;
+    for (let i = 0; i < 4; i++) {
+      ctx.fillStyle = color(i < f.band ? Role.HEAT0 + i : Role.RULE);
+      ctx.fillRect(BAND_LEFT + i*(w + BAND_GAP), BAND_TOP, w, BAND_HEIGHT);
+    }
+  }
+}
+
+// --- the sheet -----------------------------------------------------------------
+const dpr = window.devicePixelRatio || 1;
+function canvas(px) {
+  const c = document.createElement("canvas");
+  c.width = Math.round(px * dpr); c.height = Math.round(px * dpr);
+  c.style.width = px + "px"; c.style.height = px + "px";
+  return c;
+}
+
+let tps = 14;
+const tpsInput = document.getElementById("tps"), tpsv = document.getElementById("tpsv");
+tpsv.textContent = tps;
+
+function beatFor(style) { return style === "BUS" ? busBeatMs(tps) : style === "BUILD" ? buildBeatMs(tps) : heatBeatMs(tps); }
+
+/** Filmstrip spacing: one visible change per frame where the state moves. */
+function stripStep(style, state) {
+  if (state === "Stopped" || state === "Paused") return 0;
+  if (state === "Error" || (style === "BUILD" && state === "Ready")) return STEP_MS;
+  if (state === "Generating") return beatFor(style);
+  if (style === "BUS") return state === "Loading" ? PROBE_STEP_MS : PULSE_STEP_MS;
+  if (style === "BUILD") return Math.round(BUILD_CYCLE_MS / 6);
+  return state === "Loading" ? HEAT_RAMP_STEP_MS : 0;
+}
+
+/** Plain-language timing for the cell caption. */
+function timing(style, state) {
+  const b = beatFor(style);
+  const T = {
+    BUS:   { Stopped:"static, drawn once", Loading:"probe 300 ms/segment", Ready:"pulse 8 × 300 ms",
+             Generating:`1 segment / 4 tok = ${b} ms`, Paused:"static", Error:"snap 3 × 66 ms, hold" },
+    BUILD: { Stopped:"static, drawn once", Loading:`18 strokes × 198 ms + hold`, Ready:"settle 3 × 66 ms, hold",
+             Generating:`1 square / 6 tok = ${b} ms`, Paused:"static, halfway", Error:"static" },
+    HEAT:  { Stopped:"static, level 0", Loading:"ramp 0→3, 500 ms/level", Ready:"static, level 1",
+             Generating:`level ${tps >= HEAT_HOT_TPS ? 3 : 2}, needle ${b} ms`, Paused:"static, level 3", Error:"static, level 0" },
+  };
+  return T[style][state];
+}
+
+const sheet = document.getElementById("sheet");
+const cells = [];
+sheet.appendChild(document.createElement("div"));
+for (const st of STATES) { const h = document.createElement("div"); h.className = "colhead"; h.textContent = st; sheet.appendChild(h); }
+
+for (const style of STYLES) {
+  const rh = document.createElement("div"); rh.className = "rowhead"; rh.textContent = style; sheet.appendChild(rh);
+  for (const state of STATES) {
+    const cell = document.createElement("div"); cell.className = "cell";
+    const label = document.createElement("div"); label.className = "label"; label.textContent = `${style} · ${state}`;
+    const tm = document.createElement("div"); tm.className = "timing";
+    const live = document.createElement("div"); live.className = "live";
+    const big = canvas(156), small = canvas(26);
+    const cw = document.createElement("div"); cw.className = "compact";
+    const rate = document.createElement("span");
+    cw.append(small, document.createTextNode("26 px"), rate);
+    live.append(big, cw);
+    const strip = document.createElement("div"); strip.className = "strip";
+    const frames = [];
+    for (let k = 0; k < 6; k++) {
+      const fig = document.createElement("figure"), c = canvas(38), cap = document.createElement("figcaption");
+      fig.append(c, cap); strip.appendChild(fig); frames.push({ c, cap });
+    }
+    cell.append(label, tm, live, strip);
+    sheet.appendChild(cell);
+    cells.push({ style, state, big, small, tm, frames, rate, start: performance.now(), draws: 0, timer: {} });
+  }
+}
+
+function drawStrips(cell) {
+  cell.tm.textContent = timing(cell.style, cell.state);
+  const step = stripStep(cell.style, cell.state);
+  cell.frames.forEach(({ c, cap }, k) => {
+    const t = k * step + 1;
+    // Strip frames use the full geometry so the traces can be judged at 38 px.
+    draw(c.getContext("2d"), c.width, fill(cell.style, cell.state, t, tps, false, false), false);
+    cap.textContent = step ? `${k * step}` : (k ? "" : "—");
+  });
+}
+
+/** Mirrors MarkView.onDraw: draw, then sleep until the frame changes. */
+function run(cell, which, px, compact) {
+  const c = cell[which], ctx = c.getContext("2d");
+  const tick = () => {
+    const t = Math.floor(performance.now() - cell.start);
+    const f = fill(cell.style, cell.state, t, tps, compact, false);
+    draw(ctx, c.width, f, compact);
+    if (!compact) cell.draws++;
+    // +1 ms, as in MarkView: land inside the next step, never on the last tick of this one.
+    if (f.holdMs !== NEVER) cell.timer[which] = setTimeout(tick, Math.max(FRAME_MS, f.holdMs) + 1);
+  };
+  tick();
+}
+
+function startAll() {
+  for (const cell of cells) {
+    Object.values(cell.timer).forEach(clearTimeout); cell.timer = {};
+    cell.start = performance.now(); cell.draws = 0;
+    drawStrips(cell);
+    run(cell, "big", 156, false);
+    run(cell, "small", 26, true);
+  }
+}
+
+function showRates() {
+  for (const cell of cells) {
+    const secs = Math.max(0.001, (performance.now() - cell.start) / 1000);
+    cell.rate.textContent = `${(cell.draws / secs).toFixed(1)}/s`;
+  }
+}
+setInterval(showRates, 500);
+
+tpsInput.addEventListener("input", () => { tps = +tpsInput.value; tpsv.textContent = tps; startAll(); });
+document.getElementById("note").textContent =
+  `${light ? "light" : "dark"} palette · decode ${tps} tok/s · strip: frames one step apart (ms) · n/s: redraws per second of the 156 px view`;
+startAll();
+</script>
+</body>
+</html>

@@ -7,6 +7,7 @@ import android.os.SystemClock
 import android.provider.Settings
 import android.util.AttributeSet
 import android.view.View
+import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 
@@ -36,6 +37,10 @@ class MarkView @JvmOverloads constructor(
         style = Paint.Style.STROKE
         strokeCap = Paint.Cap.SQUARE
         strokeJoin = Paint.Join.MITER
+    }
+    private val trace = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeCap = Paint.Cap.BUTT
     }
     private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
 
@@ -147,7 +152,8 @@ class MarkView @JvmOverloads constructor(
 
         removeCallbacks(tick)
         if (frame.holdMs != MarkMotion.NEVER && isAttachedToWindow && isShown) {
-            postDelayed(tick, max(MarkMotion.FRAME_MS, frame.holdMs))
+            // +1 ms: land inside the next step, never on the last tick of this one.
+            postDelayed(tick, max(MarkMotion.FRAME_MS, frame.holdMs) + 1)
         }
     }
 
@@ -158,28 +164,28 @@ class MarkView @JvmOverloads constructor(
             for (sq in MarkMotion.SQUARES) canvas.drawRect(sq[0], sq[1], sq[2], sq[3], fill)
             return
         }
+        trace.color = c
+        trace.strokeWidth = MarkMotion.TRACE_STROKE * frame.traceWeight
+        for (i in 0 until 5) line(canvas, i, 0f, 1f)
         stroke.color = c
-        stroke.strokeWidth = MarkMotion.TRACE_STROKE * frame.traceWeight
-        for (s in MarkMotion.TRACES) canvas.drawLine(s[0], s[1], s[2], s[3], stroke)
         stroke.strokeWidth = MarkMotion.SQUARE_STROKE
         for (sq in MarkMotion.SQUARES) canvas.drawRect(sq[0], sq[1], sq[2], sq[3], stroke)
     }
 
     private fun drawFull(canvas: Canvas, p: MarkPalette) {
         // Traces first so the squares' strokes cover the joints, as in the drawable.
-        stroke.strokeWidth = MarkMotion.TRACE_STROKE * frame.traceWeight
+        trace.strokeWidth = MarkMotion.TRACE_STROKE * frame.traceWeight
         for (i in 0 until 5) {
             val drawn = frame.traceDrawn[i]
             if (drawn <= 0f) continue
-            stroke.color = p.color(frame.traceRole[i])
-            val s = MarkMotion.TRACES[i]
+            trace.color = p.color(frame.traceRole[i])
             val gap = frame.traceGap[i]
             if (gap > 0f) {
                 val a = (1f - gap) / 2f
-                line(canvas, s, 0f, a)
-                line(canvas, s, 1f - a, 1f)
+                line(canvas, i, 0f, a)
+                line(canvas, i, 1f - a, 1f)
             } else {
-                line(canvas, s, 0f, drawn)
+                line(canvas, i, 0f, drawn)
             }
         }
         val half = MarkMotion.SQUARE_STROKE / 2f
@@ -218,11 +224,16 @@ class MarkView @JvmOverloads constructor(
         }
     }
 
-    private fun line(canvas: Canvas, s: FloatArray, from: Float, to: Float) {
+    /** Part of trace segment [i]; a whole end on a corner is pushed out to close it. */
+    private fun line(canvas: Canvas, i: Int, from: Float, to: Float) {
         if (to <= from) return
+        val s = MarkMotion.TRACES[i]
         val dx = s[2] - s[0]
         val dy = s[3] - s[1]
-        canvas.drawLine(s[0] + dx * from, s[1] + dy * from, s[0] + dx * to, s[1] + dy * to, stroke)
+        val ext = trace.strokeWidth / 2f / max(abs(dx), abs(dy))
+        val a = if (from == 0f && MarkMotion.TRACE_CORNER_START[i]) -ext else from
+        val b = if (to == 1f && MarkMotion.TRACE_CORNER_END[i]) 1f + ext else to
+        canvas.drawLine(s[0] + dx * a, s[1] + dy * a, s[0] + dx * b, s[1] + dy * b, trace)
     }
 
     private fun drawCompact(canvas: Canvas, p: MarkPalette) {
