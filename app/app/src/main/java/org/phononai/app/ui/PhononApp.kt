@@ -1216,13 +1216,10 @@ private fun serveAction(health: Health?, kind: AvatarKind, context: Context): Pr
 
 @Composable
 private fun accentFor(kind: AvatarKind): Color = when (kind) {
-    // Green means good: ready or working. Amber is reserved for a warning
-    // (paused on heat), red for a fault. The action colour is not used for
-    // status, so a button can never read as a condition.
     AvatarKind.Stopped -> PhononColors.DimCyan
     AvatarKind.Loading -> PhononColors.Violet
-    AvatarKind.Ready -> PhononColors.Ok
-    AvatarKind.Generating -> PhononColors.Ok
+    AvatarKind.Ready -> PhononColors.Cyan
+    AvatarKind.Generating -> PhononColors.Violet
     AvatarKind.Paused -> PhononColors.Warn
     AvatarKind.Error -> PhononColors.Danger
 }
