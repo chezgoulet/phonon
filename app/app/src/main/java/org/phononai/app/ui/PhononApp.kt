@@ -439,7 +439,10 @@ private fun ServeScreen(
         Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = 22.dp),
+            .padding(horizontal = 22.dp)
+            // Room for the fixed action bar: without it the last card ends
+            // under the button and reads as clipped rather than scrolled.
+            .padding(bottom = 28.dp),
     ) {
         Spacer(Modifier.height(16.dp))
         BenchLockup()
