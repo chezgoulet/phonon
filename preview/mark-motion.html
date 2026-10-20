@@ -71,13 +71,13 @@ function color(role) {
 const STYLES = ["BUS", "BUILD", "HEAT"];
 const STATES = ["Stopped", "Loading", "Ready", "Generating", "Paused", "Error"];
 const NEVER = -1, FRAME_MS = 33, STEP_MS = 66;
-const SQUARES = [[98,24,158,84],[22,172,82,232],[174,172,234,232]];
-const SQUARE_STROKE = 13;
-const TRACES = [[52,172,52,134],[52,134,116,134],[128,116,128,84],[140,122,204,122],[204,122,204,172]];
-const TRACE_STROKE = 9;
+const SQUARES = [[26.0,26.0,86.8,86.8],[169.2,26.0,230.0,86.8],[169.2,169.2,230.0,230.0]];
+const SQUARE_STROKE = 10.85;
+const TRACES = [[86.8,56.4,169.2,56.4],[56.4,86.8,56.4,199.6],[56.4,199.6,169.2,199.6],[0,0,0,0],[0,0,0,0]];
+const TRACE_STROKE = 10.85;
 const TRACE_OWNER = [1,1,0,2,2];
-const TRACE_CORNER_START = [false,true,false,false,true], TRACE_CORNER_END = [true,false,false,true,false];
-const DOT_CX = 128, DOT_CY = 128, DOT_HALF = 12;
+const TRACE_CORNER_START = [false,false,true,false,false], TRACE_CORNER_END = [false,true,false,false,false];
+const DOT_CX = 128, DOT_CY = 128, DOT_HALF = 10.85;
 const BAND_TOP = 246, BAND_HEIGHT = 4, BAND_LEFT = 15.5, BAND_RIGHT = 240.5, BAND_GAP = 4;
 const PULSE_STEP_MS = 300, PULSE = [1,1,1,1.1,1.2,1.3,1.2,1.1];
 const PROBE_STEP_MS = 300;
@@ -220,7 +220,7 @@ function draw(ctx, side, f, compact) {
   ctx.lineCap = "square"; ctx.lineJoin = "miter";
   const line = (x0, y0, x1, y1) => { ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke(); };
   // Traces: butt caps; a whole end on a corner is pushed out to close it.
-  const part = (i, a, b) => { if (b <= a) return; const g = TRACES[i], dx = g[2]-g[0], dy = g[3]-g[1];
+  const part = (i, a, b) => { if (b <= a) return; const g = TRACES[i], dx = g[2]-g[0], dy = g[3]-g[1]; if (dx === 0 && dy === 0) return;
     const ext = ctx.lineWidth / 2 / Math.max(Math.abs(dx), Math.abs(dy));
     if (a === 0 && TRACE_CORNER_START[i]) a = -ext;
     if (b === 1 && TRACE_CORNER_END[i]) b = 1 + ext;
@@ -271,7 +271,7 @@ function draw(ctx, side, f, compact) {
   }
   if (f.dotScale > 0) {
     const h = DOT_HALF * f.dotScale; ctx.fillStyle = color(f.dotRole);
-    ctx.fillRect(DOT_CX - h, DOT_CY - h, 2*h, 2*h);
+    ctx.beginPath(); ctx.arc(DOT_CX, DOT_CY, h, 0, Math.PI * 2); ctx.fill();
   }
   if (f.band >= 0) {
     const w = (BAND_RIGHT - BAND_LEFT - 3*BAND_GAP) / 4;

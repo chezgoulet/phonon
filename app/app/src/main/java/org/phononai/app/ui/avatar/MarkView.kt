@@ -241,6 +241,7 @@ class MarkView @JvmOverloads constructor(
         val s = MarkMotion.TRACES[i]
         val dx = s[2] - s[0]
         val dy = s[3] - s[1]
+        if (dx == 0f && dy == 0f) return
         val ext = trace.strokeWidth / 2f / max(abs(dx), abs(dy))
         val a = if (from == 0f && MarkMotion.TRACE_CORNER_START[i]) -ext else from
         val b = if (to == 1f && MarkMotion.TRACE_CORNER_END[i]) 1f + ext else to
@@ -258,9 +259,11 @@ class MarkView @JvmOverloads constructor(
 
     private fun drawDot(canvas: Canvas, p: MarkPalette) {
         if (frame.dotScale > 0f) {
-            val h = MarkMotion.DOT_HALF * frame.dotScale
             fill.color = p.color(frame.dotRole)
-            canvas.drawRect(MarkMotion.DOT_CX - h, MarkMotion.DOT_CY - h, MarkMotion.DOT_CX + h, MarkMotion.DOT_CY + h, fill)
+            canvas.drawCircle(
+                MarkMotion.DOT_CX, MarkMotion.DOT_CY,
+                MarkMotion.DOT_HALF * frame.dotScale, fill,
+            )
         }
         val lit = frame.band
         if (lit < 0) return

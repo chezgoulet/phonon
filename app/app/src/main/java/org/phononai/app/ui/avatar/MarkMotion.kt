@@ -103,41 +103,46 @@ object MarkMotion {
 
     // --- geometry: res/drawable/ic_bench_mark.xml, 256 grid ------------------
 
-    /** Square corners: left, top, right, bottom. */
+    /**
+     * Canonical BENCH geometry, taken verbatim from the site header and scaled
+     * from its 118-unit box into this 256-unit one (k = 256/118):
+     *   squares (12,12), (78,12), (78,78) at 28; traces M40,26h38 and
+     *   M26,40v52h52; dot (59,59) r5; stroke 5.
+     * Top-left, top-right, bottom-right — open at the bottom-left. Do not
+     * rearrange these; the arrangement is the logo.
+     */
     val SQUARES = arrayOf(
-        floatArrayOf(98f, 24f, 158f, 84f),
-        floatArrayOf(22f, 172f, 82f, 232f),
-        floatArrayOf(174f, 172f, 234f, 232f),
+        floatArrayOf(26.0f, 26.0f, 86.8f, 86.8f),
+        floatArrayOf(169.2f, 26.0f, 230.0f, 86.8f),
+        floatArrayOf(169.2f, 169.2f, 230.0f, 230.0f),
     )
-    const val SQUARE_STROKE = 13f
+    const val SQUARE_STROKE = 10.85f
 
-    /** Trace segments in bus order: x0, y0, x1, y1. */
+    /** Traces: the top bar, then the L (down the left, along the bottom). */
     val TRACES = arrayOf(
-        floatArrayOf(52f, 172f, 52f, 134f),
-        floatArrayOf(52f, 134f, 116f, 134f),
-        floatArrayOf(128f, 116f, 128f, 84f),
-        floatArrayOf(140f, 122f, 204f, 122f),
-        floatArrayOf(204f, 122f, 204f, 172f),
+        floatArrayOf(86.8f, 56.4f, 169.2f, 56.4f),
+        floatArrayOf(56.4f, 86.8f, 56.4f, 199.6f),
+        floatArrayOf(56.4f, 199.6f, 169.2f, 199.6f),
+        floatArrayOf(0f, 0f, 0f, 0f),
+        floatArrayOf(0f, 0f, 0f, 0f),
     )
-    const val TRACE_STROKE = 9f
+    const val TRACE_STROKE = 10.85f
 
     /**
-     * Trace ends that sit on a right-angle corner. Traces use butt caps (as in
-     * the drawable), so these ends are pushed out by half the stroke to close
-     * the corner; the ends at the squares and the hub stay flush.
+     * Trace ends that sit on a right-angle corner. The vertical meets the
+     * bottom run at (56.4, 199.6); both are pushed out by half the stroke.
      */
-    val TRACE_CORNER_START = booleanArrayOf(false, true, false, false, true)
-    val TRACE_CORNER_END = booleanArrayOf(true, false, false, true, false)
+    val TRACE_CORNER_START = booleanArrayOf(false, false, true, false, false)
+    val TRACE_CORNER_END = booleanArrayOf(false, true, false, false, false)
 
     /** Which square each trace segment belongs to (for the compact cut). */
-    val TRACE_OWNER = intArrayOf(1, 1, 0, 2, 2)
+    val TRACE_OWNER = intArrayOf(0, 0, 2, 0, 0)
 
-    /** Dot: centre and half-size at scale 1. */
+    /** Dot: circle at the centre of the implied rectangle, radius as the logo. */
     const val DOT_CX = 128f
     const val DOT_CY = 128f
-    const val DOT_HALF = 12f
+    const val DOT_HALF = 10.85f
 
-    /** Heat strip under the mark: top, height, horizontal extent, gap. */
     const val BAND_TOP = 246f
     const val BAND_HEIGHT = 4f
     const val BAND_LEFT = 15.5f
