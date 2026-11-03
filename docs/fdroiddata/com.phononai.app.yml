@@ -2,8 +2,8 @@
 #
 # The submission target is a merge request against the fdroiddata repository;
 # this file lives here so it is versioned with the app it describes. Field
-# names follow the Build Metadata Reference. The two values that must be
-# confirmed against the buildserver before submitting are marked CONFIRM.
+# names follow the Build Metadata Reference. The one value that must be
+# confirmed against the buildserver is marked CONFIRM.
 
 Categories:
   - Internet
@@ -23,9 +23,9 @@ RepoType: git
 Repo: https://github.com/chezgoulet/phonon.git
 
 Builds:
-  - versionName: 0.1.17
-    versionCode: 18
-    commit: v0.1.17
+  - versionName: 0.2.2
+    versionCode: 22
+    commit: v0.2.2
     submodules: true
     # The engine is compiled from the pinned submodule during the build. It is
     # not a prebuilt library and nothing in jniLibs is committed.
@@ -35,20 +35,24 @@ Builds:
     build:
       - ./app/gradlew -p app assembleRelease
     output: app/app/build/outputs/apk/release/app-release-unsigned.apk
-    # CONFIRM: the buildserver must offer this NDK. It is r30-rc1; every
-    # measured number was produced with it. If sdkmanager cannot fetch an rc,
-    # switch to stable 30.0.16248370 in ndkVersion, ANDROID_NDK_VERSION and
-    # here together, and re-run the benchmarks before publishing figures.
+    # CONFIRM: the buildserver must offer this NDK. It is r30-rc1, and every
+    # measured number was produced with it. A release candidate may not exist
+    # on the buildserver; if sdkmanager cannot fetch it, move ndkVersion,
+    # ANDROID_NDK_VERSION and this field together to a stable NDK, then re-run
+    # the benchmarks before publishing any performance figure — the sustained
+    # tokens-per-second numbers in the release notes are NDK-dependent.
     ndk: 30.0.16138531
 
 AutoUpdateMode: Version
 UpdateCheckMode: Tags
-CurrentVersion: 0.1.17
-CurrentVersionCode: 18
+CurrentVersion: 0.2.2
+CurrentVersionCode: 22
 
 # Reproducible builds are verified (docs/REPRODUCIBLE.md), so F-Droid can
 # publish the APK we sign instead of re-signing it. That keeps one signature
-# across GitHub Releases, Obtainium and F-Droid.
+# across GitHub Releases, Obtainium and F-Droid. The asset name in the release
+# for v0.2.2 is phonon-0.2.2-22-arm64-v8a.apk, which is what %v and %c expand
+# to here.
 Binaries: https://github.com/chezgoulet/phonon/releases/download/v%v/phonon-%v-%c-arm64-v8a.apk
 AllowedAPKSigningKeys: 3ba90e38603769e78fc6fbad6cdf3b3a104527491ec4d5dff52b9ea14ce42837
 
