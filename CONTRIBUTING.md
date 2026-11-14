@@ -7,6 +7,30 @@ claims must come from `scripts/bench_phone.sh` or an equivalent reproducible
 run on the device they describe. Estimates are welcome in discussion and are
 labelled as estimates; they do not enter documentation or device manifests.
 
+## How work lands
+
+`main` is what ships; `testing` is where work integrates. They are not
+interchangeable, and the difference is what keeps a half-finished feature off a
+release.
+
+- **`feature/*`** — branched from `testing`, pull-requested back into `testing`.
+  A feature that is not release-ready still has a home here.
+- **`hotfix/*`** — branched from `main` for a fault that is shipping; pull-requested
+  into `main` and mirrored into `testing` in the same breath, so the next release
+  does not undo it.
+- **`main`** — releases only. It moves when `testing` is merged into it for a cut,
+  and the tag goes there. Nothing is committed to it directly.
+- **`testing`** — never behind `main`. A `testing` branch that lags is a defect in
+  the branch, not permission to work on `main`; realign it before starting anything.
+
+Every pull request names its base, and a pull request based on another feature
+branch is not reviewable — it is closed with a request to rebase onto `testing`.
+
+CI follows the same split: `.github/workflows/proxy-harness.yml` runs on pull
+requests that touch the API surface, and `.github/workflows/reproducible.yml` runs
+on any push to `main` or `testing` that touches the app. A red check is the answer,
+not an obstacle to merge around.
+
 ## Adding a device
 
 1. Copy `devices/panther.yaml` to `devices/<codename>.yaml`.
